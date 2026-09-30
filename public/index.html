@@ -1,5 +1,3 @@
-
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -274,37 +272,111 @@ body { font-family:-apple-system,'Segoe UI',system-ui,sans-serif; background:#0d
           <input type="email" id="ghEmail" placeholder="you@example.com" style="margin-bottom:8px" />
           <button class="btn primary" id="ghSaveIdentity" style="width:100%;justify-content:center;padding:8px">Save Identity</button>
         </div>
+
         <div class="settings-section">
-          <h3><i class="fas fa-key"></i> Token</h3>
+          <h3><i class="fas fa-key"></i> GitHub Token</h3>
           <input type="password" id="ghToken" placeholder="ghp_..." style="margin-bottom:8px" />
           <button class="btn" id="ghSaveToken" style="width:100%;justify-content:center;padding:8px">Save Token</button>
         </div>
+
         <div class="settings-section">
-          <h3>Clone Repository</h3>
-          <input type="text" id="ghCloneUrl" placeholder="https://github.com/user/repo.git" style="margin-bottom:8px" />
-          <button class="btn primary" id="ghCloneBtn" style="width:100%;justify-content:center;padding:8px">Clone</button>
+          <h3><i class="fas fa-code-branch"></i> Repository</h3>
+          <p id="ghRepoInfo" style="font-size:11px;color:#8b949e;font-family:monospace;word-break:break-all">Not connected</p>
+          <p id="ghBranchInfo" style="font-size:11px;color:#8b949e;font-family:monospace">Branch: -</p>
         </div>
+
         <div class="settings-section">
-          <h3>Current Project</h3>
-          <p id="ghBranch">Branch: -</p>
-          <p id="ghChanges">Changes: -</p>
-          <input type="text" id="ghCommitMsg" placeholder="Commit message" style="margin:8px 0" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-            <button class="btn primary" id="ghPushBtn" style="justify-content:center;padding:8px">Commit+Push</button>
-            <button class="btn" id="ghPullBtn" style="justify-content:center;padding:8px">Pull</button>
+          <h3><i class="fas fa-cloud-download-alt"></i> Clone</h3>
+          <input type="text" id="ghCloneUrl" placeholder="https://github.com/user/repo.git" style="margin-bottom:8px" />
+          <button class="btn primary" id="ghCloneBtn" style="width:100%;justify-content:center;padding:8px">Clone Repository</button>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-code-branch"></i> Branches</h3>
+          <div id="ghBranchList" style="font-size:11px;margin-bottom:8px">—</div>
+          <input type="text" id="ghNewBranchName" placeholder="new-branch-name" style="margin-bottom:6px" />
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+            <button class="btn" id="ghCreateBranchBtn" style="justify-content:center;padding:8px">+ Create</button>
+            <button class="btn" id="ghCheckoutBranchBtn" style="justify-content:center;padding:8px">Checkout</button>
           </div>
-          <button class="btn warn" id="ghUndoBtn" style="width:100%;justify-content:center;padding:8px;margin-top:6px">
-            <i class="fas fa-undo"></i> Undo Last Commit
+          <input type="text" id="ghMergeSource" placeholder="branch to merge" style="margin-bottom:6px" />
+          <button class="btn primary" id="ghMergeBtn" style="width:100%;justify-content:center;padding:8px">
+            <i class="fas fa-code-branch"></i> Merge Into Current
+          </button>
+          <button class="btn" id="ghAbortMergeBtn" style="width:100%;justify-content:center;padding:8px;margin-top:6px;display:none">
+            <i class="fas fa-ban"></i> Abort Merge
           </button>
         </div>
+
         <div class="settings-section">
-          <h3>Tools</h3>
+          <h3><i class="fas fa-edit"></i> Changes</h3>
+          <div id="ghChangesList" style="font-size:11px;max-height:200px;overflow-y:auto;background:#0d1117;border:1px solid #30363d;border-radius:6px;padding:8px;margin-bottom:8px">No changes</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
-            <button class="btn" id="ghInitBtn" style="justify-content:center;padding:8px">Init Git</button>
-            <button class="btn" id="ghStatusBtn" style="justify-content:center;padding:8px">Status</button>
-            <button class="btn" id="ghLogBtn" style="justify-content:center;padding:8px">Log</button>
-            <button class="btn" id="ghSetRemoteBtn" style="justify-content:center;padding:8px">Set Remote</button>
+            <button class="btn" id="ghAddAllBtn" style="justify-content:center;padding:8px">Stage All</button>
+            <button class="btn" id="ghResetAllBtn" style="justify-content:center;padding:8px">Unstage All</button>
           </div>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-upload"></i> Commit &amp; Push</h3>
+          <input type="text" id="ghCommitMsg" placeholder="Commit message" style="margin-bottom:6px" />
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+            <button class="btn" id="ghCommitOnlyBtn" style="justify-content:center;padding:8px">Commit</button>
+            <button class="btn primary" id="ghPushBtn" style="justify-content:center;padding:8px">Commit + Push</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <button class="btn" id="ghPullBtn" style="justify-content:center;padding:8px">Pull</button>
+            <button class="btn" id="ghPullRebaseBtn" style="justify-content:center;padding:8px">Pull --rebase</button>
+          </div>
+          <button class="btn" id="ghFetchBtn" style="width:100%;justify-content:center;padding:8px;margin-top:6px">
+            <i class="fas fa-sync"></i> Fetch
+          </button>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-box"></i> Stash</h3>
+          <input type="text" id="ghStashMsg" placeholder="Stash message (optional)" style="margin-bottom:6px" />
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+            <button class="btn" id="ghStashPushBtn" style="justify-content:center;padding:8px">Stash</button>
+            <button class="btn" id="ghStashPopBtn" style="justify-content:center;padding:8px">Pop</button>
+          </div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <button class="btn" id="ghStashListBtn" style="justify-content:center;padding:8px">List</button>
+            <button class="btn danger" id="ghStashClearBtn" style="justify-content:center;padding:8px">Clear All</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-history"></i> History</h3>
+          <div id="ghLogList" style="font-size:11px;max-height:250px;overflow-y:auto">—</div>
+          <button class="btn" id="ghLogBtn" style="width:100%;justify-content:center;padding:8px;margin-top:8px">
+            <i class="fas fa-sync"></i> Refresh Log
+          </button>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-tag"></i> Tags</h3>
+          <div id="ghTagList" style="font-size:11px;margin-bottom:8px">—</div>
+          <input type="text" id="ghTagName" placeholder="v1.0.0" style="margin-bottom:6px" />
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <button class="btn" id="ghTagCreateBtn" style="justify-content:center;padding:8px">Create Tag</button>
+            <button class="btn" id="ghTagPushBtn" style="justify-content:center;padding:8px">Push Tags</button>
+          </div>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-undo"></i> Recovery</h3>
+          <button class="btn warn" id="ghUndoBtn" style="width:100%;justify-content:center;padding:8px">
+            <i class="fas fa-undo"></i> Revert Last Commit
+          </button>
+          <button class="btn danger" id="ghHardResetBtn" style="width:100%;justify-content:center;padding:8px;margin-top:6px">
+            <i class="fas fa-exclamation-triangle"></i> Hard Reset (discard all)
+          </button>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-terminal"></i> Output</h3>
+          <pre id="ghOutput" style="background:#0a0e14;border:1px solid #21262d;border-radius:6px;padding:10px;font-size:10px;max-height:250px;overflow:auto;color:#c9d1d9;white-space:pre-wrap;display:none"></pre>
         </div>
       </div>
 
@@ -431,6 +503,21 @@ body { font-family:-apple-system,'Segoe UI',system-ui,sans-serif; background:#0d
             <i class="fas fa-vial"></i> Test &amp; Save
           </button>
           <p id="geminiKeyStatus" style="font-size:11px;margin-top:8px;color:#8b949e">Not verified</p>
+        </div>
+
+        <div class="settings-section">
+          <h3><i class="fas fa-crown" style="color:#d29922"></i> Pro License</h3>
+          <p>Unlock signed AAB builds for Play Store publishing.</p>
+          <input type="text" id="licenseKeyInput" placeholder="DS-PRO-XXXX-XXXX-XXXX" style="margin-bottom:6px" />
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+            <button class="btn primary" id="licenseSaveBtn" style="justify-content:center;padding:8px">
+              <i class="fas fa-check"></i> Activate
+            </button>
+            <button class="btn" id="licenseRemoveBtn" style="justify-content:center;padding:8px">
+              <i class="fas fa-times"></i> Remove
+            </button>
+          </div>
+          <p id="licenseStatus" style="font-size:11px;margin-top:8px;color:#8b949e">Checking…</p>
         </div>
 
         <div class="settings-section">
@@ -934,6 +1021,7 @@ function setupGenerator() {
   };
 }
 
+/* ══════════ GITHUB TAB — FULL ══════════ */
 function setupGithub() {
   var tIn = document.getElementById('ghToken');
   if (!tIn) return;
@@ -941,14 +1029,66 @@ function setupGithub() {
   document.getElementById('ghName').value = localStorage.getItem('gh_name') || '';
   document.getElementById('ghEmail').value = localStorage.getItem('gh_email') || '';
 
-  document.getElementById('ghSaveToken').onclick = function() { localStorage.setItem('gh_token', tIn.value.trim()); toast('Token saved', 'success'); };
+  function showGhOutput(text, error) {
+    var el = document.getElementById('ghOutput');
+    el.style.display = 'block';
+    el.textContent = text || '(no output)';
+    el.style.color = error ? '#f85149' : '#c9d1d9';
+  }
+
+  function refreshAllGitState() {
+    if (!currentProject) return;
+    ghCall('/api/git/status/detailed', { cwd: currentProject }).then(function(r) {
+      var list = document.getElementById('ghChangesList');
+      if (!r.files || !r.files.length) { list.innerHTML = 'No changes'; return; }
+      list.innerHTML = r.files.map(function(f) {
+        var color = f.status === '??' ? '#8b949e' : f.status.indexOf('M') >= 0 ? '#d29922' : '#3fb950';
+        return '<div style="padding:3px 0;display:flex;gap:6px"><span style="color:' + color + ';font-family:monospace;min-width:24px">' + f.status + '</span><span style="font-family:monospace;word-break:break-all">' + f.path + '</span></div>';
+      }).join('');
+    }).catch(function() {});
+    ghCall('/api/git/branches', { cwd: currentProject }).then(function(r) {
+      var list = document.getElementById('ghBranchList');
+      if (!r.branches || !r.branches.length) { list.innerHTML = 'No branches'; return; }
+      list.innerHTML = r.branches.map(function(b) {
+        var isCurrent = b === r.current;
+        return '<div style="padding:3px 0;color:' + (isCurrent ? '#58a6ff' : '#c9d1d9') + ';font-family:monospace">' + (isCurrent ? '★ ' : '  ') + b + '</div>';
+      }).join('');
+      document.getElementById('ghBranchInfo').textContent = 'Branch: ' + (r.current || '-');
+    }).catch(function() {});
+    ghCall('/api/git/log/detailed', { cwd: currentProject, limit: 20 }).then(function(r) {
+      var list = document.getElementById('ghLogList');
+      if (!r.commits || !r.commits.length) { list.innerHTML = 'No commits'; return; }
+      list.innerHTML = r.commits.map(function(c) {
+        return '<div style="padding:5px 0;border-bottom:1px solid #21262d">' +
+          '<div style="color:#58a6ff;font-family:monospace;font-size:10px">' + c.hash + ' · ' + c.date + '</div>' +
+          '<div style="color:#e6edf3">' + c.message + '</div>' +
+          '<div style="color:#8b949e;font-size:10px">by ' + c.author + '</div>' +
+          '</div>';
+      }).join('');
+    }).catch(function() {});
+    ghCall('/api/git/status', { cwd: currentProject }).then(function(r) {
+      var el = document.getElementById('ghRepoInfo');
+      if (r.isRepo) el.textContent = r.remote || '(no remote set)';
+      else el.textContent = 'Not a git repo';
+    }).catch(function() {});
+  }
+  window.refreshAllGitState = refreshAllGitState;
+
+  document.getElementById('ghSaveToken').onclick = function() {
+    localStorage.setItem('gh_token', tIn.value.trim());
+    toast('Token saved', 'success');
+  };
   document.getElementById('ghSaveIdentity').onclick = function() {
     var n = document.getElementById('ghName').value.trim();
     var e = document.getElementById('ghEmail').value.trim();
     if (!n || !e) { toast('Name + email required', 'error'); return; }
     localStorage.setItem('gh_name', n); localStorage.setItem('gh_email', e);
-    ghCall('/api/git/set-identity', { name: n, email: e }).then(function(r) { toast(r.code === 0 ? 'Identity saved' : 'Failed', r.code === 0); });
+    ghCall('/api/git/set-identity', { name: n, email: e }).then(function(r) {
+      toast(r.code === 0 ? 'Identity saved' : 'Failed', r.code === 0 ? 'success' : 'error');
+    });
   };
+
+  // ── Clone ──
   document.getElementById('ghCloneBtn').onclick = async function() {
     var url = document.getElementById('ghCloneUrl').value.trim();
     if (!url) { toast('URL required', 'error'); return; }
@@ -957,50 +1097,179 @@ function setupGithub() {
     if (token && url.indexOf('https://github.com/') === 0) finalUrl = url.replace('https://', 'https://' + token + '@');
     toast('Cloning...', 'info');
     var r = await ghCall('/api/git/clone', { url: finalUrl });
-    if (r.code === 0) { toast('Cloned into ' + r.dir, 'success'); refreshTree(); detectLanguage(r.dir); if (isMobile) closeDrawers(); }
-    else toast('Clone failed: ' + (r.stderr || '').slice(0,80), 'error');
+    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    if (r.code === 0) { toast('Cloned into ' + r.dir, 'success'); refreshTree(); detectLanguage(r.dir); currentProject = r.dir; refreshAllGitState(); }
+    else toast('Clone failed', 'error');
+  };
+
+  // ── Branches ──
+  document.getElementById('ghCreateBranchBtn').onclick = async function() {
+    if (!currentProject) { toast('Open a project first', 'error'); return; }
+    var name = document.getElementById('ghNewBranchName').value.trim();
+    if (!name) { toast('Branch name required', 'error'); return; }
+    var r = await ghCall('/api/git/branch/create', { cwd: currentProject, name: name, checkout: true });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Branch created & checked out' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
+  };
+  document.getElementById('ghCheckoutBranchBtn').onclick = async function() {
+    if (!currentProject) { toast('Open a project first', 'error'); return; }
+    var name = document.getElementById('ghNewBranchName').value.trim();
+    if (!name) { toast('Enter the branch to checkout', 'error'); return; }
+    var r = await ghCall('/api/git/branch/checkout', { cwd: currentProject, name: name });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Checked out ' + name : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
+  };
+  document.getElementById('ghMergeBtn').onclick = async function() {
+    if (!currentProject) { toast('Open a project first', 'error'); return; }
+    var src = document.getElementById('ghMergeSource').value.trim();
+    if (!src) { toast('Enter source branch', 'error'); return; }
+    var r = await ghCall('/api/git/branch/merge', { cwd: currentProject, source: src });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    if (r.conflicted) {
+      toast('Merge conflicts — resolve them', 'error');
+      document.getElementById('ghAbortMergeBtn').style.display = 'inline-flex';
+    } else if (r.ok) {
+      toast('Merged!', 'success');
+      document.getElementById('ghAbortMergeBtn').style.display = 'none';
+    } else {
+      toast('Merge failed', 'error');
+    }
+    refreshAllGitState();
+  };
+  document.getElementById('ghAbortMergeBtn').onclick = async function() {
+    var r = await ghCall('/api/git/merge/abort', { cwd: currentProject });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Merge aborted' : 'Abort failed', r.ok ? 'success' : 'error');
+    document.getElementById('ghAbortMergeBtn').style.display = 'none';
+    refreshAllGitState();
+  };
+
+  // ── Stage / Unstage ──
+  document.getElementById('ghAddAllBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/add', { cwd: currentProject });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Staged all' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
+  };
+  document.getElementById('ghResetAllBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/reset', { cwd: currentProject });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Unstaged all' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
+  };
+
+  // ── Commit / Push / Pull ──
+  document.getElementById('ghCommitOnlyBtn').onclick = async function() {
+    if (!currentProject) { toast('Open a project first', 'error'); return; }
+    var msg = document.getElementById('ghCommitMsg').value.trim() || 'Update';
+    var r = await ghCall('/api/git/push', { cwd: currentProject, message: msg, commitOnly: true });
+    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    toast(r.code === 0 ? 'Committed' : 'Failed', r.code === 0 ? 'success' : 'error');
+    refreshAllGitState();
   };
   document.getElementById('ghPushBtn').onclick = async function() {
     if (!currentProject) { toast('Open a project first', 'error'); return; }
     var msg = document.getElementById('ghCommitMsg').value.trim() || 'Update';
     var r = await ghCall('/api/git/push', { cwd: currentProject, message: msg });
-    toast(r.code === 0 ? 'Pushed' : 'Push warnings', r.code === 0);
+    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    toast(r.code === 0 ? 'Pushed' : 'Push had issues', r.code === 0 ? 'success' : 'error');
+    refreshAllGitState();
   };
   document.getElementById('ghPullBtn').onclick = async function() {
     if (!currentProject) { toast('Open a project first', 'error'); return; }
     var r = await ghCall('/api/git/pull', { cwd: currentProject });
-    toast(r.code === 0 ? 'Pulled' : 'Pull failed', r.code === 0);
+    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    toast(r.code === 0 ? 'Pulled' : 'Pull failed', r.code === 0 ? 'success' : 'error');
+    refreshAllGitState();
   };
-  document.getElementById('ghInitBtn').onclick = async function() {
+  document.getElementById('ghPullRebaseBtn').onclick = async function() {
     if (!currentProject) { toast('Open a project first', 'error'); return; }
-    var r = await ghCall('/api/git/init', { cwd: currentProject, branch: 'main' });
-    toast(r.code === 0 ? 'Git initialized' : 'Failed', r.code === 0);
+    var r = await ghCall('/api/git/pull/rebase', { cwd: currentProject });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    if (r.conflicted) toast('Rebase conflicts!', 'error');
+    else toast(r.ok ? 'Pulled (rebase)' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
   };
-  document.getElementById('ghStatusBtn').onclick = async function() {
+  document.getElementById('ghFetchBtn').onclick = async function() {
     if (!currentProject) { toast('Open a project first', 'error'); return; }
-    var r = await ghCall('/api/git/status', { cwd: currentProject });
-    if (r.isRepo) alert('Branch: ' + r.branch + '\nChanges: ' + r.changeCount + '\nRemote: ' + (r.remote || '(none)'));
-    else alert('Not a git repository');
+    var r = await ghCall('/api/git/fetch', { cwd: currentProject });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Fetched' : 'Fetch failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
   };
-  document.getElementById('ghLogBtn').onclick = async function() {
-    if (!currentProject) { toast('Open a project first', 'error'); return; }
-    var r = await ghCall('/api/git/log', { cwd: currentProject });
-    alert(r.log || '(no commits)');
+
+  // ── Stash ──
+  document.getElementById('ghStashPushBtn').onclick = async function() {
+    if (!currentProject) return;
+    var msg = document.getElementById('ghStashMsg').value.trim();
+    var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'push', message: msg });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Stashed' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
   };
-  document.getElementById('ghSetRemoteBtn').onclick = async function() {
-    if (!currentProject) { toast('Open a project first', 'error'); return; }
-    var url = prompt('Remote URL:');
-    if (!url) return;
-    var r = await ghCall('/api/git/set-remote', { cwd: currentProject, url: url });
-    toast(r.code === 0 ? 'Remote set' : 'Failed', r.code === 0);
+  document.getElementById('ghStashPopBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'pop' });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Stash popped' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
   };
+  document.getElementById('ghStashListBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'list' });
+    showGhOutput(r.stdout || '(no stashes)', !r.ok);
+  };
+  document.getElementById('ghStashClearBtn').onclick = function() {
+    if (!currentProject) return;
+    showConfirm('Clear all stashes?', 'This cannot be undone.', async function() {
+      var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'clear' });
+      showGhOutput(r.stdout + r.stderr, !r.ok);
+      hideConfirm();
+    }, 'Clear');
+  };
+
+  // ── Log ──
+  document.getElementById('ghLogBtn').onclick = refreshAllGitState;
+
+  // ── Tags ──
+  document.getElementById('ghTagCreateBtn').onclick = async function() {
+    if (!currentProject) return;
+    var name = document.getElementById('ghTagName').value.trim();
+    if (!name) { toast('Tag name required', 'error'); return; }
+    var r = await ghCall('/api/git/tags', { cwd: currentProject, action: 'create', name: name, message: name });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Tag created' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
+  };
+  document.getElementById('ghTagPushBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/tags', { cwd: currentProject, action: 'push' });
+    showGhOutput(r.stdout + r.stderr, !r.ok);
+    toast(r.ok ? 'Tags pushed' : 'Failed', r.ok ? 'success' : 'error');
+  };
+
+  // ── Recovery ──
   document.getElementById('ghUndoBtn').onclick = function() {
     if (!currentProject) { toast('Open a project first', 'error'); return; }
-    showConfirm('Undo last commit?', 'This will revert the most recent git commit in ' + currentProject + '.', async function() {
+    showConfirm('Revert last commit?', 'This creates a new commit undoing the last one.', async function() {
       var r = await ghCall('/api/git/undo', { cwd: currentProject });
-      toast(r.ok ? 'Undone!' : 'Undo failed', r.ok ? 'success' : 'error');
-      hideConfirm(); refreshTree();
-    }, 'Undo');
+      showGhOutput(r.output || '', !r.ok);
+      toast(r.ok ? 'Reverted' : 'Failed', r.ok ? 'success' : 'error');
+      hideConfirm(); refreshAllGitState();
+    }, 'Revert');
+  };
+  document.getElementById('ghHardResetBtn').onclick = function() {
+    if (!currentProject) return;
+    showConfirm('Hard reset?', 'ALL uncommitted changes will be LOST. Are you sure?', async function() {
+      var r = await ghCall('/api/git/reset', { cwd: currentProject, hard: true });
+      showGhOutput(r.stdout + r.stderr, !r.ok);
+      toast(r.ok ? 'Hard reset done' : 'Failed', r.ok ? 'success' : 'error');
+      hideConfirm(); refreshAllGitState();
+    }, 'Reset');
   };
 }
 
@@ -1105,10 +1374,10 @@ async function buildDeploy() {
   try {
     var r = await fetch(API + '/api/deploy/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd: cwd, keystore: keystore, password: password, output: output }) });
     var data = await r.json();
-    out.textContent = data.output || '(no output)';
+    out.textContent = data.output || data.error || '(no output)';
     if (data.artifact) { out.textContent += '\n\n✅ Artifact: ' + data.artifact.path + ' (' + data.artifact.sizeStr + ')'; toast('Build succeeded: ' + data.artifact.name, 'success'); }
     else if (data.ok) toast('Build finished (no artifact found)', 'info');
-    else toast('Build failed', 'error');
+    else toast(data.error || 'Build failed', 'error');
     refreshArtifacts();
   } catch (e) { out.textContent = 'Error: ' + e.message; toast('Build failed: ' + e.message, 'error'); }
   btn.disabled = false;
@@ -1126,6 +1395,18 @@ async function refreshArtifacts() {
       return '<div class="backup-item"><div class="bk-name">' + a.name + '</div><div class="bk-meta">' + a.sizeStr + ' · ' + a.path + '</div></div>';
     }).join('');
   } catch (e) { list.innerHTML = '<span style="color:#f85149">Backend offline</span>'; }
+}
+
+/* ══════════ LICENSE ══════════ */
+async function refreshLicenseStatus() {
+  var el = document.getElementById('licenseStatus');
+  if (!el) return;
+  try {
+    var r = await fetch(API + '/api/license/status');
+    var d = await r.json();
+    if (d.pro) { el.textContent = '✅ Pro active — ' + d.key; el.style.color = '#3fb950'; }
+    else { el.textContent = 'Free tier — AAB builds locked'; el.style.color = '#8b949e'; }
+  } catch (e) { el.textContent = 'Backend offline'; el.style.color = '#f85149'; }
 }
 
 /* ══════════ BACKUP ══════════ */
@@ -1254,6 +1535,8 @@ function setupTabs() {
       if (panel) panel.classList.add('active');
       if (tab === 'backup') refreshBackupList();
       if (tab === 'deploy') { checkToolchain(); loadKeystores(); loadProjectsForDeploy(); refreshArtifacts(); }
+      if (tab === 'github' && window.refreshAllGitState) window.refreshAllGitState();
+      if (tab === 'settings') refreshLicenseStatus();
     };
   }
 }
@@ -1372,7 +1655,6 @@ async function sendChat() {
   if (openFile) sysPrompt += '\n\nCurrently open file: ' + openFile + '\nContents:\n' + fileContent.slice(0, 2000);
 
   if (ai.provider === 'gemini') {
-    // Gemini: simplified tool-less flow (Gemini function-calling differs; we keep it text-only for now)
     try {
       var res = await fetch(ai.url, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -1386,7 +1668,6 @@ async function sendChat() {
     return;
   }
 
-  // DeepSeek: full tool-calling loop
   var messages = [{ role: 'system', content: sysPrompt }, { role: 'user', content: msg }];
   var maxIterations = 15;
   for (var iter = 0; iter < maxIterations; iter++) {
@@ -1733,6 +2014,22 @@ function bindButtons() {
     } catch (e) { s.textContent = '❌ Error: ' + e.message; s.style.color = '#f85149'; }
   };
 
+  // License buttons
+  var licInput = document.getElementById('licenseKeyInput');
+  var licSave = document.getElementById('licenseSaveBtn');
+  var licRemove = document.getElementById('licenseRemoveBtn');
+  if (licSave) licSave.onclick = function() {
+    fetch(API + '/api/license/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: licInput.value.trim() }) })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { toast(d.ok ? 'License activated ✅' : (d.error || 'Failed'), d.ok ? 'success' : 'error'); refreshLicenseStatus(); });
+  };
+  if (licRemove) licRemove.onclick = function() {
+    fetch(API + '/api/license/remove', { method: 'DELETE' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) { toast(d.ok ? 'License removed' : 'Failed', d.ok ? 'success' : 'error'); refreshLicenseStatus(); });
+  };
+  refreshLicenseStatus();
+
   // Deploy tab buttons
   var checkToolsBtn = document.getElementById('checkToolsBtn');
   var installToolsBtn = document.getElementById('installToolsBtn');
@@ -1777,6 +2074,7 @@ function start() {
     try { loadKeystores(); } catch(e) {}
     try { loadProjectsForDeploy(); } catch(e) {}
     try { refreshArtifacts(); } catch(e) {}
+    try { refreshLicenseStatus(); } catch(e) {}
   }, 2000);
 
   console.log('[DS] all setup done');
