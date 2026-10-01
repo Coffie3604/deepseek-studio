@@ -483,6 +483,9 @@ body {
   flex:1; min-height:0;
   background:#1e1e1e; position:relative;
 }
+.editor-tabs-bar:empty {
+  display:none !important;
+}
 .editor-empty {
   display:flex; flex-direction:column;
   align-items:center; justify-content:center;
@@ -914,9 +917,8 @@ body {
 
     <!-- SAVE DROPDOWN — consolidated -->
     <div class="save-wrap" id="saveWrap">
-      <button class="btn primary" id="saveBtn" title="Save (Ctrl+S)">
+      <button class="btn primary icon-only" id="saveBtn" title="Save / Editor menu">
         <i class="fas fa-save"></i>
-        <span class="hide-mobile" style="margin-left:2px">Save</span>
         <i class="fas fa-caret-down save-caret"></i>
       </button>
       <div class="save-menu" id="saveMenu">
@@ -1014,11 +1016,7 @@ body {
 
     <!-- ═══════════ EDITOR PANEL ═══════════ -->
     <div class="tab-panel" id="panel-editor">
-      <div class="editor-tabs-bar" id="editorTabsBar">
-        <div class="editor-tab active">
-          <i class="fas fa-file"></i> No file
-        </div>
-      </div>
+      <div class="editor-tabs-bar" id="editorTabsBar"></div>
       <div id="monaco">
         <div class="editor-empty" id="editorEmpty">
           <i class="fas fa-file-code"></i>
@@ -1800,9 +1798,11 @@ function renderEditorTabs() {
   var bar = document.getElementById('editorTabsBar');
   bar.innerHTML = '';
   if (!openTabs.length) {
-    bar.innerHTML = '<div class="editor-tab active"><i class="fas fa-file"></i> No file</div>';
+    // Hide the entire tab bar when nothing is open
+    bar.style.display = 'none';
     return;
   }
+  bar.style.display = 'flex';
   openTabs.forEach(function(p) {
     var tab = document.createElement('div');
     tab.className = 'editor-tab' + (p === activeTabPath ? ' active' : '');
@@ -3076,21 +3076,12 @@ function setupSaveDropdown() {
   var menu = document.getElementById('saveMenu');
   if (!wrap || !btn || !menu) return;
 
+  // Tap anywhere on the button → open the menu (no more instant save)
   btn.onclick = function(e) {
-    // If clicking the caret, open menu; otherwise save directly
-    if (e.target.classList.contains('save-caret')) {
-      e.preventDefault(); e.stopPropagation();
-      wrap.classList.toggle('open');
-      menu.classList.toggle('active');
-      return;
-    }
-    if (e.target.closest('.save-caret')) {
-      e.preventDefault(); e.stopPropagation();
-      wrap.classList.toggle('open');
-      menu.classList.toggle('active');
-      return;
-    }
-    saveFile();
+    e.preventDefault();
+    e.stopPropagation();
+    wrap.classList.toggle('open');
+    menu.classList.toggle('active');
   };
 
   // Long-press to open menu
