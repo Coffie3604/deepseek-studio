@@ -61,30 +61,25 @@ echo -e "${YELLOW}→${NC} Installing shortcuts (ds-start, ds-stop, ds-status)..
 
 cat > "$BIN_DIR/ds-start" <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
-cd "$HOME/deepseek-projects/deepseek-editor" 2>/dev/null || { echo "❌ Not installed"; exit 1; }
+cd "$HOME/deepseek-projects/deepseek-editor" 2>/dev/null || { echo "DeepSeek Studio not installed. Run install.sh first."; exit 1; }
+
+# Kill any existing server
 pkill -f "node server.js" 2>/dev/null || true
-sleep 1
-pgrep -f "node server.js" >/dev/null && pkill -9 -f "node server.js" 2>/dev/null || true
-setsid nohup node server.js > "$HOME/.ds-studio.log" 2>&1 < /dev/null &
-disown 2>/dev/null || true
-READY=0
-for i in $(seq 1 20); do
-    sleep 1
-    if curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null; then READY=1; break; fi
-done
-if [ "$READY" != "1" ]; then
-    echo "⚠️  Server didn't respond in 20s."
-    tail -20 "$HOME/.ds-studio.log"
-    exit 1
-fi
-VER=$(curl -s http://127.0.0.1:3001/api/version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
-echo "✅ DeepSeek Studio v${VER:-1.0.0} running"
-if command -v termux-open-url >/dev/null 2>&1; then
-    termux-open-url "http://127.0.0.1:3001" 2>/dev/null &
-else
+sleep 0.5
+
+# Start server in background with nohup
+nohup node server.js > "$HOME/.ds-studio.log" 2>&1 &
+sleep 1.5
+
+# Verify it's running
+if curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3001/api/fs/list 2>/dev/null | grep -q "200"; then
+    echo "✅ DeepSeek Studio running at http://127.0.0.1:3001"
+    # Try to auto-open in browser
     am start -a android.intent.action.VIEW -d "http://127.0.0.1:3001" >/dev/null 2>&1 &
+else
+    echo "⚠️  Server may not be running. Check log:"
+    echo "   cat ~/.ds-studio.log"
 fi
-exit 0
 EOF
 chmod +x "$BIN_DIR/ds-start"
 
@@ -140,14 +135,11 @@ chmod +x "$BIN_DIR/ds-update"
 
 echo -e "${GREEN}✓${NC} Shortcuts installed"
 
-# ─── Termux widget shortcuts ───
+# ─── Termux widget shortcut ───
 mkdir -p ~/.shortcuts
-rm -f ~/.shortcuts/DeepSeekStart ~/.shortcuts/DeepSeekStop
-ln -sf "$BIN_DIR/ds-start"   "$HOME/.shortcuts/🐳 DeepSeek Start"
-ln -sf "$BIN_DIR/ds-stop"    "$HOME/.shortcuts/🛑 DeepSeek Stop"
-ln -sf "$BIN_DIR/ds-restart" "$HOME/.shortcuts/🔄 DeepSeek Restart"
-ln -sf "$BIN_DIR/ds-status"  "$HOME/.shortcuts/ℹ️  DeepSeek Status"
-echo -e "${GREEN}✓${NC} 4 widget shortcuts created"
+ln -sf "$BIN_DIR/ds-start" ~/.shortcuts/DeepSeekStart
+ln -sf "$BIN_DIR/ds-stop" ~/.shortcuts/DeepSeekStop
+echo -e "${GREEN}✓${NC} Termux widget shortcuts linked"
 
 # ─── Storage (optional) ───
 if [ ! -d "$HOME/storage/external-1" ]; then
@@ -170,9 +162,8 @@ echo "  ds-status    — show status"
 echo "  ds-log       — tail the log file"
 echo "  ds-update    — pull latest + reinstall deps"
 echo ""
-echo "Add home screen widgets for 1-tap launch:"
-echo "  Long-press home → Widgets → Termux:Widget"
-echo "  Add: 🐳 Start · 🛑 Stop · 🔄 Restart · ℹ️ Status"
+echo "Or add a Termux widget to home screen:"
+echo "  Widgets → Termux:Widget → DeepSeekStart"
 echo ""
 echo "First time? Install Chrome bookmark:"
 echo "  http://127.0.0.1:3001"
