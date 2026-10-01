@@ -1,5 +1,5 @@
 /* DeepSeek Studio Service Worker */
-const CACHE_NAME = 'deepseek-studio-v1';
+const CACHE_NAME = 'deepseek-studio-v3';
 const PRECACHE_URLS = [
   '/',
   '/manifest.json',
