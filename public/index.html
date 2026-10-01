@@ -154,6 +154,36 @@ body { font-family:-apple-system,'Segoe UI',system-ui,sans-serif; background:#0d
 .wizard-status.err { color:#f85149; }
 .wizard-status.pending { color:#d29922; }
 
+/* ═══════════ SAVE DROPDOWN ═══════════ */
+.save-dropdown { position:relative; display:inline-block; }
+.save-dropdown .save-label { display:inline; margin-left:2px; }
+.save-dropdown .save-caret { margin-left:2px; font-size:10px; opacity:.7; }
+.save-dropdown-menu {
+  position:absolute; top:calc(100% + 6px); right:0;
+  background:#161b22; border:1px solid #30363d; border-radius:8px;
+  min-width:240px; padding:4px 0;
+  box-shadow:0 8px 30px rgba(0,0,0,.7);
+  z-index:2500; display:none;
+}
+.save-dropdown-menu.active { display:block; }
+.dd-item {
+  padding:10px 14px; font-size:13px; color:#c9d1d9;
+  cursor:pointer; display:flex; align-items:center; gap:10px;
+  white-space:nowrap;
+}
+.dd-item:hover { background:#21262d; color:#58a6ff; }
+.dd-item i:first-child { width:16px; text-align:center; color:#8b949e; }
+.dd-item:hover i:first-child { color:#58a6ff; }
+.dd-item .dd-shortcut {
+  margin-left:auto; font-size:10px; color:#484f58;
+  font-family:monospace; padding-left:12px;
+}
+.dd-sep { height:1px; background:#21262d; margin:4px 0; }
+@media (max-width: 500px) {
+  .save-dropdown .save-label { display:none; }
+  .save-dropdown .save-caret { margin-left:4px; }
+}
+
 ::-webkit-scrollbar { width:6px; height:6px; }
 ::-webkit-scrollbar-thumb { background:#30363d; border-radius:3px; }
 @media (max-width: 900px) {
@@ -182,7 +212,25 @@ body { font-family:-apple-system,'Segoe UI',system-ui,sans-serif; background:#0d
   <div class="hright">
     <div class="status"><span class="dot checking" id="statusDot"></span><span id="statusText">...</span></div>
     <span id="langBadge" style="font-size:10px;color:#8b949e;padding:3px 6px;border-radius:10px;background:#21262d;display:none"></span>
-    <button class="btn icon-only" id="saveBtn" title="Save"><i class="fas fa-save"></i></button>
+    <div class="save-dropdown" id="saveDropdownWrap">
+      <button class="btn" id="saveBtn" title="Save (Ctrl+S)">
+        <i class="fas fa-save"></i>
+        <span class="save-label">Save</span>
+        <i class="fas fa-caret-down save-caret"></i>
+      </button>
+      <div class="save-dropdown-menu" id="saveDropdownMenu">
+        <div class="dd-item" data-action="save"><i class="fas fa-save"></i> Save <span class="dd-shortcut">Ctrl+S</span></div>
+        <div class="dd-item" data-action="save-as"><i class="fas fa-copy"></i> Save As... <span class="dd-shortcut">Ctrl+Shift+S</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" data-action="reload"><i class="fas fa-sync"></i> Reload from disk</div>
+        <div class="dd-item" data-action="find"><i class="fas fa-search"></i> Find <span class="dd-shortcut">Ctrl+F</span></div>
+        <div class="dd-item" data-action="replace"><i class="fas fa-exchange-alt"></i> Find &amp; Replace <span class="dd-shortcut">Ctrl+H</span></div>
+        <div class="dd-item" data-action="goto"><i class="fas fa-arrow-right"></i> Go to line... <span class="dd-shortcut">Ctrl+G</span></div>
+        <div class="dd-sep"></div>
+        <div class="dd-item" data-action="bookmark"><i class="far fa-star"></i> Bookmark this file</div>
+        <div class="dd-item" data-action="close-tab"><i class="fas fa-times"></i> Close current tab</div>
+      </div>
+    </div>
     <button class="btn icon-only" id="compileBtn" title="Compile &amp; Run open file" style="color:#3fb950"><i class="fas fa-bolt"></i></button>
     <button class="btn icon-only" id="buildBtn" title="Build project"><i class="fas fa-hammer"></i></button>
     <button class="btn icon-only" id="runBtn" title="Run project"><i class="fas fa-play"></i></button>
