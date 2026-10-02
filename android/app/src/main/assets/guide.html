@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeepSeek Studio — Guide</title>
+<style>
+body{font-family:-apple-system,'Segoe UI',system-ui,sans-serif;background:#0d1117;color:#e6edf3;max-width:720px;margin:0 auto;padding:24px 20px 80px;line-height:1.7}
+h1{color:#58a6ff;font-size:26px;margin-bottom:6px}
+h2{color:#f0f6fc;font-size:19px;margin-top:32px;margin-bottom:10px;border-bottom:1px solid #30363d;padding-bottom:8px}
+h3{color:#f0f6fc;font-size:15px;margin-top:20px;margin-bottom:6px}
+p{color:#c9d1d9;margin-bottom:10px}
+code{background:#161b22;padding:2px 6px;border-radius:4px;font-family:ui-monospace,monospace;font-size:13px;color:#58a6ff}
+pre{background:#161b22;border:1px solid #30363d;border-radius:8px;padding:12px;overflow-x:auto;margin:10px 0;font-size:13px}
+pre code{background:none;padding:0;color:#c9d1d9}
+table{width:100%;border-collapse:collapse;margin:10px 0;font-size:13px}
+th,td{text-align:left;padding:8px;border-bottom:1px solid #30363d}
+th{color:#8b949e;font-size:11px;text-transform:uppercase}
+a{color:#58a6ff}
+.tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600}
+.tag.g{background:#238636;color:#fff}
+.tag.r{background:#da3633;color:#fff}
+.tag.b{background:#1f6feb;color:#fff}
+.back{display:inline-flex;align-items:center;gap:8px;background:#161b22;border:1px solid #30363d;color:#c9d1d9;padding:8px 14px;border-radius:8px;text-decoration:none;font-size:13px;margin-bottom:20px}
+.back:hover{border-color:#58a6ff;color:#58a6ff}
+ul{color:#c9d1d9;padding-left:22px}
+li{margin-bottom:4px}
+</style>
+</head>
+<body>
+<a class="back" href="/">← Back to app</a>
+<h1>DeepSeek Studio</h1>
+<p style="color:#8b949e">AI-powered code editor that runs entirely on your Android phone.</p>
+
+<h2>🚀 Quick Start</h2>
+<ol style="color:#c9d1d9;padding-left:22px">
+  <li>Install Termux from <a href="https://f-droid.org/packages/com.termux/">F-Droid</a></li>
+  <li>Run the installer in Termux:<br>
+    <code>curl -fsSL https://raw.githubusercontent.com/Coffie3604/deepseek-studio/main/install.sh | bash</code></li>
+  <li>Install <a href="https://f-droid.org/packages/com.termux.widget/">Termux:Widget</a> from F-Droid</li>
+  <li>Long-press home screen → Widgets → Termux:Widget → add the 4 shortcuts</li>
+  <li>Tap <strong>🐳 DeepSeek Start</strong></li>
+  <li>In Chrome, open <strong>Setup</strong> → paste your AI key</li>
+</ol>
+
+<h2>📱 The 4 Home Screen Widgets</h2>
+<table>
+  <tr><th>Widget</th><th>Action</th><th>When to use</th></tr>
+  <tr><td><span class="tag g">🐳 Start</span></td><td>Boot server + open Chrome</td><td>Every session start</td></tr>
+  <tr><td><span class="tag r">🛑 Stop</span></td><td>Kill server, save battery</td><td>End of session</td></tr>
+  <tr><td><span class="tag b">🔄 Restart</span></td><td>Full restart + reopen</td><td>If misbehaving</td></tr>
+  <tr><td><strong>ℹ️ Status</strong></td><td>Toast shows version + uptime</td><td>Check health</td></tr>
+</table>
+
+<h2>🖥️ The Three Tabs</h2>
+<h3>💬 Chat</h3>
+<p>Pick a project, describe what you want. The AI writes files, runs commands, fixes bugs. Type <code>/</code> for snippet templates.</p>
+
+<h3>📝 Editor</h3>
+<p>Monaco (VS Code engine) with multi-tab, find/replace, format. Tap <strong>Save ▾</strong> in the header for the full menu (Save As, Reload, Find, Format, Bookmark).</p>
+
+<h3>💻 Terminal</h3>
+<p>Full Termux shell. AI commands appear here in real-time with <code># AI:</code> prefix. Use <strong>Ctrl+C</strong> to interrupt, <strong>Kill</strong> to force-stop.</p>
+
+<h2>🎨 Sidebar Panels (☰ → sliders icon)</h2>
+<table>
+  <tr><th>Tab</th><th>Purpose</th></tr>
+  <tr><td><strong>AI</strong></td><td>Quick prompts: Explain, Find bugs, Add docs, Write tests</td></tr>
+  <tr><td><strong>Tpl</strong></td><td>7 project templates (Flutter, Python, Rust, Go, Node, HTML, Kotlin)</td></tr>
+  <tr><td><strong>Gen</strong></td><td>Describe an app → AI scaffolds it</td></tr>
+  <tr><td><strong>Term</strong></td><td>Quick commands, package managers, env vars, process list</td></tr>
+  <tr><td><strong>Git</strong></td><td>Clone, branches, commits, stash, tags</td></tr>
+  <tr><td><strong>Build</strong></td><td>Android APK/AAB builder with keystore signing</td></tr>
+  <tr><td><strong>Backup</strong></td><td>SD card snapshots (keeps last 5)</td></tr>
+  <tr><td><strong>Setup</strong></td><td>API keys, editor settings, license</td></tr>
+</table>
+
+<h2>💡 Pro Tips</h2>
+<ul>
+  <li>Type <code>/</code> in chat for 12 pre-built prompt templates</li>
+  <li>Enable <strong>Auto</strong> to let AI run tools without confirmation</li>
+  <li>Click any <code>command</code> in AI response → runs in terminal</li>
+  <li>Click any <code>file.py</code> in AI response → opens in editor</li>
+  <li><strong>Ctrl+S</strong> saves, <strong>Ctrl+W</strong> closes tab</li>
+  <li>Long-press files for rename/delete/copy-path</li>
+</ul>
+
+<h2>🆘 Troubleshooting</h2>
+<table>
+  <tr><th>Problem</th><th>Fix</th></tr>
+  <tr><td>Site can't be reached</td><td>Tap 🐳 Start widget</td></tr>
+  <tr><td>Server hangs</td><td>Tap 🔄 Restart</td></tr>
+  <tr><td>Widget does nothing</td><td>Open Termux once, then retry</td></tr>
+  <tr><td>AI says "add key"</td><td>Setup → paste API key</td></tr>
+  <tr><td>"Cannot GET /api/..."</td><td>Run <code>ds-update && ds-restart</code></td></tr>
+</table>
+
+<h2>📁 File Locations</h2>
+<pre><code>~/.ds-studio.log              ← Server log
+~/.shortcuts/                 ← Widget shortcuts
+~/deepseek-projects/          ← Your projects
+~/storage/external-1/DeepSeekBackups/  ← Backups</code></pre>
+
+<h2>🔗 Commands Reference</h2>
+<pre><code>ds-start     start server + open Chrome
+ds-stop      stop server
+ds-restart   restart server
+ds-status    check state
+ds-log       tail live log
+ds-update    pull latest + reinstall
+ds-open      just open browser</code></pre>
+
+<p style="margin-top:40px;color:#484f58;font-size:11px;text-align:center">
+  DeepSeek Studio · AI-powered code editor for Android
+</p>
+</body>
+</html>
