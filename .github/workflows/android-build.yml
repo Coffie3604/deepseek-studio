@@ -17,9 +17,6 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Copy web assets into android assets
         run: |
           mkdir -p android/app/src/main/assets
@@ -29,24 +26,20 @@ jobs:
           cp public/icon-v2.svg    android/app/src/main/assets/
           cp public/manifest.json  android/app/src/main/assets/
           cp public/sw.js          android/app/src/main/assets/
-
-      - name: Grant execute permission for gradlew (if present)
-        run: |
-          if [ -f android/gradlew ]; then chmod +x android/gradlew; fi
-        continue-on-error: true
+          ls -la android/app/src/main/assets/
 
       - name: Build Debug APK
         working-directory: android
         run: |
-          gradle wrapper --gradle-version 8.2 || true
-          if [ -f gradlew ]; then ./gradlew assembleDebug; else gradle assembleDebug; fi
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          gradle --version
+          gradle assembleDebug --no-daemon --stacktrace
 
       - name: Locate APK
         id: apk
         run: |
           APK=$(find android -name "*.apk" | head -1)
           echo "apk_path=$APK" >> $GITHUB_OUTPUT
-          echo "APK at: $APK"
           ls -lh "$APK"
 
       - name: Upload APK artifact
