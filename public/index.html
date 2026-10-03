@@ -1229,6 +1229,8 @@ function setupGenerator() {
 /* ══════════ AI TOOLS ══════════ */
 var AI_TOOLS = [
   { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file. Paths are relative to project root.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+  { type: 'function', function: { name: 'apply_patch', description: 'Edit an existing file by finding the search string and replacing it with the replace string. Use this INSTEAD of write_file for ANY change to an existing file. Include 3-5 lines of surrounding context in the search string so it matches exactly once.', parameters: { type: 'object', properties: { path: { type: 'string' }, search: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'search', 'replace'] } } },
+  { type: 'function', function: { name: 'notify', description: 'Send an Android notification. Call this AFTER any command that took more than about 60 seconds (builds, installs, test suites) so the user knows it finished.', parameters: { type: 'object', properties: { title: { type: 'string' }, message: { type: 'string' } }, required: ['message'] } } },
   { type: 'function', function: { name: 'read_file', description: 'Read file contents', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'list_files', description: 'List files in a directory', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
   { type: 'function', function: { name: 'create_folder', description: 'Create a new folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
@@ -1285,6 +1287,38 @@ function appendMessage(role, content, skipSave) {
       link.onclick = function() { sendToTerminal(this.getAttribute('data-cmd')); };
     });
   } else div.textContent = content;
+
+  /* ---- COPY BUTTON (inline SVG) ---- */
+  var copyBtn = document.createElement('button');
+  copyBtn.className = 'msg-copy-btn';
+  copyBtn.type = 'button';
+  copyBtn.title = 'Copy message';
+  copyBtn.setAttribute('aria-label', 'Copy message');
+  copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+  copyBtn.onclick = function(e) {
+    e.stopPropagation();
+    var ok = function() {
+      copyBtn.classList.add('copied');
+      copyBtn.title = 'Copied!';
+      copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>';
+      setTimeout(function() {
+        copyBtn.classList.remove('copied');
+        copyBtn.title = 'Copy message';
+        copyBtn.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>';
+      }, 1400);
+      toast('Copied to clipboard', 'success');
+    };
+    var fail = function() { toast('Copy failed', 'error'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(content).then(ok).catch(function() {
+        fallbackCopy(content) ? ok() : fail();
+      });
+    } else {
+      fallbackCopy(content) ? ok() : fail();
+    }
+  };
+  div.appendChild(copyBtn);
+
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
   if (!skipSave) {
@@ -1293,6 +1327,22 @@ function appendMessage(role, content, skipSave) {
     localStorage.setItem('ds_chat', JSON.stringify(chatHistory));
   }
   return div;
+}
+
+function fallbackCopy(text) {
+  try {
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.top = '-9999px';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    var ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch (e) { return false; }
 }
 function restoreChatHistory() {
   var box = document.getElementById('chatMessages');
@@ -1321,6 +1371,8 @@ function makeToolBubble(name, args) {
   div.className = 'tool-call running';
   var argPreview = '';
   if (name === 'write_file') argPreview = args.path || '';
+  else if (name === 'apply_patch') argPreview = (args.path || '') + ' -> ' + ((args.search || '').slice(0, 40).replace(/\n/g, ' '));
+  else if (name === 'notify') argPreview = (args.message || '').slice(0, 60);
   else if (['read_file','list_files','create_folder','delete_file'].indexOf(name) >= 0) argPreview = args.path || '';
   else if (name === 'run_command') argPreview = (args.command || '').slice(0, 60);
   else if (name === 'grep_search') argPreview = '"' + (args.pattern || '') + '"';
@@ -1376,13 +1428,26 @@ async function sendChat() {
   appendMessage('user', msg);
   showTypingIndicator();
 
-  var sysPrompt = 'You are DeepSeek Studio, an AI coding assistant on Termux. ' +
-    'The user is working in the project: ' + currentProject + '. ' +
-    'Use the provided tools to create/modify files and run commands. ' +
-    'All paths are relative to the project root "' + currentProject + '/". ' +
-    'When running servers, set background=true. For installs use pip install / npm install. ' +
-    'Prefer small, targeted edits over rewriting entire files. ' +
-    'Include brief comments for non-obvious code. Summarize briefly when done.';
+  var sysPrompt = 'You are DeepSeek Studio, an AI coding agent running on Termux (Android). ' +
+    'Project: "' + currentProject + '". All paths are relative to "' + currentProject + '/".\\n\\n' +
+    '## Behavior\\n' +
+    '- BE DECISIVE. Act on the task; do not just analyze or explain what you would do.\\n' +
+    '- Spend AT MOST 2-3 read/search operations to understand the code, then start editing.\\n' +
+    '- If the request is ambiguous, make a reasonable assumption and act.\\n' +
+    '- When you finish a coherent chunk of work, STOP calling tools and give a 1-2 sentence summary of what changed.\\n\\n' +
+    '## Tool usage\\n' +
+    '- Use apply_patch for ANY change to an EXISTING file. Provide 3-5 lines of unique context in the search string.\\n' +
+    '- Use write_file ONLY for brand-new files or complete rewrites (rare).\\n' +
+    '- Use read_file when you need to see current content before editing.\\n' +
+    '- Use grep_search to find symbols and usages across the project - never run grep via run_command.\\n' +
+    '- Use find_files to locate files by name - never run find via run_command.\\n' +
+    '- Use run_command for installs, tests, builds, and running scripts. Set background=true for servers and watchers.\\n' +
+    '- If a run_command takes longer than about 60 seconds (builds, installs), call notify with a short status afterwards.\\n\\n' +
+    '## Boundaries\\n' +
+    '- Never modify files outside "' + currentProject + '/".\\n' +
+    '- Do NOT touch node_modules, .git, build, .dart_tool, dist, .next.\\n' +
+    '- Do not install packages unless the task requires it.\\n\\n' +
+    'When done, give a 1-2 sentence summary of what changed.';
   if (openFile) sysPrompt += '\n\nCurrently open file: ' + openFile + '\nContents:\n' + fileContent.slice(0, 2000);
 
   if (ai.provider === 'gemini') {
@@ -1397,7 +1462,7 @@ async function sendChat() {
   }
 
   var messages = [{ role: 'system', content: sysPrompt }, { role: 'user', content: msg }];
-  var maxIterations = 15;
+  var maxIterations = 40;
   for (var iter = 0; iter < maxIterations; iter++) {
     try {
       var res = await fetch(ai.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ai.key }, body: JSON.stringify({ model: 'deepseek-chat', messages: messages, tools: AI_TOOLS, tool_choice: 'auto', max_tokens: 4096 }) });
@@ -2245,7 +2310,8 @@ function setupSnippets() {
   }
   input.addEventListener('input', function() {
     var val = this.value;
-    if (val.startsWith('/')) showSnippets(val.slice(1));
+    var m = val.match(/^\/([\w -]{0,30})$/);
+    if (m) showSnippets(m[1]);
     else dropdown.classList.remove('active');
   });
   input.addEventListener('keydown', function(e) { if (e.key === 'Escape') dropdown.classList.remove('active'); });

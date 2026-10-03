@@ -24,6 +24,16 @@ app.use(cors());
 app.use(express.json({ limit: '20mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+/* ══════════ WAKE LOCK ══════════ */
+// Acquire wake lock so Android doesn't kill us during long builds/tests
+try {
+    const { execSync } = require('child_process');
+    execSync('command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock', { timeout: 5000 });
+    console.log('🔒 Wake lock acquired');
+} catch (e) {
+    console.log('ℹ️  Wake lock not available (run: pkg install termux-api)');
+}
+
 /* ══════════ SAFETY ══════════ */
 const BLOCKED_PATTERNS = [
     /rm\s+-rf\s+\/(?!data\/data\/com\.termux)/,
@@ -217,6 +227,192 @@ app.post('/api/ai/tool-call', (req, res) => {
             });
             return;
         }
+        if (name === 'apply_patch') {
+
+            const target = path.join(WORKSPACE, a.path || '');
+
+            if (!isWithinWorkspace(a.path)) return res.status(403).json({ error: 'outside workspace' });
+
+            if (!fs.existsSync(target)) return res.json({ ok: false, display: 'File not found: ' + a.path + ' — use read_file or write_file first', result: { error: 'not found' } });
+
+            let content;
+
+            try { content = fs.readFileSync(target, 'utf8'); }
+
+            catch (e) { return res.json({ ok: false, display: 'Cannot read ' + a.path + ': ' + e.message }); }
+
+            const search = a.search || '';
+
+            const replace = a.replace || '';
+
+            if (!search) return res.status(400).json({ error: 'search string required' });
+
+            let idx = 0, count = 0;
+
+            while ((idx = content.indexOf(search, idx)) !== -1) { count++; idx += search.length; }
+
+            if (count === 0) {
+
+                const norm = s => s.replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '');
+
+                const normContent = norm(content);
+
+                const normSearch = norm(search);
+
+                if (normSearch && normContent.includes(normSearch)) {
+
+                    // Re-apply on the ORIGINAL content's normalized form, but preserve original CRLF if present.
+
+                    const usesCRLF = content.includes('\r\n');
+
+                    const newNormalized = normContent.replace(normSearch, norm(replace));
+
+                    const finalContent = usesCRLF ? newNormalized.replace(/\n/g, '\r\n') : newNormalized;
+
+                    fs.writeFileSync(target, finalContent, 'utf8');
+
+                    return res.json({ ok: true, display: 'Patched ' + a.path + ' (normalized whitespace; CRLF=' + usesCRLF + ')', result: { path: a.path, replaced: 1 } });
+
+                }
+
+                return res.json({ ok: false, display: 'search string NOT found in ' + a.path + ' — read_file first to see exact content, then match 3-5 lines of context', result: { error: 'not found' } });
+
+            }
+
+            if (count > 1 && !a.replace_all) {
+
+                return res.json({ ok: false, display: 'search matches ' + count + ' times — add more context to make it unique, or set replace_all=true', result: { error: 'multiple matches', count } });
+
+            }
+
+            content = a.replace_all ? content.split(search).join(replace) : content.replace(search, replace);
+
+            fs.writeFileSync(target, content, 'utf8');
+
+            return res.json({ ok: true, display: 'Patched ' + a.path + ' (' + count + ' replacement' + (count > 1 ? 's' : '') + ')', result: { path: a.path, replaced: count } });
+
+        }
+
+        if (name === 'grep_search') {
+
+            const pattern = a.pattern || '';
+
+            if (!pattern) return res.status(400).json({ error: 'pattern required' });
+
+            const searchPath = a.path ? path.join(WORKSPACE, a.path) : WORKSPACE;
+
+            if (!isWithinWorkspace(a.path || '')) return res.status(403).json({ error: 'outside workspace' });
+
+            const flags = a.ignoreCase ? '-i' : '';
+
+            const escaped = pattern.replace(/"/g, '\\"');
+
+            const cmd = 'grep -rnI ' + flags +
+
+                ' --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=build' +
+
+                ' --exclude-dir=.dart_tool --exclude-dir=dist --exclude-dir=.next' +
+
+                ' -- "' + escaped + '" "' + searchPath + '" 2>&1 | head -60';
+
+            exec(cmd, { cwd: WORKSPACE, timeout: 30000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+
+                const lines = (stdout || '').trim().split('\n').filter(Boolean);
+
+                const cleaned = lines.map(l => l.replace(WORKSPACE + '/', '')).slice(0, 40);
+
+                return res.json({
+
+                    ok: true,
+
+                    display: 'Found ' + cleaned.length + ' match(es) for "' + pattern + '"',
+
+                    result: { matches: cleaned, count: cleaned.length }
+
+                });
+
+            });
+
+            return;
+
+        }
+
+        if (name === 'find_files') {
+
+            const pattern = a.pattern || '';
+
+            if (!pattern) return res.status(400).json({ error: 'pattern required' });
+
+            const searchPath = a.path ? path.join(WORKSPACE, a.path) : WORKSPACE;
+
+            if (!isWithinWorkspace(a.path || '')) return res.status(403).json({ error: 'outside workspace' });
+
+            const escaped = pattern.replace(/"/g, '\\"');
+
+            const cmd = 'find "' + searchPath + '" -maxdepth 8 -type f -name "' + escaped + '"' +
+
+                ' -not -path "*/node_modules/*" -not -path "*/.git/*" -not -path "*/build/*"' +
+
+                ' -not -path "*/.dart_tool/*" -not -path "*/dist/*" -not -path "*/.next/*"' +
+
+                ' 2>&1 | head -50';
+
+            exec(cmd, { cwd: WORKSPACE, timeout: 30000, maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
+
+                const lines = (stdout || '').trim().split('\n').filter(Boolean);
+
+                const cleaned = lines.map(l => l.replace(WORKSPACE + '/', ''));
+
+                return res.json({
+
+                    ok: true,
+
+                    display: 'Found ' + cleaned.length + ' file(s) matching "' + pattern + '"',
+
+                    result: { files: cleaned, count: cleaned.length }
+
+                });
+
+            });
+
+            return;
+
+        }
+
+        if (name === 'notify') {
+
+            const rawTitle = a.title || 'DeepSeek Studio';
+
+            const rawMsg = a.message || 'Done';
+
+            // Escape single-quotes and backslashes for shell single-quoted string
+
+            const shellEscape = s => String(s).replace(/'/g, "'\\''");
+
+            const cmd = 'termux-notification --title ' + "'" + shellEscape(rawTitle) + "'" +
+
+                ' --content ' + "'" + shellEscape(rawMsg) + "'" +
+
+                ' --priority high --vibrate 300 2>&1';
+
+            exec(cmd, { timeout: 5000 }, (err) => {
+
+                return res.json({
+
+                    ok: !err,
+
+                    display: err ? 'Notification failed — is termux-api installed?' : 'Notified: ' + rawTitle,
+
+                    result: { ok: !err }
+
+                });
+
+            });
+
+            return;
+
+        }
+
         return res.status(400).json({ error: 'Unknown tool: ' + name });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -913,6 +1109,11 @@ wss.on('connection', (ws) => {
 function shutdown(signal) {
     console.log('\n[' + signal + '] Shutting down...');
     try { wss.close(); } catch (e) {}
+    try {
+        const { execSync } = require('child_process');
+        execSync('command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock', { timeout: 3000 });
+        console.log('🔓 Wake lock released');
+    } catch (e) {}
     server.close(() => {
         console.log('Server closed.');
         process.exit(0);
