@@ -49,10 +49,17 @@ function isCommandBlocked(cmd) {
     for (const p of BLOCKED_PATTERNS) if (p.test(cmd)) return p.source;
     return null;
 }
+// True only when `resolved` is `base` itself or a descendant of it.
+// A plain startsWith() check is unsafe: "/home/x/deepseek-projects-evil"
+// would pass a startsWith("/home/x/deepseek-projects") test.
+function withinBase(base, resolved) {
+    const b = path.resolve(base);
+    const r = path.resolve(resolved);
+    return r === b || r.startsWith(b + path.sep);
+}
 function isWithinWorkspace(p) {
     try {
-        const resolved = path.resolve(WORKSPACE, p || '');
-        return resolved.startsWith(WORKSPACE);
+        return withinBase(WORKSPACE, path.resolve(WORKSPACE, p || ''));
     } catch (e) { return false; }
 }
 
@@ -81,6 +88,11 @@ app.use('/api/', function(req, res, next) {
     if (w.count > 300) return res.status(429).json({ error: 'Too many requests' });
     next();
 });
+// Periodically drop stale rate-limit buckets so the map can't grow without bound.
+setInterval(() => {
+    const now = Date.now();
+    for (const [ip, w] of rateLimitMap) if (now > w.reset) rateLimitMap.delete(ip);
+}, 5 * 60 * 1000).unref();
 
 /* ══════════ PROCESSES ══════════ */
 app.get('/api/processes', (req, res) => {
@@ -107,7 +119,7 @@ app.post('/api/processes/kill', (req, res) => {
 /* ══════════ FILESYSTEM ══════════ */
 app.get('/api/fs/list', (req, res) => {
     const target = path.join(WORKSPACE, req.query.path || '');
-    if (!target.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, target)) return res.status(403).json({ error: 'Forbidden' });
     try {
         const items = fs.readdirSync(target, { withFileTypes: true })
             .filter(d => d.name !== '.gitkeep' && d.name !== '.git')
@@ -121,13 +133,13 @@ app.get('/api/fs/list', (req, res) => {
 });
 app.get('/api/fs/read', (req, res) => {
     const target = path.join(WORKSPACE, req.query.path);
-    if (!target.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, target)) return res.status(403).json({ error: 'Forbidden' });
     try { res.json({ content: fs.readFileSync(target, 'utf8') }); }
     catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.post('/api/fs/write', (req, res) => {
     const target = path.join(WORKSPACE, req.body.path);
-    if (!target.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, target)) return res.status(403).json({ error: 'Forbidden' });
     try {
         fs.mkdirSync(path.dirname(target), { recursive: true });
         fs.writeFileSync(target, req.body.content != null ? req.body.content : '', 'utf8');
@@ -136,7 +148,7 @@ app.post('/api/fs/write', (req, res) => {
 });
 app.delete('/api/fs/delete', (req, res) => {
     const target = path.join(WORKSPACE, req.query.path);
-    if (!target.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, target)) return res.status(403).json({ error: 'Forbidden' });
     try { fs.rmSync(target, { recursive: true, force: true }); res.json({ ok: true }); }
     catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -145,7 +157,7 @@ app.post('/api/fs/rename', (req, res) => {
     if (!oldPath || !newPath) return res.status(400).json({ error: 'paths required' });
     const src = path.join(WORKSPACE, oldPath);
     const dst = path.join(WORKSPACE, newPath);
-    if (!src.startsWith(WORKSPACE) || !dst.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, src) || !withinBase(WORKSPACE, dst)) return res.status(403).json({ error: 'Forbidden' });
     try {
         fs.mkdirSync(path.dirname(dst), { recursive: true });
         fs.renameSync(src, dst);
@@ -160,7 +172,7 @@ app.post('/api/exec', (req, res) => {
     const blocked = isCommandBlocked(cmd);
     if (blocked) return res.status(403).json({ error: 'Blocked: ' + blocked });
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec(cmd, { cwd: workdir, timeout: 300000, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
         res.json({ code: err ? (err.code || 1) : 0, stdout: stdout || '', stderr: stderr || '' });
     });
@@ -214,7 +226,7 @@ app.post('/api/ai/tool-call', (req, res) => {
             const blocked = isCommandBlocked(cmd);
             if (blocked) return res.status(403).json({ error: 'Blocked: ' + blocked });
             const cwd = a.cwd ? path.join(WORKSPACE, a.cwd) : WORKSPACE;
-            if (!cwd.startsWith(WORKSPACE)) return res.status(403).json({ error: 'outside workspace' });
+            if (!withinBase(WORKSPACE, cwd)) return res.status(403).json({ error: 'outside workspace' });
             const isBg = a.background === true;
             const timeout = isBg ? 3000 : 120000;
             exec(cmd, { cwd, timeout, maxBuffer: 20 * 1024 * 1024 }, (err, stdout, stderr) => {
@@ -422,7 +434,7 @@ app.post('/api/ai/tool-call', (req, res) => {
 /* ══════════ LANGUAGE DETECTION ══════════ */
 app.get('/api/detect-language', (req, res) => {
     const dir = path.join(WORKSPACE, req.query.path || '');
-    if (!dir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, dir)) return res.status(403).json({ error: 'Forbidden' });
     const checks = [
         { file: 'pubspec.yaml', lang: 'flutter', build: 'flutter build apk --debug', run: 'flutter run' },
         { file: 'build.gradle.kts', lang: 'kotlin', build: './gradlew build', run: './gradlew run' },
@@ -447,7 +459,7 @@ app.post('/api/compile', (req, res) => {
     const { path: filePath } = req.body;
     if (!filePath) return res.status(400).json({ error: 'path required' });
     const target = path.join(WORKSPACE, filePath);
-    if (!target.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, target)) return res.status(403).json({ error: 'Forbidden' });
     if (!fs.existsSync(target)) return res.status(404).json({ error: 'File not found' });
     const ext = filePath.split('.').pop().toLowerCase();
     const nameNoExt = path.basename(filePath, '.' + ext);
@@ -479,7 +491,7 @@ app.post('/api/compile', (req, res) => {
 app.post('/api/git/status', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git rev-parse --is-inside-work-tree 2>&1', { cwd: workdir }, (err, stdout) => {
         if (err || !stdout.includes('true')) return res.json({ isRepo: false });
         exec('git branch --show-current 2>&1 && echo "---" && git status --porcelain 2>&1 && echo "---" && git remote -v 2>&1', { cwd: workdir }, (e2, o2) => {
@@ -494,7 +506,7 @@ app.post('/api/git/status', (req, res) => {
 app.post('/api/git/log', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git log --oneline -10 2>&1', { cwd: workdir, timeout: 10000 }, (err, stdout) => {
         res.json({ log: stdout || '', error: err ? err.message : null });
     });
@@ -502,7 +514,7 @@ app.post('/api/git/log', (req, res) => {
 app.post('/api/git/init', (req, res) => {
     const { cwd, branch } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git init -b ' + (branch || 'main') + ' 2>&1 || git init 2>&1', { cwd: workdir }, (err, so, se) => {
         res.json({ code: err ? 1 : 0, stdout: so || '', stderr: se || '' });
     });
@@ -512,7 +524,7 @@ app.post('/api/git/clone', (req, res) => {
     if (!url) return res.status(400).json({ error: 'url required' });
     const name = dir || url.split('/').pop().replace(/\.git$/, '');
     const target = path.join(WORKSPACE, name);
-    if (!target.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, target)) return res.status(403).json({ error: 'Forbidden' });
     if (fs.existsSync(target)) return res.status(400).json({ error: 'Directory exists: ' + name });
     exec('git clone "' + url + '" "' + name + '" 2>&1', { cwd: WORKSPACE, timeout: 180000 }, (err, so, se) => {
         res.json({ code: err ? 1 : 0, stdout: so || '', stderr: se || '', dir: name });
@@ -521,7 +533,7 @@ app.post('/api/git/clone', (req, res) => {
 app.post('/api/git/push', (req, res) => {
     const { cwd, message, commitOnly } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     const msg = (message || 'Update').replace(/"/g, '\\"');
     const cmd = commitOnly
         ? 'git add -A && git commit -m "' + msg + '" 2>&1'
@@ -533,7 +545,7 @@ app.post('/api/git/push', (req, res) => {
 app.post('/api/git/pull', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git pull 2>&1', { cwd: workdir, timeout: 60000 }, (err, so, se) => {
         res.json({ code: err ? 1 : 0, stdout: so || '', stderr: se || '' });
     });
@@ -541,7 +553,7 @@ app.post('/api/git/pull', (req, res) => {
 app.post('/api/git/set-remote', (req, res) => {
     const { cwd, url } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     if (!url) return res.status(400).json({ error: 'url required' });
     exec('git remote remove origin 2>/dev/null; git remote add origin "' + url + '" 2>&1 && echo OK', { cwd: workdir }, (err, so, se) => {
         res.json({ code: err ? 1 : 0, stdout: so || '', stderr: se || '' });
@@ -559,7 +571,7 @@ app.post('/api/git/set-identity', (req, res) => {
 app.post('/api/git/branches', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git branch -a 2>&1 && echo "---" && git branch --show-current 2>&1', { cwd: workdir, timeout: 10000 }, (err, stdout) => {
         const parts = (stdout || '').split('---').map(s => s.trim());
         const all = (parts[0] || '').split('\n').filter(Boolean).map(b => b.replace(/^\*\s*/, '').trim());
@@ -569,7 +581,7 @@ app.post('/api/git/branches', (req, res) => {
 app.post('/api/git/branch/create', (req, res) => {
     const { cwd, name, checkout } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE) || !name) return res.status(403).json({ error: 'invalid' });
+    if (!withinBase(WORKSPACE, workdir) || !name) return res.status(403).json({ error: 'invalid' });
     const cmd = checkout ? 'git checkout -b "' + name + '" 2>&1' : 'git branch "' + name + '" 2>&1';
     exec(cmd, { cwd: workdir, timeout: 15000 }, (err, so, se) => {
         res.json({ ok: !err, stdout: so || '', stderr: se || '' });
@@ -578,7 +590,7 @@ app.post('/api/git/branch/create', (req, res) => {
 app.post('/api/git/branch/checkout', (req, res) => {
     const { cwd, name } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE) || !name) return res.status(403).json({ error: 'invalid' });
+    if (!withinBase(WORKSPACE, workdir) || !name) return res.status(403).json({ error: 'invalid' });
     exec('git checkout "' + name + '" 2>&1', { cwd: workdir, timeout: 15000 }, (err, so, se) => {
         res.json({ ok: !err, stdout: so || '', stderr: se || '' });
     });
@@ -586,7 +598,7 @@ app.post('/api/git/branch/checkout', (req, res) => {
 app.post('/api/git/branch/delete', (req, res) => {
     const { cwd, name, force } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE) || !name) return res.status(403).json({ error: 'invalid' });
+    if (!withinBase(WORKSPACE, workdir) || !name) return res.status(403).json({ error: 'invalid' });
     exec('git branch ' + (force ? '-D' : '-d') + ' "' + name + '" 2>&1', { cwd: workdir, timeout: 15000 }, (err, so, se) => {
         res.json({ ok: !err, stdout: so || '', stderr: se || '' });
     });
@@ -594,7 +606,7 @@ app.post('/api/git/branch/delete', (req, res) => {
 app.post('/api/git/branch/merge', (req, res) => {
     const { cwd, source } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE) || !source) return res.status(403).json({ error: 'invalid' });
+    if (!withinBase(WORKSPACE, workdir) || !source) return res.status(403).json({ error: 'invalid' });
     exec('git merge "' + source + '" --no-edit 2>&1', { cwd: workdir, timeout: 30000 }, (err, so, se) => {
         const out = (so || '') + (se || '');
         res.json({ ok: !err && !/CONFLICT/.test(out), conflicted: /CONFLICT|Automatic merge failed/.test(out), stdout: so || '', stderr: se || '' });
@@ -605,7 +617,7 @@ app.post('/api/git/branch/merge', (req, res) => {
 app.post('/api/git/status/detailed', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git status --porcelain=v1 -uall 2>&1', { cwd: workdir, timeout: 10000 }, (err, stdout) => {
         const lines = (stdout || '').split('\n').filter(Boolean);
         const files = lines.map(l => ({ status: l.slice(0, 2).trim(), path: l.slice(3) }));
@@ -615,7 +627,7 @@ app.post('/api/git/status/detailed', (req, res) => {
 app.post('/api/git/diff', (req, res) => {
     const { cwd, file } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     const target = file ? ' -- "' + file + '"' : '';
     exec('git diff --no-color' + target + ' 2>&1; echo "---STAGED---"; git diff --cached --no-color' + target + ' 2>&1', { cwd: workdir, timeout: 15000 }, (err, stdout) => {
         const parts = (stdout || '').split('---STAGED---');
@@ -627,7 +639,7 @@ app.post('/api/git/diff', (req, res) => {
 app.post('/api/git/add', (req, res) => {
     const { cwd, paths } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     const target = paths && paths.length ? paths.map(p => '"' + p + '"').join(' ') : '-A';
     exec('git add ' + target + ' 2>&1', { cwd: workdir, timeout: 15000 }, (err, so, se) => {
         res.json({ ok: !err, stdout: so || '', stderr: se || '' });
@@ -636,7 +648,7 @@ app.post('/api/git/add', (req, res) => {
 app.post('/api/git/reset', (req, res) => {
     const { cwd, paths, hard } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     let cmd;
     if (hard) cmd = 'git reset --hard HEAD 2>&1';
     else if (paths && paths.length) cmd = 'git reset HEAD ' + paths.map(p => '"' + p + '"').join(' ') + ' 2>&1';
@@ -648,7 +660,7 @@ app.post('/api/git/reset', (req, res) => {
 app.post('/api/git/stash', (req, res) => {
     const { cwd, action, message } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     let cmd = 'git stash 2>&1';
     if (action === 'list') cmd = 'git stash list 2>&1';
     else if (action === 'pop') cmd = 'git stash pop 2>&1';
@@ -665,7 +677,7 @@ app.post('/api/git/stash', (req, res) => {
 app.post('/api/git/conflicts', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git diff --name-only --diff-filter=U 2>&1', { cwd: workdir, timeout: 10000 }, (err, stdout) => {
         const files = (stdout || '').split('\n').filter(Boolean);
         res.json({ files });
@@ -674,7 +686,7 @@ app.post('/api/git/conflicts', (req, res) => {
 app.post('/api/git/merge/abort', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git merge --abort 2>&1', { cwd: workdir, timeout: 15000 }, (err, so, se) => {
         res.json({ ok: !err, stdout: so || '', stderr: se || '' });
     });
@@ -684,7 +696,7 @@ app.post('/api/git/merge/abort', (req, res) => {
 app.post('/api/git/cherry-pick', (req, res) => {
     const { cwd, commit } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE) || !commit) return res.status(403).json({ error: 'invalid' });
+    if (!withinBase(WORKSPACE, workdir) || !commit) return res.status(403).json({ error: 'invalid' });
     exec('git cherry-pick "' + commit + '" 2>&1', { cwd: workdir, timeout: 30000 }, (err, so, se) => {
         const out = (so || '') + (se || '');
         const conflicted = /conflict/i.test(out);
@@ -694,7 +706,7 @@ app.post('/api/git/cherry-pick', (req, res) => {
 app.post('/api/git/revert', (req, res) => {
     const { cwd, commit } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE) || !commit) return res.status(403).json({ error: 'invalid' });
+    if (!withinBase(WORKSPACE, workdir) || !commit) return res.status(403).json({ error: 'invalid' });
     exec('git revert "' + commit + '" --no-edit 2>&1', { cwd: workdir, timeout: 30000 }, (err, so, se) => {
         const out = (so || '') + (se || '');
         const conflicted = /conflict/i.test(out);
@@ -706,7 +718,7 @@ app.post('/api/git/revert', (req, res) => {
 app.post('/api/git/tags', (req, res) => {
     const { cwd, action, name, message } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     let cmd;
     if (action === 'list') cmd = 'git tag -l 2>&1';
     else if (action === 'create') cmd = 'git tag -a "' + name + '" -m "' + (message || name).replace(/"/g, '\\"') + '" 2>&1';
@@ -720,7 +732,7 @@ app.post('/api/git/tags', (req, res) => {
 app.post('/api/git/remotes', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git remote -v 2>&1', { cwd: workdir, timeout: 10000 }, (err, stdout) => {
         const lines = (stdout || '').split('\n').filter(Boolean);
         const remotes = {};
@@ -734,7 +746,7 @@ app.post('/api/git/remotes', (req, res) => {
 app.post('/api/git/fetch', (req, res) => {
     const { cwd, remote } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git fetch ' + (remote || 'origin') + ' 2>&1', { cwd: workdir, timeout: 60000 }, (err, so, se) => {
         res.json({ ok: !err, stdout: so || '', stderr: se || '' });
     });
@@ -742,7 +754,7 @@ app.post('/api/git/fetch', (req, res) => {
 app.post('/api/git/pull/rebase', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git pull --rebase 2>&1', { cwd: workdir, timeout: 60000 }, (err, so, se) => {
         const out = (so || '') + (se || '');
         const conflicted = /conflict/i.test(out);
@@ -754,7 +766,7 @@ app.post('/api/git/pull/rebase', (req, res) => {
 app.post('/api/git/log/detailed', (req, res) => {
     const { cwd, limit } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     const n = limit || 20;
     exec('git log -' + n + ' --pretty=format:"%h|%an|%ar|%s" 2>&1', { cwd: workdir, timeout: 10000 }, (err, stdout) => {
         const commits = (stdout || '').split('\n').filter(Boolean).map(l => {
@@ -767,7 +779,7 @@ app.post('/api/git/log/detailed', (req, res) => {
 app.post('/api/git/show', (req, res) => {
     const { cwd, commit } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git show --stat "' + commit + '" 2>&1', { cwd: workdir, timeout: 15000 }, (err, stdout) => {
         res.json({ output: stdout || '', error: err ? err.message : null });
     });
@@ -777,7 +789,7 @@ app.post('/api/git/show', (req, res) => {
 app.post('/api/git/auto-init', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     const cmd = 'if [ ! -d .git ]; then git init -b main 2>&1; git add -A 2>&1; git commit -m "Initial commit" 2>&1 || true; fi; echo DONE';
     exec(cmd, { cwd: workdir, timeout: 30000 }, (err, so, se) => {
         res.json({ code: err ? 1 : 0, stdout: so || '', stderr: se || '' });
@@ -786,7 +798,7 @@ app.post('/api/git/auto-init', (req, res) => {
 app.post('/api/git/auto-commit', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git config user.email 2>&1', { cwd: workdir }, (e1, out1) => {
         if (!out1 || out1.trim().length === 0) return res.json({ skipped: true, reason: 'no git identity set' });
         const msg = 'autosave ' + new Date().toISOString().slice(11, 19);
@@ -798,7 +810,7 @@ app.post('/api/git/auto-commit', (req, res) => {
 app.post('/api/git/undo', (req, res) => {
     const { cwd } = req.body;
     const workdir = cwd ? path.join(WORKSPACE, cwd) : WORKSPACE;
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     exec('git log --oneline -2 2>&1', { cwd: workdir }, (err, stdout) => {
         const lines = (stdout || '').trim().split('\n');
         if (lines.length < 2) return res.json({ ok: false, error: 'Not enough commits' });
@@ -913,7 +925,7 @@ app.delete('/api/backup/delete', (req, res) => {
     const { name } = req.query;
     if (!name || !/^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}$/.test(name)) return res.status(400).json({ error: 'invalid name' });
     const dir = path.join(SD_BACKUP, name);
-    if (!dir.startsWith(SD_BACKUP)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(SD_BACKUP, dir)) return res.status(403).json({ error: 'Forbidden' });
     exec('rm -rf "' + dir + '" 2>&1', (err, so, se) => {
         if (err) return res.status(500).json({ error: se || err.message });
         res.json({ ok: true });
@@ -976,7 +988,7 @@ app.post('/api/deploy/build', (req, res) => {
     const { cwd, keystore, alias, password, output } = req.body;
     if (!cwd) return res.status(400).json({ error: 'cwd required' });
     const workdir = path.join(WORKSPACE, cwd);
-    if (!workdir.startsWith(WORKSPACE)) return res.status(403).json({ error: 'Forbidden' });
+    if (!withinBase(WORKSPACE, workdir)) return res.status(403).json({ error: 'Forbidden' });
     if (!fs.existsSync(workdir)) return res.status(404).json({ error: 'Project not found' });
     const projectType = detectAndroidProject(workdir);
     if (!projectType) return res.status(400).json({ error: 'Not an Android project' });
@@ -1131,6 +1143,16 @@ process.on('unhandledRejection', (reason) => {
 });
 
 /* ══════════ BOOT ══════════ */
+server.on('error', (err) => {
+    if (err && err.code === 'EADDRINUSE') {
+        console.error('\n✗ Port ' + PORT + ' is already in use.');
+        console.error('  Another DeepSeek Studio instance may be running.');
+        console.error('  Stop it with: ds-stop   (or: pkill -f "node server.js")\n');
+    } else {
+        console.error('\n✗ Server error:', err && err.message ? err.message : err);
+    }
+    process.exit(1);
+});
 server.listen(PORT, '127.0.0.1', () => {
     console.log('');
     console.log('===========================================');
