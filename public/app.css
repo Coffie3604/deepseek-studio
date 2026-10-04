@@ -927,3 +927,105 @@ body {
   display: block;
   pointer-events: none;
 }
+
+/* ══════════ DeepSeek API Key onboarding ══════════ */
+.ds-hero {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, rgba(31,111,235,.12), rgba(63,185,80,.08));
+  border: 1px solid rgba(31,111,235,.3);
+  border-radius: var(--radius);
+  margin-bottom: 14px;
+}
+.ds-hero-icon {
+  width: 40px; height: 40px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(31,111,235,.2); border-radius: 10px;
+  color: var(--blue);
+}
+.ds-hero-body { flex: 1; min-width: 0; }
+.ds-hero-title { font-size: 13px; font-weight: 700; color: var(--fg-0); }
+.ds-hero-sub { font-size: 11px; color: var(--fg-3); margin-top: 2px; }
+
+.ds-steps {
+  display: flex; flex-direction: column; gap: 6px;
+  margin-bottom: 14px;
+}
+.ds-step {
+  display: flex; align-items: center; gap: 12px;
+  padding: 11px 12px;
+  background: var(--bg-1); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  text-decoration: none; color: var(--fg-1);
+  transition: all .15s ease;
+  min-height: 52px;
+  -webkit-tap-highlight-color: transparent;
+}
+.ds-step:hover, .ds-step:active {
+  border-color: var(--blue); background: var(--bg-3);
+  transform: translateX(2px);
+}
+.ds-step-num {
+  width: 26px; height: 26px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--blue-2); color: #fff;
+  border-radius: 50%; font-size: 12px; font-weight: 700;
+}
+.ds-step-body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.ds-step-title { font-size: 13px; font-weight: 600; color: var(--fg-0); }
+.ds-step-sub { font-size: 11px; color: var(--fg-3); margin-top: 1px; }
+.ds-step-arrow { color: var(--fg-3); flex-shrink: 0; }
+.ds-step:hover .ds-step-arrow { color: var(--blue); }
+
+.ds-input-label {
+  display: block; font-size: 11px;
+  color: var(--fg-3); margin-bottom: 6px;
+  text-transform: uppercase; letter-spacing: .5px;
+}
+.ds-input-wrap {
+  display: flex; align-items: stretch; gap: 6px;
+  position: relative;
+}
+.ds-input-wrap input {
+  flex: 1; min-width: 0;
+}
+.ds-input-btn {
+  width: 40px; min-height: 40px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-3); border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-3); cursor: pointer;
+  transition: all .15s ease;
+  flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent;
+  padding: 0;
+}
+.ds-input-btn:hover, .ds-input-btn:active {
+  background: var(--bg-4); color: var(--blue); border-color: var(--blue);
+}
+.ds-input-btn svg { display: block; pointer-events: none; }
+
+/* Welcome message CTA button */
+.welcome-cta {
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 11px 16px;
+  background: var(--green-2); border: 1px solid var(--green-2);
+  border-radius: 10px;
+  color: #fff; font-size: 13px; font-weight: 600;
+  font-family: inherit; cursor: pointer;
+  transition: all .15s ease;
+  -webkit-tap-highlight-color: transparent;
+  min-height: 44px;
+}
+.welcome-cta:hover, .welcome-cta:active {
+  background: var(--green); border-color: var(--green);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(35,134,54,.35);
+}
+.welcome-cta-icon {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px;
+  background: rgba(0,0,0,.18); border-radius: 6px;
+  flex-shrink: 0;
+}
+.welcome-cta-arrow { opacity: .8; }

@@ -95,7 +95,18 @@
         <div class="chat-msg assistant">
           <p>👋 Welcome to <b>DeepSeek Studio</b>.</p>
           <p>Pick a project above, then tell me what to build. I can create files, run commands, and deploy.</p>
-          <p>Try: <i>"Create a Python script that prints hello"</i></p>
+          <p style="margin-top:12px">
+            <button class="welcome-cta" onclick="openDrawer('right'); document.querySelector('[data-tab=settings]').click();">
+              <span class="welcome-cta-icon">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                </svg>
+              </span>
+              <span>Set up your DeepSeek API key</span>
+              <svg class="welcome-cta-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </button>
+          </p>
+          <p style="font-size:12px;color:var(--fg-3);margin-top:8px">Free to install. You only pay DeepSeek for what you use.</p>
         </div>
       </div>
       <div class="ai-input-bar">
@@ -472,13 +483,81 @@
           </select>
         </div>
         <div class="settings-section" id="deepseekKeySection">
-          <h3>DeepSeek API Key</h3>
-          <input type="password" id="apiKeyInput" placeholder="sk-..." style="margin-bottom:8px" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <button class="btn primary" id="apiKeyWizardBtn" style="justify-content:center;padding:10px"><i class="fas fa-key"></i> Get Key</button>
-            <button class="btn" id="apiKeyTestBtn" style="justify-content:center;padding:10px"><i class="fas fa-vial"></i> Test</button>
+          <h3><i class="fas fa-key" style="color:var(--yellow)"></i> DeepSeek API Key</h3>
+
+          <div class="ds-hero">
+            <div class="ds-hero-icon">
+              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+              </svg>
+            </div>
+            <div class="ds-hero-body">
+              <div class="ds-hero-title">Bring your own DeepSeek key</div>
+              <div class="ds-hero-sub">Pay-as-you-go · ~$0.14 per million tokens · No subscription</div>
+            </div>
           </div>
+
+          <div class="ds-steps">
+            <a class="ds-step" href="https://platform.deepseek.com/sign_up" target="_blank" rel="noopener">
+              <span class="ds-step-num">1</span>
+              <span class="ds-step-body">
+                <span class="ds-step-title">Create account</span>
+                <span class="ds-step-sub">Free sign-up · email only</span>
+              </span>
+              <svg class="ds-step-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
+            </a>
+            <a class="ds-step" href="https://platform.deepseek.com/top_up" target="_blank" rel="noopener">
+              <span class="ds-step-num">2</span>
+              <span class="ds-step-body">
+                <span class="ds-step-title">Add credits</span>
+                <span class="ds-step-sub">$5 ≈ weeks of coding</span>
+              </span>
+              <svg class="ds-step-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
+            </a>
+            <a class="ds-step" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">
+              <span class="ds-step-num">3</span>
+              <span class="ds-step-body">
+                <span class="ds-step-title">Create API key</span>
+                <span class="ds-step-sub">Copy the sk-… key</span>
+              </span>
+              <svg class="ds-step-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
+            </a>
+          </div>
+
+          <label class="ds-input-label">Paste your key</label>
+          <div class="ds-input-wrap">
+            <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" />
+            <button type="button" class="ds-input-btn" id="apiKeyPasteBtn" title="Paste from clipboard">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+              </svg>
+            </button>
+            <button type="button" class="ds-input-btn" id="apiKeyRevealBtn" title="Show/hide key">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </button>
+          </div>
+
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+            <button class="btn primary" id="apiKeyWizardBtn" style="justify-content:center;padding:10px"><i class="fas fa-magic"></i> Step-by-step</button>
+            <button class="btn" id="apiKeyTestBtn" style="justify-content:center;padding:10px"><i class="fas fa-vial"></i> Test key</button>
+          </div>
+
           <p id="apiKeyStatus" style="font-size:11px;margin-top:10px;color:var(--fg-3)">Not verified</p>
+
+          <p style="font-size:11px;color:var(--fg-3);margin-top:12px;line-height:1.5">
+            <i class="fas fa-lock" style="color:var(--green)"></i>
+            Your key is stored only in this browser's localStorage. It never leaves your device except to call the DeepSeek API directly from your phone.
+          </p>
+
+          <p style="font-size:11px;color:var(--fg-3);margin-top:8px">
+            <a href="https://api-docs.deepseek.com/quick_start/pricing" target="_blank" rel="noopener" style="color:var(--blue)">
+              <i class="fas fa-external-link-alt"></i> Current pricing &amp; models
+            </a>
+          </p>
         </div>
         <div class="settings-section" id="geminiKeySection" style="display:none">
           <h3>Google Gemini API Key</h3>
@@ -563,46 +642,69 @@
 <!-- API Key Wizard -->
 <div class="modal-overlay" id="apiKeyWizardModal">
   <div class="modal-box">
-    <div class="modal-title"><i class="fas fa-key" style="color:var(--yellow)"></i> Get DeepSeek API Key</div>
+    <div class="modal-title">
+      <i class="fas fa-key" style="color:var(--yellow)"></i>
+      Get a DeepSeek API Key
+    </div>
+
+    <p style="font-size:12px;color:var(--fg-3);margin-bottom:16px;line-height:1.5">
+      DeepSeek charges per token used — no subscription. <strong style="color:var(--fg-1)">$5 typically covers weeks of coding.</strong>
+    </p>
+
     <div class="wizard-step" id="wizStep1">
       <div class="wizard-num">1</div>
       <div class="wizard-body">
-        <div class="wizard-title">Sign up (free)</div>
-        <div class="wizard-desc">Create an account at platform.deepseek.com</div>
+        <div class="wizard-title">Create a DeepSeek account</div>
+        <div class="wizard-desc">Free sign-up with email. Takes 30 seconds.</div>
         <button class="wizard-btn primary" onclick="openWizardLink('https://platform.deepseek.com/sign_up')">
-          <i class="fas fa-external-link-alt"></i> Open sign-up
+          <i class="fas fa-external-link-alt"></i> Open sign-up page
         </button>
       </div>
     </div>
+
     <div class="wizard-step" id="wizStep2">
       <div class="wizard-num">2</div>
       <div class="wizard-body">
-        <div class="wizard-title">Add credits</div>
-        <div class="wizard-desc">$5 is plenty for weeks of use</div>
+        <div class="wizard-title">Add credits ($5 recommended)</div>
+        <div class="wizard-desc">Card or PayPal. $5 is ~35M tokens of deepseek-chat.</div>
         <button class="wizard-btn primary" onclick="openWizardLink('https://platform.deepseek.com/top_up')">
-          <i class="fas fa-external-link-alt"></i> Open billing
+          <i class="fas fa-external-link-alt"></i> Open top-up page
         </button>
       </div>
     </div>
+
     <div class="wizard-step" id="wizStep3">
       <div class="wizard-num">3</div>
       <div class="wizard-body">
-        <div class="wizard-title">Create API key</div>
-        <div class="wizard-desc">Copy the sk-… key</div>
+        <div class="wizard-title">Create your API key</div>
+        <div class="wizard-desc">Click <em>Create new API key</em>, name it "DeepSeek Studio", then copy the <code>sk-…</code> value.</div>
         <button class="wizard-btn primary" onclick="openWizardLink('https://platform.deepseek.com/api_keys')">
-          <i class="fas fa-external-link-alt"></i> Open API keys
+          <i class="fas fa-external-link-alt"></i> Open API keys page
         </button>
       </div>
     </div>
+
     <div class="wizard-step" id="wizStep4">
       <div class="wizard-num">4</div>
       <div class="wizard-body">
-        <div class="wizard-title">Paste your key</div>
-        <input type="password" class="modal-input" id="wizKeyInput" placeholder="sk-..." style="margin-top:8px" />
-        <button class="wizard-btn primary" onclick="verifyAndSaveWizardKey()">Verify &amp; Save</button>
+        <div class="wizard-title">Paste your key here</div>
+        <div class="wizard-desc">It will be verified against DeepSeek before saving.</div>
+        <div class="ds-input-wrap" style="margin-top:8px">
+          <input type="password" class="modal-input" id="wizKeyInput" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-bottom:0" />
+          <button type="button" class="ds-input-btn" id="wizPasteBtn" title="Paste from clipboard">
+            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+            </svg>
+          </button>
+        </div>
+        <button class="wizard-btn primary" style="width:100%;margin-top:8px;justify-content:center" onclick="verifyAndSaveWizardKey()">
+          <i class="fas fa-check"></i> Verify &amp; Save
+        </button>
         <div class="wizard-status" id="wizStatus"></div>
       </div>
     </div>
+
     <div class="modal-buttons" style="margin-top:14px">
       <button class="btn" onclick="closeApiKeyWizard()">Cancel</button>
       <button class="btn primary" onclick="closeApiKeyWizard()">Done</button>
@@ -2320,6 +2422,33 @@ function setupSnippets() {
   });
 }
 
+/* ══════════ CLIPBOARD + REVEAL HELPERS ══════════ */
+function readClipboardInto(inputEl, statusCb) {
+  if (!inputEl) return;
+  var set = function(text) {
+    text = (text || '').trim();
+    if (!text) { if (statusCb) statusCb('Clipboard empty', 'error'); return; }
+    inputEl.value = text;
+    inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    inputEl.dispatchEvent(new Event('change', { bubbles: true }));
+    if (statusCb) statusCb('Pasted ' + text.length + ' chars', 'success');
+  };
+  if (navigator.clipboard && navigator.clipboard.readText) {
+    navigator.clipboard.readText().then(set).catch(function() {
+      inputEl.focus();
+      if (statusCb) statusCb('Clipboard blocked — paste manually', 'warn');
+    });
+  } else {
+    inputEl.focus();
+    if (statusCb) statusCb('Clipboard not available — paste manually', 'warn');
+  }
+}
+
+function toggleReveal(inputEl) {
+  if (!inputEl) return;
+  inputEl.type = inputEl.type === 'password' ? 'text' : 'password';
+}
+
 /* ══════════ BIND HEADER BUTTONS ══════════ */
 function bindHeaderButtons() {
   var mL = document.getElementById('menuLeftBtn');
@@ -2433,6 +2562,26 @@ function bindHeaderButtons() {
     } catch (e) { s.textContent = '❌ Error: ' + e.message; s.style.color = 'var(--red)'; }
   };
   if (aW) aW.onclick = openApiKeyWizard;
+
+  /* ── NEW: paste + reveal + wizard paste ── */
+  var apiKeyPaste = document.getElementById('apiKeyPasteBtn');
+  var apiKeyReveal = document.getElementById('apiKeyRevealBtn');
+  var wizPaste = document.getElementById('wizPasteBtn');
+  var apiKeyStatusEl = document.getElementById('apiKeyStatus');
+  var setKeyStatus = function(msg, type) {
+    if (!apiKeyStatusEl) return;
+    apiKeyStatusEl.textContent = msg;
+    apiKeyStatusEl.style.color = type === 'error' ? 'var(--red)' : type === 'warn' ? 'var(--yellow)' : type === 'success' ? 'var(--green)' : 'var(--fg-3)';
+  };
+  if (apiKeyPaste) apiKeyPaste.onclick = function() { readClipboardInto(aK, setKeyStatus); };
+  if (apiKeyReveal) apiKeyReveal.onclick = function() { toggleReveal(aK); };
+  if (wizPaste) wizPaste.onclick = function() {
+    var wizInput = document.getElementById('wizKeyInput');
+    readClipboardInto(wizInput, function(msg, type) {
+      var st = document.getElementById('wizStatus');
+      if (st) { st.textContent = msg; st.className = 'wizard-status ' + (type === 'error' ? 'err' : type === 'warn' ? 'pending' : 'ok'); }
+    });
+  };
   if (aT) aT.onclick = async function() {
     var k = (aK.value || '').trim();
     var s = document.getElementById('apiKeyStatus');
@@ -2577,6 +2726,55 @@ async function compileCurrent() {
     toast(data.ok ? 'Compiled ✓' : 'Compile failed', data.ok ? 'success' : 'error');
   } catch (e) { toast('Compile failed: ' + e.message, 'error'); }
 }
+
+
+/* ══════════ AUTO-VERIFY + AUTO-TEST ══════════ */
+(function setupAutoVerify() {
+  var input = document.getElementById('apiKeyInput');
+  if (!input) return;
+  var statusEl = document.getElementById('apiKeyStatus');
+
+  /* Live feedback as the user types/pastes */
+  input.addEventListener('input', function() {
+    if (!statusEl) return;
+    var v = (this.value || '').trim();
+    if (!v) {
+      statusEl.textContent = 'Not verified';
+      statusEl.style.color = 'var(--fg-3)';
+      return;
+    }
+    if (!v.startsWith('sk-')) {
+      statusEl.textContent = '⚠ Keys start with sk-';
+      statusEl.style.color = 'var(--yellow)';
+      return;
+    }
+    if (v.length < 20) {
+      statusEl.textContent = '⚠ Too short — ' + v.length + ' chars';
+      statusEl.style.color = 'var(--yellow)';
+      return;
+    }
+    statusEl.textContent = '✓ Key format looks valid — click Test to confirm';
+    statusEl.style.color = 'var(--green)';
+  });
+
+  /* Auto-test 600ms after a change lands a plausible key.
+     Only fires when the test button exists and we haven't just tested. */
+  var autoTestTimer = null;
+  var lastTested = '';
+  input.addEventListener('change', function() {
+    var v = (this.value || '').trim();
+    if (!v || !v.startsWith('sk-') || v.length < 20) return;
+    if (v === lastTested) return;                // dedupe
+    clearTimeout(autoTestTimer);
+    autoTestTimer = setTimeout(function() {
+      var testBtn = document.getElementById('apiKeyTestBtn');
+      if (testBtn) {
+        lastTested = v;
+        testBtn.click();
+      }
+    }, 600);
+  });
+})();
 
 /* ══════════ START ══════════ */
 function start() {
