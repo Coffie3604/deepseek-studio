@@ -12,7 +12,6 @@
 <link rel="icon" type="image/svg+xml" href="/icon-v2.svg" />
 <link rel="apple-touch-icon" href="/icon-v2.svg" />
 <title>DeepSeek Studio</title>
-<!-- ✅ FIXED: @xterm/xterm is the current scoped package -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 <link rel="stylesheet" href="/app.css" />
@@ -60,6 +59,9 @@
     <div class="ft-head">
       <span>Projects</span>
       <div style="display:flex;gap:4px">
+        <button class="btn icon-only" id="linkFolderBtn" title="Link external folder" style="min-width:32px;min-height:32px;padding:6px">
+          <i class="fas fa-link"></i>
+        </button>
         <button class="btn icon-only" id="refreshTreeBtn" title="Refresh" style="min-width:32px;min-height:32px;padding:6px">
           <i class="fas fa-sync"></i>
         </button>
@@ -105,6 +107,7 @@
             </button>
           </p>
           <p style="font-size:12px;color:var(--fg-3);margin-top:8px">Free to install. You only pay DeepSeek for what you use.</p>
+          <p style="font-size:12px;color:var(--fg-3);margin-top:6px">💡 Tip: click the <b>🔗</b> button in the file tree header to link any folder from your phone storage.</p>
         </div>
       </div>
       <div class="ai-input-bar">
@@ -598,6 +601,19 @@
           <p id="backendVersion" style="color:var(--fg-3);font-size:11px;margin-top:4px"></p>
           <div id="libsStatus" class="libs-status"></div>
         </div>
+
+        <!-- NEW: External Links management -->
+        <div class="settings-section">
+          <h3><i class="fas fa-link"></i> External Folders</h3>
+          <p style="font-size:11px;color:var(--fg-3);line-height:1.5">
+            Link folders from your phone storage into the workspace. Everything (editor, git, AI) treats them like normal subfolders. The original folder is never modified or moved.
+          </p>
+          <button class="btn primary" id="settingsLinkFolderBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:10px">
+            <i class="fas fa-plus"></i> Link a Folder
+          </button>
+          <div id="linksList" style="font-size:11px"></div>
+        </div>
+
         <div class="settings-section">
           <h3>Terminal</h3>
           <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
@@ -644,7 +660,9 @@
   </div>
 </div>
 
-<!-- MODALS -->
+<!-- ═══════════ MODALS ═══════════ -->
+
+<!-- New File Modal -->
 <div class="modal-overlay" id="newFileModal">
   <div class="modal-box">
     <div class="modal-title">Create new file</div>
@@ -658,6 +676,43 @@
   </div>
 </div>
 
+<!-- NEW: Link External Folder Modal -->
+<div class="modal-overlay" id="linkFolderModal">
+  <div class="modal-box">
+    <div class="modal-title">
+      <i class="fas fa-link" style="color:var(--blue)"></i>
+      Link an External Folder
+    </div>
+    <p style="font-size:12px;color:var(--fg-3);line-height:1.5;margin-bottom:12px">
+      Browse to any folder on your phone. A link will be created inside the workspace — <b style="color:var(--fg-1)">the original folder is not modified</b>.
+    </p>
+
+    <!-- Breadcrumb -->
+    <div id="lfBreadcrumb" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:11px;font-family:monospace;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:8px;min-height:36px">
+      <span style="color:var(--fg-3)">/</span>
+    </div>
+
+    <!-- Folder list -->
+    <div id="lfList" style="max-height:280px;overflow-y:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px;margin-bottom:10px">
+      <div style="padding:16px;text-align:center;color:var(--fg-3);font-size:12px">Loading…</div>
+    </div>
+
+    <!-- Optional custom name + action -->
+    <label class="modal-label" style="margin-top:6px">Link name (optional)</label>
+    <input type="text" class="modal-input" id="lfNameInput" placeholder="Defaults to the folder name" style="margin-bottom:12px" />
+
+    <div style="display:flex;gap:8px">
+      <button class="btn" id="lfCancelBtn" style="flex:1;justify-content:center;padding:10px">Cancel</button>
+      <button class="btn primary" id="lfLinkBtn" style="flex:2;justify-content:center;padding:10px" disabled>
+        <i class="fas fa-link"></i> Link this folder
+      </button>
+    </div>
+
+    <p id="lfStatus" style="font-size:11px;color:var(--fg-3);margin-top:10px;line-height:1.5"></p>
+  </div>
+</div>
+
+<!-- API Key Wizard -->
 <div class="modal-overlay" id="apiKeyWizardModal">
   <div class="modal-box">
     <div class="modal-title">
@@ -724,6 +779,7 @@
   </div>
 </div>
 
+<!-- Context Menu -->
 <div class="ctx-menu" id="ctxMenu">
   <div class="ctx-title" id="ctxTitle">item</div>
   <div class="ctx-item" id="ctxOpen"><i class="fas fa-folder-open"></i> Open in Editor</div>
@@ -734,9 +790,12 @@
   <div class="ctx-item" id="ctxRename"><i class="fas fa-edit"></i> Rename</div>
   <div class="ctx-item" id="ctxCopyPath"><i class="fas fa-copy"></i> Copy path</div>
   <div class="ctx-item" id="ctxTerminalHere"><i class="fas fa-terminal"></i> Open terminal here</div>
+  <!-- NEW: shows only for linked folders -->
+  <div class="ctx-item" id="ctxUnlink" style="display:none"><i class="fas fa-unlink"></i> Unlink external folder</div>
   <div class="ctx-item danger" id="ctxDelete"><i class="fas fa-trash"></i> Delete</div>
 </div>
 
+<!-- Confirm -->
 <div class="confirm-overlay" id="confirmModal">
   <div class="confirm-box">
     <div class="confirm-title" id="confirmTitle">Are you sure?</div>
@@ -749,7 +808,7 @@
 </div>
 
 <script>
-console.log('[DS] boot v2.1');
+console.log('[DS] boot v2.2');
 
 /* ═══════════════════════════════════════════════════════════════════
    GLOBAL STATE
@@ -792,6 +851,13 @@ var isAITyping = false;
 var aiTypingEl = null;
 var newFilePrefix = '';
 
+/* NEW: external link state for the picker modal */
+var lfCurrentPath = '';
+var lfCurrentParent = null;
+var lfSelectedPath = '';
+var lfAllowedRoots = [];
+var linkIndex = {}; // name -> { target, broken } from /api/fs/links
+
 /* ═══════════════════════════════════════════════════════════════════
    AI PROVIDER
    ═══════════════════════════════════════════════════════════════════ */
@@ -827,6 +893,30 @@ function fsWrite(p, content) { return fetch(API + '/api/fs/write', { method: 'PO
 function fsDelete(p) { return fetch(API + '/api/fs/delete?path=' + encodeURIComponent(p), { method: 'DELETE' }).then(function(r) { return r.json(); }); }
 function fsRename(oldPath, newPath) { return fetch(API + '/api/fs/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPath: oldPath, newPath: newPath }) }).then(function(r) { return r.json(); }); }
 async function ghCall(endpoint, body) { var r = await fetch(API + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return r.json(); }
+
+/* ═══════════════════════════════════════════════════════════════════
+   LINKS API
+   ═══════════════════════════════════════════════════════════════════ */
+function loadLinkIndex() {
+  return fetch(API + '/api/fs/links').then(function(r) { return r.json(); }).then(function(data) {
+    linkIndex = {};
+    (data.links || []).forEach(function(l) {
+      linkIndex[l.name] = l;
+    });
+    return linkIndex;
+  }).catch(function() { return {}; });
+}
+function createLink(target, name) {
+  return fetch(API + '/api/fs/link', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target: target, name: name || undefined })
+  }).then(function(r) { return r.json(); });
+}
+function removeLink(name) {
+  return fetch(API + '/api/fs/link?name=' + encodeURIComponent(name), { method: 'DELETE' })
+    .then(function(r) { return r.json(); });
+}
 
 /* ═══════════════════════════════════════════════════════════════════
    DRAWERS / TABS
@@ -871,14 +961,19 @@ function showTabBadge(tabName, show) {
 /* ═══════════════════════════════════════════════════════════════════
    FILE TREE
    ═══════════════════════════════════════════════════════════════════ */
-function refreshTree() { treeCache = {}; loadTreeLevel(''); }
+function refreshTree() {
+  loadLinkIndex().then(function() {
+    treeCache = {};
+    loadTreeLevel('');
+  });
+}
 function loadTreeLevel(parentPath) { fsList(parentPath).then(function(items) { treeCache[parentPath] = items; renderTree(); }); }
 function renderTree() {
   var body = document.getElementById('ftBody');
   body.innerHTML = '';
   var rootItems = treeCache[''] || [];
   if (!rootItems.length) {
-    body.innerHTML = '<div class="ft-empty">Empty workspace<br><br>Use <b>Templates</b><br>or <b>Generate</b></div>';
+    body.innerHTML = '<div class="ft-empty">Empty workspace<br><br>Use <b>Templates</b>, <b>Generate</b>, or click the <b>🔗</b> button above to link a folder from your phone</div>';
     return;
   }
   renderItems(rootItems, 0, body);
@@ -889,14 +984,28 @@ function renderItems(items, depth, container) {
     var isExpanded = expandedFolders[it.path];
     div.className = 'tree-item' + (openFile === it.path ? ' active' : '');
     div.style.paddingLeft = (10 + depth * 14) + 'px';
+
     var chevronHtml = it.isDir
       ? '<i class="fas fa-chevron-right chevron' + (isExpanded ? ' open' : '') + '"></i>'
       : '<span class="chevron"></span>';
-    var iconClass = it.isDir ? (isExpanded ? 'fa-folder-open' : 'fa-folder') : getFileIcon(it.name);
-    var iconColor = fileIconColor(it.name, it.isDir);
-    var badgeHtml = '';
-    if (!it.isDir && modifiedFiles[it.path]) badgeHtml = '<span class="file-badge modified">M</span>';
-    div.innerHTML = chevronHtml + '<i class="fas ' + iconClass + ' tree-icon" style="' + iconColor + '"></i><span class="tree-name">' + it.name + '</span>' + badgeHtml;
+
+    // Icon: for linked folders use link icon
+    var iconClass;
+    if (it.isLink) iconClass = isExpanded ? 'fa-folder-open' : 'fa-folder';
+    else if (it.isDir) iconClass = isExpanded ? 'fa-folder-open' : 'fa-folder';
+    else iconClass = getFileIcon(it.name);
+    var iconColor = it.isLink ? 'color:#58a6ff' : fileIconColor(it.name, it.isDir);
+
+    var linkBadge = it.isLink
+      ? '<span class="file-badge link" title="Linked from ' + (linkIndex[it.name] ? linkIndex[it.name].target : 'external') + '" style="background:#1f6feb22;color:var(--blue)">🔗</span>'
+      : '';
+
+    var modBadge = '';
+    if (!it.isDir && modifiedFiles[it.path]) modBadge = '<span class="file-badge modified">M</span>';
+
+    div.innerHTML = chevronHtml + '<i class="fas ' + iconClass + ' tree-icon" style="' + iconColor + '"></i>' +
+                    '<span class="tree-name">' + it.name + '</span>' + linkBadge + modBadge;
+
     div.onclick = function() {
       if (it.isDir) {
         if (expandedFolders[it.path]) { delete expandedFolders[it.path]; renderTree(); }
@@ -950,6 +1059,185 @@ function fileIconColor(name, isDir) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   LINK FOLDER MODAL
+   ═══════════════════════════════════════════════════════════════════ */
+function openLinkFolderModal() {
+  lfSelectedPath = '';
+  lfCurrentPath = '';
+  lfCurrentParent = null;
+  document.getElementById('lfNameInput').value = '';
+  document.getElementById('lfStatus').textContent = '';
+  document.getElementById('lfLinkBtn').disabled = true;
+  document.getElementById('linkFolderModal').classList.add('active');
+  browseTo('');
+}
+function closeLinkFolderModal() {
+  document.getElementById('linkFolderModal').classList.remove('active');
+}
+function browseTo(p) {
+  var url = API + '/api/fs/browse' + (p ? '?path=' + encodeURIComponent(p) : '');
+  var list = document.getElementById('lfList');
+  list.innerHTML = '<div style="padding:16px;text-align:center;color:var(--fg-3);font-size:12px">Loading…</div>';
+  fetch(url).then(function(r) { return r.json(); }).then(function(data) {
+    if (data.error) {
+      list.innerHTML = '<div style="padding:16px;color:var(--red);font-size:12px">' + data.error + '</div>';
+      return;
+    }
+    if (data.roots) lfAllowedRoots = data.items.map(function(i) { return i.path; });
+    lfCurrentPath = data.path || '';
+    lfCurrentParent = data.parent;
+    renderBreadcrumb();
+    renderFolderList(data.items || [], data.roots);
+  }).catch(function(e) {
+    list.innerHTML = '<div style="padding:16px;color:var(--red);font-size:12px">Error: ' + e.message + '</div>';
+  });
+}
+function renderBreadcrumb() {
+  var bc = document.getElementById('lfBreadcrumb');
+  bc.innerHTML = '';
+  if (!lfCurrentPath) {
+    bc.innerHTML = '<span style="color:var(--fg-3)">Pick a starting location</span>';
+    return;
+  }
+  var parts = lfCurrentPath.split('/').filter(Boolean);
+  var acc = '';
+  parts.forEach(function(part, i) {
+    acc += '/' + part;
+    var span = document.createElement('span');
+    span.textContent = part;
+    span.style.cursor = 'pointer';
+    span.style.color = 'var(--blue)';
+    span.onclick = function() { browseTo(acc); };
+    bc.appendChild(span);
+    if (i < parts.length - 1) {
+      var sep = document.createElement('span');
+      sep.textContent = '/';
+      sep.style.color = 'var(--fg-4)';
+      bc.appendChild(sep);
+    }
+  });
+}
+function renderFolderList(items, isRoots) {
+  var list = document.getElementById('lfList');
+  list.innerHTML = '';
+
+  // "Use this folder" hint when inside a real path
+  if (!isRoots && lfCurrentPath) {
+    var useBtn = document.createElement('div');
+    useBtn.style.cssText = 'padding:10px 12px;background:#1f6feb22;border-radius:6px;margin:4px 0;cursor:pointer;font-size:12px;color:var(--blue);font-weight:600';
+    useBtn.innerHTML = '<i class="fas fa-check-circle"></i> Use this folder (' + (lfCurrentPath.split('/').pop() || lfCurrentPath) + ')';
+    useBtn.onclick = function() { selectFolder(lfCurrentPath); };
+    list.appendChild(useBtn);
+  }
+
+  if (!items.length) {
+    var empty = document.createElement('div');
+    empty.style.cssText = 'padding:16px;text-align:center;color:var(--fg-4);font-size:12px';
+    empty.textContent = 'No subfolders';
+    list.appendChild(empty);
+    return;
+  }
+
+  items.forEach(function(it) {
+    var row = document.createElement('div');
+    row.style.cssText = 'padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;border-radius:6px;font-size:13px';
+    row.onmouseenter = function() { row.style.background = 'var(--bg-3)'; };
+    row.onmouseleave = function() { row.style.background = 'transparent'; };
+    row.innerHTML = '<i class="fas fa-folder" style="color:var(--blue);width:16px"></i>' +
+                    '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + it.name + '</span>' +
+                    '<i class="fas fa-chevron-right" style="color:var(--fg-4);font-size:10px"></i>';
+    if (isRoots) {
+      row.title = it.path;
+    }
+    row.onclick = function() {
+      browseTo(it.path);
+    };
+    list.appendChild(row);
+  });
+}
+function selectFolder(path) {
+  lfSelectedPath = path;
+  var nameInput = document.getElementById('lfNameInput');
+  if (!nameInput.value) {
+    nameInput.placeholder = 'Defaults to "' + (path.split('/').pop() || 'link') + '"';
+  }
+  document.getElementById('lfLinkBtn').disabled = false;
+  document.getElementById('lfStatus').textContent = '📁 Selected: ' + path;
+  document.getElementById('lfStatus').style.color = 'var(--blue)';
+}
+function doCreateLink() {
+  if (!lfSelectedPath) { toast('Select a folder first', 'error'); return; }
+  var name = (document.getElementById('lfNameInput').value || '').trim();
+  var btn = document.getElementById('lfLinkBtn');
+  btn.disabled = true;
+  btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Linking…';
+  createLink(lfSelectedPath, name || undefined).then(function(r) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-link"></i> Link this folder';
+    if (r.ok) {
+      toast('Linked: ' + r.link.name, 'success');
+      closeLinkFolderModal();
+      refreshTree();
+      loadLinksList();
+    } else {
+      document.getElementById('lfStatus').textContent = '❌ ' + (r.error || 'Link failed');
+      document.getElementById('lfStatus').style.color = 'var(--red)';
+    }
+  }).catch(function(e) {
+    btn.disabled = false;
+    btn.innerHTML = '<i class="fas fa-link"></i> Link this folder';
+    document.getElementById('lfStatus').textContent = '❌ ' + e.message;
+    document.getElementById('lfStatus').style.color = 'var(--red)';
+  });
+}
+function loadLinksList() {
+  var el = document.getElementById('linksList');
+  if (!el) return;
+  fetch(API + '/api/fs/links').then(function(r) { return r.json(); }).then(function(data) {
+    var links = data.links || [];
+    if (!links.length) {
+      el.innerHTML = '<div style="color:var(--fg-4);font-size:11px;padding:6px">No external folders linked yet.</div>';
+      return;
+    }
+    el.innerHTML = '';
+    links.forEach(function(l) {
+      var row = document.createElement('div');
+      row.className = 'env-row';
+      row.style.alignItems = 'center';
+      var status = l.broken ? '⚠️' : (l.targetExists ? '✅' : '❌');
+      var bg = l.broken ? '#9e6a0322' : (l.targetExists ? '#23863622' : '#da363322');
+      row.style.background = bg;
+      row.style.padding = '6px 10px';
+      row.style.borderRadius = '6px';
+      row.innerHTML = '<span style="flex:1;font-size:11px;line-height:1.4;overflow:hidden">' +
+        '<b style="color:var(--fg-1)">' + status + ' ' + l.name + '</b><br>' +
+        '<span style="color:var(--fg-3);font-family:monospace;font-size:10px;word-break:break-all">' + l.target + '</span>' +
+      '</span>';
+      var btn = document.createElement('button');
+      btn.className = 'btn';
+      btn.style.cssText = 'padding:6px 10px;font-size:11px';
+      btn.innerHTML = '<i class="fas fa-unlink"></i>';
+      btn.title = 'Unlink (folder is preserved)';
+      btn.onclick = function() {
+        showConfirm('Unlink "' + l.name + '"?',
+          'The external folder is NOT deleted — only the link inside the workspace is removed.',
+          function() {
+            removeLink(l.name).then(function(r) {
+              if (r.ok) { toast('Unlinked', 'success'); refreshTree(); loadLinksList(); }
+              else toast(r.error || 'Unlink failed', 'error');
+              hideConfirm();
+            });
+          }, 'Unlink');
+      };
+      row.appendChild(btn);
+      el.appendChild(row);
+    });
+  }).catch(function() {
+    el.innerHTML = '<div style="color:var(--red);font-size:11px">Backend offline</div>';
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    CONTEXT MENU / CONFIRM
    ═══════════════════════════════════════════════════════════════════ */
 function showContextMenu(it, e) {
@@ -957,10 +1245,21 @@ function showContextMenu(it, e) {
   var m = document.getElementById('ctxMenu');
   document.getElementById('ctxTitle').textContent = it.name;
   document.getElementById('ctxBookmark').innerHTML = '<i class="' + (bookmarks.indexOf(it.path) >= 0 ? 'fas' : 'far') + ' fa-star"></i> ' + (bookmarks.indexOf(it.path) >= 0 ? 'Remove bookmark' : 'Bookmark');
+
+  // NEW: show unlink option only for linked folders
+  var unlinkEl = document.getElementById('ctxUnlink');
+  if (unlinkEl) {
+    if (it.isLink) {
+      unlinkEl.style.display = 'flex';
+    } else {
+      unlinkEl.style.display = 'none';
+    }
+  }
+
   var rect = (e && e.target && e.target.getBoundingClientRect) ? e.target.getBoundingClientRect() : { left: 20, top: 150, bottom: 200 };
   var left = Math.min(rect.left, window.innerWidth - 240);
   var top = rect.bottom + 5;
-  if (top + 420 > window.innerHeight - 10) top = Math.max(10, rect.top - 420);
+  if (top + 480 > window.innerHeight - 10) top = Math.max(10, rect.top - 480);
   m.style.left = Math.max(10, left) + 'px';
   m.style.top = top + 'px';
   m.classList.add('active');
@@ -982,6 +1281,7 @@ function hideConfirm() { document.getElementById('confirmModal').classList.remov
 function renameItem(item) {
   var newName = window.prompt('Rename to:', item.name);
   if (!newName || newName === item.name) { hideContextMenu(); return; }
+  if (item.isLink) { toast('Cannot rename a linked folder — unlink and re-link instead', 'warn'); hideContextMenu(); return; }
   var dir = item.path.split('/').slice(0, -1).join('/');
   var newPath = dir ? dir + '/' + newName : newName;
   fsRename(item.path, newPath).then(function(r) {
@@ -1199,7 +1499,8 @@ function loadWorkspaceSelector() {
     sel.innerHTML = '<option value="">-- select a project --</option>';
     dirs.forEach(function(d) {
       var opt = document.createElement('option');
-      opt.value = d.name; opt.textContent = d.name;
+      opt.value = d.name;
+      opt.textContent = d.name + (d.isLink ? '  🔗' : '');
       if (d.name === currentProject) opt.selected = true;
       sel.appendChild(opt);
     });
@@ -1220,7 +1521,7 @@ function loadWorkspaceSelector() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   TEMPLATES
+   TEMPLATES / GENERATOR / AI TOOLS
    ═══════════════════════════════════════════════════════════════════ */
 var TEMPLATES = [
   { id: 'kotlin-hello', name: 'Kotlin Hello World', desc: 'Gradle Kotlin JVM project',
@@ -1245,7 +1546,6 @@ var TEMPLATES = [
     files: { 'go.mod': 'module mygoapp\n\ngo 1.21\n', 'main.go': 'package main\n\nimport "fmt"\n\nfunc main() {\n    fmt.Println("Hello from Go!")\n}\n' }
   }
 ];
-
 function setupTemplates() {
   var list = document.getElementById('templatesList');
   if (!list) return;
@@ -1275,10 +1575,6 @@ function setupTemplates() {
     list.appendChild(btn);
   });
 }
-
-/* ═══════════════════════════════════════════════════════════════════
-   AI GENERATOR
-   ═══════════════════════════════════════════════════════════════════ */
 function setupGenerator() {
   var btn = document.getElementById('genBtn');
   if (!btn) return;
@@ -1334,13 +1630,13 @@ function setupGenerator() {
   };
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   AI TOOLS
-   ═══════════════════════════════════════════════════════════════════ */
+/* AI TOOLS — includes termux_toast + termux_open_url */
 var AI_TOOLS = [
   { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file. Paths are relative to project root.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
   { type: 'function', function: { name: 'apply_patch', description: 'Edit an existing file by finding the search string and replacing it with the replace string. Use this INSTEAD of write_file for ANY change to an existing file. Include 3-5 lines of surrounding context in the search string so it matches exactly once.', parameters: { type: 'object', properties: { path: { type: 'string' }, search: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'search', 'replace'] } } },
   { type: 'function', function: { name: 'notify', description: 'Send an Android notification. Call this AFTER any command that took more than about 60 seconds (builds, installs, test suites) so the user knows it finished.', parameters: { type: 'object', properties: { title: { type: 'string' }, message: { type: 'string' } }, required: ['message'] } } },
+  { type: 'function', function: { name: 'termux_toast', description: 'Show a quick Android toast popup (great for short status messages under 200 chars).', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } } },
+  { type: 'function', function: { name: 'termux_open_url', description: 'Open a URL in the Android default browser. Perfect for previewing web projects or opening documentation.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
   { type: 'function', function: { name: 'read_file', description: 'Read file contents', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
   { type: 'function', function: { name: 'list_files', description: 'List files in a directory', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
   { type: 'function', function: { name: 'create_folder', description: 'Create a new folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
@@ -1479,6 +1775,8 @@ function makeToolBubble(name, args) {
   if (name === 'write_file') argPreview = args.path || '';
   else if (name === 'apply_patch') argPreview = (args.path || '') + ' → ' + ((args.search || '').slice(0, 40).replace(/\n/g, ' '));
   else if (name === 'notify') argPreview = (args.message || '').slice(0, 60);
+  else if (name === 'termux_toast') argPreview = (args.message || '').slice(0, 60);
+  else if (name === 'termux_open_url') argPreview = (args.url || '').slice(0, 60);
   else if (['read_file','list_files','create_folder','delete_file'].indexOf(name) >= 0) argPreview = args.path || '';
   else if (name === 'run_command') argPreview = (args.command || '').slice(0, 60);
   else if (name === 'grep_search') argPreview = '"' + (args.pattern || '') + '"';
@@ -1551,7 +1849,9 @@ async function sendChat() {
     '- Use grep_search to find symbols and usages across the project - never run grep via run_command.\n' +
     '- Use find_files to locate files by name - never run find via run_command.\n' +
     '- Use run_command for installs, tests, builds, and running scripts. Set background=true for servers and watchers.\n' +
-    '- If a run_command takes longer than about 60 seconds (builds, installs), call notify with a short status afterwards.\n\n' +
+    '- Use termux_open_url to open URLs in the phone browser (e.g. after starting a dev server, to preview it).\n' +
+    '- Use termux_toast for quick status messages under 200 chars.\n' +
+    '- Use notify for important long-running events (>60s).\n\n' +
     '## Boundaries\n' +
     '- Never modify files outside "' + currentProject + '/".\n' +
     '- Do NOT touch node_modules, .git, build, .dart_tool, dist, .next.\n' +
@@ -1684,13 +1984,8 @@ function loadMonaco() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   TERMINAL — v2.1 with corrected CDN + fallback chain
+   TERMINAL
    ═══════════════════════════════════════════════════════════════════ */
-
-/**
- * Load a script with a promise, resolving the global name once loaded.
- * Returns: { src, globalName, instance } or null if it failed.
- */
 function loadScript(src) {
   return new Promise(function(resolve, reject) {
     var s = document.createElement('script');
@@ -1701,8 +1996,6 @@ function loadScript(src) {
     document.head.appendChild(s);
   });
 }
-
-/** Try each source in order; return the first that loads. Reject if all fail. */
 function loadScriptFromAny(sources) {
   var i = 0;
   function attempt() {
@@ -1715,54 +2008,32 @@ function loadScriptFromAny(sources) {
 
 function initTerminal() {
   var CDN = 'https://cdn.jsdelivr.net/npm/';
-
-  // ── Core library: try @xterm/xterm (current) then xterm (deprecated fallback) ──
   var CORE_SOURCES = [
     CDN + '@xterm/xterm@5.5.0/lib/xterm.min.js',
     CDN + '@xterm/xterm@5.5.0/lib/xterm.js',
-    CDN + 'xterm@5.3.0/lib/xterm.js'   // legacy fallback
+    CDN + 'xterm@5.3.0/lib/xterm.js'
   ];
-
-  // ── Addons: each has a primary + fallback URL ──
   var ADDONS = [
-    { key: 'fit',       globalName: 'FitAddon',
-      urls: [CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.min.js', CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.js', CDN + 'xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js'] },
-    { key: 'webLinks',  globalName: 'WebLinksAddon',
-      urls: [CDN + '@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js', CDN + '@xterm/addon-web-links@0.11.0/lib/addon-web-links.js'] },
-    { key: 'search',    globalName: 'SearchAddon',
-      urls: [CDN + '@xterm/addon-search@0.15.0/lib/addon-search.min.js', CDN + '@xterm/addon-search@0.15.0/lib/addon-search.js'] },
-    { key: 'unicode11', globalName: 'Unicode11Addon',
-      urls: [CDN + '@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.min.js', CDN + '@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.js'] },
-    { key: 'webgl',     globalName: 'WebglAddon',
-      urls: [CDN + '@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js', CDN + '@xterm/addon-webgl@0.18.0/lib/addon-webgl.js'] },
-    { key: 'serialize', globalName: 'SerializeAddon',
-      urls: [CDN + '@xterm/addon-serialize@0.13.0/lib/addon-serialize.min.js', CDN + '@xterm/addon-serialize@0.13.0/lib/addon-serialize.js'] }
+    { key: 'fit', urls: [CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.min.js', CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.js', CDN + 'xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js'] },
+    { key: 'webLinks', urls: [CDN + '@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js', CDN + '@xterm/addon-web-links@0.11.0/lib/addon-web-links.js'] },
+    { key: 'search', urls: [CDN + '@xterm/addon-search@0.15.0/lib/addon-search.min.js', CDN + '@xterm/addon-search@0.15.0/lib/addon-search.js'] },
+    { key: 'unicode11', urls: [CDN + '@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.min.js', CDN + '@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.js'] },
+    { key: 'webgl', urls: [CDN + '@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js', CDN + '@xterm/addon-webgl@0.18.0/lib/addon-webgl.js'] },
+    { key: 'serialize', urls: [CDN + '@xterm/addon-serialize@0.13.0/lib/addon-serialize.min.js', CDN + '@xterm/addon-serialize@0.13.0/lib/addon-serialize.js'] }
   ];
-
   console.log('[term] loading core from CDN…');
   loadScriptFromAny(CORE_SOURCES).then(function(loadedCoreSrc) {
     console.log('[term] core loaded:', loadedCoreSrc);
-
-    // Verify the global exists
-    if (typeof Terminal === 'undefined') {
-      throw new Error('Core loaded but `Terminal` global is missing');
-    }
-
-    // Load addons in parallel (each independently, ignoring failures)
+    if (typeof Terminal === 'undefined') throw new Error('Core loaded but `Terminal` global is missing');
     return Promise.all(ADDONS.map(function(a) {
-      return loadScriptFromAny(a.urls)
-        .then(function(src) { return { key: a.key, globalName: a.globalName, src: src }; })
-        .catch(function(err) {
-          console.warn('[term] addon failed:', a.key, err.message);
-          return null;
-        });
+      return loadScriptFromAny(a.urls).then(function(src) { return { key: a.key, src: src }; })
+        .catch(function(err) { console.warn('[term] addon failed:', a.key, err.message); return null; });
     }));
   }).then(function(loaded) {
     var ok = {};
     loaded.forEach(function(a) { if (a) ok[a.key] = a; });
     console.log('[term] addons loaded:', Object.keys(ok).join(', ') || 'none');
 
-    // Build terminal
     term = new Terminal({
       cursorBlink: true,
       fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
@@ -1776,33 +2047,25 @@ function initTerminal() {
     });
 
     if (ok.fit && window.FitAddon) {
-      try { var fit = new FitAddon.FitAddon(); term.loadAddon(fit); termAddons.fit = fit; }
-      catch (e) { console.warn('[term] fit load failed', e); }
+      try { var fit = new FitAddon.FitAddon(); term.loadAddon(fit); termAddons.fit = fit; } catch (e) {}
     }
     if (ok.webLinks && window.WebLinksAddon) {
-      try { var wl = new WebLinksAddon.WebLinksAddon(); term.loadAddon(wl); termAddons.webLinks = wl; }
-      catch (e) { console.warn('[term] webLinks load failed', e); }
+      try { var wl = new WebLinksAddon.WebLinksAddon(); term.loadAddon(wl); termAddons.webLinks = wl; } catch (e) {}
     }
     if (ok.search && window.SearchAddon) {
-      try { var search = new SearchAddon.SearchAddon(); term.loadAddon(search); termAddons.search = search; }
-      catch (e) { console.warn('[term] search load failed', e); }
+      try { var search = new SearchAddon.SearchAddon(); term.loadAddon(search); termAddons.search = search; } catch (e) {}
     }
     if (ok.unicode11 && window.Unicode11Addon) {
-      try {
-        term.loadAddon(new Unicode11Addon.Unicode11Addon());
-        term.unicode.activeVersion = '11';
-      } catch (e) { console.warn('[term] unicode11 activate failed', e); }
+      try { term.loadAddon(new Unicode11Addon.Unicode11Addon()); term.unicode.activeVersion = '11'; } catch (e) {}
     }
     if (ok.serialize && window.SerializeAddon) {
-      try { var sz = new SerializeAddon.SerializeAddon(); term.loadAddon(sz); termAddons.serialize = sz; }
-      catch (e) { console.warn('[term] serialize load failed', e); }
+      try { var sz = new SerializeAddon.SerializeAddon(); term.loadAddon(sz); termAddons.serialize = sz; } catch (e) {}
     }
 
     var host = document.getElementById('terminal');
     if (!host) throw new Error('No #terminal host element');
     term.open(host);
 
-    // WebGL — must load AFTER open() and with fallback
     if (termWebgl && ok.webgl && window.WebglAddon) {
       try {
         var webgl = new WebglAddon.WebglAddon();
@@ -1813,14 +2076,11 @@ function initTerminal() {
         });
         term.loadAddon(webgl);
         termAddons.webgl = webgl;
-      } catch (e) {
-        console.warn('[term] WebGL addon load failed:', e.message);
-      }
+      } catch (e) { console.warn('[term] WebGL addon load failed:', e.message); }
     }
 
     setTimeout(function() { try { termAddons.fit && termAddons.fit.fit(); } catch (e) {} }, 300);
 
-    // Connect WebSocket
     var wsUrl = 'ws://' + location.hostname + ':3001/pty';
     try { ws = new WebSocket(wsUrl); }
     catch (e) { ws = new WebSocket('ws://127.0.0.1:3001/pty'); }
@@ -1858,26 +2118,18 @@ function initTerminal() {
     console.error('[term] init failed:', e);
     var el = document.getElementById('terminal');
     if (el) {
-      el.innerHTML =
-        '<div style="padding:20px;color:var(--red);font-family:monospace;font-size:12px;line-height:1.6">' +
+      el.innerHTML = '<div style="padding:20px;color:var(--red);font-family:monospace;font-size:12px;line-height:1.6">' +
         '<b>Terminal failed to load</b><br>' + String(e.message || e) + '<br><br>' +
-        '<span style="color:var(--fg-3)">Check your internet connection and try a hard reload (Ctrl+Shift+R).<br>' +
-        'If it persists, the CDN may be blocked — the rest of the app still works.</span>' +
-        '</div>';
+        '<span style="color:var(--fg-3)">Check your internet connection and try a hard reload (Ctrl+Shift+R).</span></div>';
     }
   });
 }
-
 function updateTermInfo(text, online) {
   var t = document.getElementById('termInfoText');
   var p = document.getElementById('termPulse');
   if (t) t.textContent = text;
   if (p) p.style.background = online ? 'var(--green)' : 'var(--red)';
 }
-
-/* ═══════════════════════════════════════════════════════════════════
-   TERMINAL SEARCH
-   ═══════════════════════════════════════════════════════════════════ */
 function setupTerminalSearch() {
   var bar = document.getElementById('termSearchBar');
   var btn = document.getElementById('termSearchBtn');
@@ -1888,26 +2140,12 @@ function setupTerminalSearch() {
   var caseChk = document.getElementById('termSearchCase');
   var regexChk = document.getElementById('termSearchRegex');
   if (!btn || !bar) return;
-
-  function openSearch() {
-    bar.classList.add('active');
-    setTimeout(function() { input.focus(); input.select(); }, 50);
-  }
-  function closeSearch() {
-    bar.classList.remove('active');
-    if (termAddons.search) { try { termAddons.search.clearDecorations(); } catch (e) {} }
-    if (term) term.focus();
-  }
-  function opts() {
-    return { caseSensitive: caseChk.checked, regex: regexChk.checked, incremental: true };
-  }
+  function openSearch() { bar.classList.add('active'); setTimeout(function() { input.focus(); input.select(); }, 50); }
+  function closeSearch() { bar.classList.remove('active'); if (termAddons.search) { try { termAddons.search.clearDecorations(); } catch (e) {} } if (term) term.focus(); }
+  function opts() { return { caseSensitive: caseChk.checked, regex: regexChk.checked, incremental: true }; }
   function findNext() { if (termAddons.search && input.value) termAddons.search.findNext(input.value, opts()); }
   function findPrev() { if (termAddons.search && input.value) termAddons.search.findPrevious(input.value, opts()); }
-
-  btn.onclick = function() {
-    if (bar.classList.contains('active')) closeSearch();
-    else openSearch();
-  };
+  btn.onclick = function() { if (bar.classList.contains('active')) closeSearch(); else openSearch(); };
   close.onclick = closeSearch;
   input.oninput = findNext;
   input.onkeydown = function(e) {
@@ -1920,10 +2158,6 @@ function setupTerminalSearch() {
   caseChk.onchange = findNext;
   regexChk.onchange = findNext;
 }
-
-/* ═══════════════════════════════════════════════════════════════════
-   TERMINAL HELPERS
-   ═══════════════════════════════════════════════════════════════════ */
 function sendToTerminal(cmd, silent) {
   if (!term) { toast('Terminal not ready', 'error'); return; }
   switchPrimaryPanel('terminal');
@@ -1936,9 +2170,7 @@ function sendToTerminal(cmd, silent) {
       localStorage.setItem('ds_cmd_history', JSON.stringify(cmdHistory));
       renderCmdHistory();
     }
-  } else {
-    toast('Terminal disconnected', 'error');
-  }
+  } else { toast('Terminal disconnected', 'error'); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1949,7 +2181,6 @@ function checkBackend() {
   var txt = document.getElementById('statusText');
   var bs = document.getElementById('backendStatus');
   var banner = document.getElementById('offlineBanner');
-
   if (!navigator.onLine) {
     dot.className = 'dot offline';
     txt.textContent = 'Offline';
@@ -1957,7 +2188,6 @@ function checkBackend() {
     banner.classList.add('active');
     return;
   }
-
   fetch(API + '/api/version').then(function(r) { return r.json(); }).then(function(d) {
     dot.className = 'dot on';
     txt.textContent = 'Online';
@@ -1982,7 +2212,8 @@ function renderLibsStatus(libs) {
     'simple-git': 'Git (simple-git)',
     '@octokit/rest': 'GitHub (Octokit)',
     'node-pty': 'Real PTY',
-    'editkit': 'Fuzzy patches'
+    'editkit': 'Fuzzy patches',
+    'termux-api': 'Termux API'
   };
   var html = '<div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">';
   Object.keys(labels).forEach(function(k) {
@@ -2014,14 +2245,14 @@ function setupSideTabs() {
       if (t === 'backup') refreshBackupList();
       if (t === 'deploy') { checkToolchain(); loadKeystores(); loadProjectsForDeploy(); refreshArtifacts(); }
       if (t === 'github' && window.refreshAllGitState) window.refreshAllGitState();
-      if (t === 'settings') refreshLicenseStatus();
+      if (t === 'settings') { refreshLicenseStatus(); loadLinksList(); }
       if (t === 'term') { renderQuickCommands(); renderEnvVars(); renderCmdHistory(); }
     };
   });
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   QUICK COMMANDS
+   QUICK COMMANDS / ENV VARS / PROCESSES
    ═══════════════════════════════════════════════════════════════════ */
 var QUICK_COMMANDS = [
   { icon: 'fa-search', cmd: null, label: 'Find in terminal', action: function() {
@@ -2057,10 +2288,6 @@ function renderQuickCommands() {
     list.appendChild(div);
   });
 }
-
-/* ═══════════════════════════════════════════════════════════════════
-   ENV VARS / CMD HISTORY / PROCESSES
-   ═══════════════════════════════════════════════════════════════════ */
 function renderEnvVars() {
   var list = document.getElementById('envVarsList');
   if (!list) return;
@@ -2138,7 +2365,6 @@ function setupGithub() {
   }
   function refreshAllGitState() {
     if (!currentProject) return;
-
     ghCall('/api/git/status/detailed', { cwd: currentProject }).then(function(r) {
       var list = document.getElementById('ghChangesList');
       if (!r.files || !r.files.length) { list.innerHTML = '<div class="git-empty">✓ Working tree clean</div>'; return; }
@@ -2148,7 +2374,6 @@ function setupGithub() {
         return '<div class="git-change-row"><span class="git-status-code" style="color:' + color + '">' + st + '</span><span class="git-path">' + f.path + '</span></div>';
       }).join('');
     }).catch(function() {});
-
     ghCall('/api/git/branches', { cwd: currentProject }).then(function(r) {
       var list = document.getElementById('ghBranchList');
       if (!r.branches || !r.branches.length) { list.innerHTML = 'No branches'; return; }
@@ -2157,7 +2382,6 @@ function setupGithub() {
       }).join('');
       document.getElementById('ghBranchInfo').textContent = 'Branch: ' + (r.current || '-');
     }).catch(function() {});
-
     ghCall('/api/git/log/detailed', { cwd: currentProject, limit: 20 }).then(function(r) {
       var list = document.getElementById('ghLogList');
       if (!r.commits || !r.commits.length) { list.innerHTML = 'No commits'; return; }
@@ -2167,11 +2391,9 @@ function setupGithub() {
         return '<div style="padding:8px 0;border-bottom:1px solid var(--border-2)">' +
           '<div style="color:var(--blue);font-family:monospace;font-size:10px">' + String(c.hash || '').slice(0, 7) + ' · ' + date + '</div>' +
           '<div style="color:var(--fg-1);font-size:12px;margin:3px 0">' + msg + '</div>' +
-          '<div style="color:var(--fg-3);font-size:10px">by ' + (c.author || '?') + '</div>' +
-        '</div>';
+          '<div style="color:var(--fg-3);font-size:10px">by ' + (c.author || '?') + '</div></div>';
       }).join('');
     }).catch(function() {});
-
     ghCall('/api/git/status', { cwd: currentProject }).then(function(r) {
       var el = document.getElementById('ghRepoInfo');
       el.textContent = r.isRepo ? (r.remote || '(no remote set)') : 'Not a git repo';
@@ -2190,7 +2412,6 @@ function setupGithub() {
       })
       .catch(function() { localStorage.setItem('gh_token', token); toast('Saved locally', 'info'); });
   };
-
   document.getElementById('ghSaveIdentity').onclick = function() {
     var n = document.getElementById('ghName').value.trim();
     var e = document.getElementById('ghEmail').value.trim();
@@ -2200,7 +2421,6 @@ function setupGithub() {
       toast(r.code === 0 ? 'Identity saved' : 'Failed', r.code === 0 ? 'success' : 'error');
     });
   };
-
   document.getElementById('ghCloneBtn').onclick = async function() {
     var url = document.getElementById('ghCloneUrl').value.trim();
     if (!url) { toast('URL required', 'error'); return; }
@@ -2210,7 +2430,6 @@ function setupGithub() {
     if (r.code === 0) { toast('Cloned into ' + r.dir, 'success'); refreshTree(); loadWorkspaceSelector(); setCurrentProject(r.dir); }
     else toast('Clone failed', 'error');
   };
-
   document.getElementById('ghCreateBranchBtn').onclick = async function() {
     if (!currentProject) { toast('Select a project first', 'error'); return; }
     var name = document.getElementById('ghNewBranchName').value.trim();
@@ -2362,7 +2581,7 @@ function setupGithub() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   DEPLOY / BACKUP / LICENSE / PWA / WIZARD
+   DEPLOY / BACKUP / LICENSE / PWA
    ═══════════════════════════════════════════════════════════════════ */
 async function checkToolchain() {
   var statusEl = document.getElementById('toolchainStatus');
@@ -2534,7 +2753,7 @@ async function refreshBackupList() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
-   API KEY WIZARD
+   API KEY WIZARD / PWA
    ═══════════════════════════════════════════════════════════════════ */
 function openApiKeyWizard() {
   document.getElementById('wizKeyInput').value = localStorage.getItem('ds_key') || '';
@@ -2561,10 +2780,6 @@ async function verifyAndSaveWizardKey() {
     } else { statusEl.textContent = '❌ Rejected (status ' + r.status + ')'; statusEl.className = 'wizard-status err'; }
   } catch (e) { statusEl.textContent = '❌ Network error: ' + e.message; statusEl.className = 'wizard-status err'; }
 }
-
-/* ═══════════════════════════════════════════════════════════════════
-   PWA
-   ═══════════════════════════════════════════════════════════════════ */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('/sw.js').catch(function() {}); });
 }
@@ -2651,13 +2866,46 @@ function setupContextMenu() {
     var dir = item.isDir ? item.path : item.path.split('/').slice(0, -1).join('/');
     sendToTerminal('cd ~/deepseek-projects/' + (dir ? dir : ''));
   };
+
+  // NEW: unlink handler
+  document.getElementById('ctxUnlink').onclick = function() {
+    if (!ctxItem || !ctxItem.isLink) return;
+    var item = ctxItem; hideContextMenu();
+    showConfirm('Unlink "' + item.name + '"?',
+      'The external folder is NOT deleted — only the link inside the workspace is removed.',
+      function() {
+        removeLink(item.name).then(function(r) {
+          if (r.ok) { toast('Unlinked', 'success'); refreshTree(); loadLinksList(); }
+          else toast(r.error || 'Unlink failed', 'error');
+          hideConfirm();
+        });
+      }, 'Unlink');
+  };
+
   document.getElementById('ctxDelete').onclick = function() {
     if (!ctxItem) return;
     var item = ctxItem; hideContextMenu();
+
+    // Guard: refuse to delete a linked folder — unlink instead
+    if (item.isLink) {
+      showConfirm('Delete linked folder "' + item.name + '"?',
+        'This is a linked external folder. The original files will NOT be deleted — only the link will be removed.',
+        function() {
+          removeLink(item.name).then(function(r) {
+            if (r.ok) { toast('Link removed (files preserved)', 'success'); refreshTree(); loadLinksList(); }
+            else toast(r.error || 'Failed', 'error');
+            hideConfirm();
+          });
+        }, 'Unlink');
+      return;
+    }
+
     showConfirm('Delete "' + item.name + '"?', 'Cannot be undone.', function() {
       fsDelete(item.path).then(function(r) {
         if (r.ok) { toast('Deleted', 'success'); delete treeCache[item.path]; refreshTree(); }
-        else toast('Delete failed', 'error');
+        else if (r.requiresUnlink) {
+          toast('Use "Unlink" instead — this is an external folder', 'warn');
+        } else toast('Delete failed', 'error');
         hideConfirm();
       });
     }, 'Delete');
@@ -2763,6 +3011,7 @@ function bindHeaderButtons() {
   var cB = document.getElementById('compileBtn');
   var nb = document.getElementById('newFileBtn');
   var rtb = document.getElementById('refreshTreeBtn');
+  var lfb = document.getElementById('linkFolderBtn');
   var saveBtn = document.getElementById('saveBtn');
   var aI = document.getElementById('aiInput');
   var aiSend = document.getElementById('aiSendBtn');
@@ -2782,8 +3031,19 @@ function bindHeaderButtons() {
   if (cB) cB.onclick = compileCurrent;
   if (nb) nb.onclick = function() { openNewFileModal(''); };
   if (rtb) rtb.onclick = refreshTree;
+  if (lfb) lfb.onclick = openLinkFolderModal;
   if (saveBtn) saveBtn.onclick = saveFile;
   if (aiSend) aiSend.onclick = sendChat;
+
+  // Link folder modal buttons
+  var lfCancel = document.getElementById('lfCancelBtn');
+  var lfLink = document.getElementById('lfLinkBtn');
+  if (lfCancel) lfCancel.onclick = closeLinkFolderModal;
+  if (lfLink) lfLink.onclick = doCreateLink;
+
+  // Settings link button
+  var slfb = document.getElementById('settingsLinkFolderBtn');
+  if (slfb) slfb.onclick = openLinkFolderModal;
 
   var aSA = document.getElementById('actSaveAs');
   var aRL = document.getElementById('actReload');
@@ -3085,7 +3345,7 @@ async function compileCurrent() {
    START
    ═══════════════════════════════════════════════════════════════════ */
 function start() {
-  console.log('[DS] starting app v2.1');
+  console.log('[DS] starting app v2.2');
   isMobile = window.innerWidth <= 900;
 
   try { bindHeaderButtons(); } catch (e) { console.log('bindHeaderButtons fail', e); }
@@ -3108,6 +3368,7 @@ function start() {
   try { renderEditorTabs(); } catch (e) { console.log('renderEditorTabs fail', e); }
   try { updateChatWarn(); } catch (e) {}
   try { updateCtxIndicator(); } catch (e) {}
+  try { loadLinksList(); } catch (e) {}
   if (currentProject) setCurrentProject(currentProject);
 
   setTimeout(function() {
@@ -3119,6 +3380,7 @@ function start() {
     try { renderQuickCommands(); } catch (e) {}
     try { renderEnvVars(); } catch (e) {}
     try { renderCmdHistory(); } catch (e) {}
+    try { loadLinksList(); } catch (e) {}
   }, 2000);
 
   console.log('[DS] all setup done');
