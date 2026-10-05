@@ -12,7 +12,8 @@
 <link rel="icon" type="image/svg+xml" href="/icon-v2.svg" />
 <link rel="apple-touch-icon" href="/icon-v2.svg" />
 <title>DeepSeek Studio</title>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+<!-- ✅ FIXED: @xterm/xterm is the current scoped package -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 <link rel="stylesheet" href="/app.css" />
 </head>
@@ -33,7 +34,7 @@
       <span class="dot checking" id="statusDot"></span>
       <span id="statusText" class="label">...</span>
     </div>
-    <span id="langBadge" style="font-size:10px;color:var(--fg-3);padding:3px 8px;border-radius:10px;background:var(--bg-3);display:none"></span>
+    <span id="langBadge" class="lang-badge" style="display:none"></span>
     <button class="btn primary icon-only" id="saveBtn" title="Save (Ctrl+S)">
       <i class="fas fa-save"></i>
     </button>
@@ -46,7 +47,6 @@
   </div>
 </div>
 
-<!-- OFFLINE BANNER -->
 <div class="offline-banner" id="offlineBanner">
   <i class="fas fa-wifi"></i> You're offline — backend not reachable
 </div>
@@ -56,7 +56,6 @@
 <!-- ═══════════ MAIN ═══════════ -->
 <div class="main">
 
-  <!-- FILE TREE -->
   <div class="file-tree" id="fileTree">
     <div class="ft-head">
       <span>Projects</span>
@@ -72,7 +71,6 @@
     <div class="ft-body" id="ftBody"></div>
   </div>
 
-  <!-- CONTENT -->
   <div class="content-area">
 
     <div class="primary-tabs">
@@ -81,7 +79,7 @@
       <div class="ptab" data-panel="terminal"><i class="fas fa-terminal"></i> Terminal <span class="tab-badge" id="terminalBadge"></span></div>
     </div>
 
-    <!-- ═══════════ CHAT PANEL ═══════════ -->
+    <!-- CHAT PANEL -->
     <div class="tab-panel active" id="panel-chat">
       <div class="chat-header">
         <label><i class="fas fa-folder-open"></i> Working in:</label>
@@ -121,7 +119,7 @@
       </div>
     </div>
 
-    <!-- ═══════════ EDITOR PANEL ═══════════ -->
+    <!-- EDITOR PANEL -->
     <div class="tab-panel" id="panel-editor">
       <div class="editor-tabs-bar" id="editorTabsBar" style="display:none"></div>
       <div id="monaco">
@@ -129,18 +127,32 @@
           <i class="fas fa-file-code"></i>
           <div class="title">No file open</div>
           <div class="hint">Tap a file in the tree to open it here</div>
-          <div class="hint" style="margin-top:8px">or type <code style="background:var(--bg-2);padding:2px 6px;border-radius:3px">/</code> in chat for AI snippets</div>
+          <div class="hint" style="margin-top:8px">or type <code> / </code> in chat for AI snippets</div>
         </div>
       </div>
     </div>
 
-    <!-- ═══════════ TERMINAL PANEL ═══════════ -->
+    <!-- TERMINAL PANEL -->
     <div class="tab-panel" id="panel-terminal">
       <div id="terminal-container">
         <div class="terminal-toolbar">
           <button class="tbtn" id="termClearBtn" title="Clear screen"><i class="fas fa-eraser"></i> Clear</button>
           <button class="tbtn" id="termCopyBtn" title="Copy all"><i class="fas fa-copy"></i></button>
           <button class="tbtn" id="termPasteBtn" title="Paste"><i class="fas fa-paste"></i></button>
+          <div class="sep"></div>
+          <button class="tbtn" id="termSearchBtn" title="Find (Ctrl+F)"><i class="fas fa-search"></i></button>
+          <div class="term-search-bar" id="termSearchBar">
+            <input id="termSearchInput" type="text" placeholder="Find…" autocomplete="off" spellcheck="false" />
+            <button class="tsb-btn" id="termSearchPrev" title="Previous (Shift+Enter)"><i class="fas fa-chevron-up"></i></button>
+            <button class="tsb-btn" id="termSearchNext" title="Next (Enter)"><i class="fas fa-chevron-down"></i></button>
+            <label class="tsb-opt" title="Case sensitive">
+              <input type="checkbox" id="termSearchCase" /> Aa
+            </label>
+            <label class="tsb-opt" title="Regex">
+              <input type="checkbox" id="termSearchRegex" /> .*
+            </label>
+            <button class="tsb-btn" id="termSearchClose" title="Close (Esc)"><i class="fas fa-times"></i></button>
+          </div>
           <div class="sep"></div>
           <button class="tbtn" id="termCtrlCBtn" title="Send Ctrl+C"><i class="fas fa-stop-circle"></i></button>
           <button class="tbtn" id="termCtrlDBtn" title="Send Ctrl+D"><i class="fas fa-sign-out-alt"></i></button>
@@ -160,7 +172,7 @@
 
   </div>
 
-  <!-- ═══════════ SIDEBAR ═══════════ -->
+  <!-- SIDEBAR -->
   <div class="sidebar" id="sidebar">
     <div class="side-tabs">
       <div class="stab active" data-tab="ai"><i class="fas fa-robot"></i><span>AI</span></div>
@@ -255,7 +267,7 @@
         <div id="genProgress" style="margin-top:12px;font-size:12px;color:var(--fg-3);line-height:1.6"></div>
       </div>
 
-      <!-- TERMINAL PANEL (sidebar) -->
+      <!-- TERMINAL SIDEBAR -->
       <div class="panel" id="panel-term">
         <h3 style="font-size:14px;margin-bottom:12px;color:var(--fg-0)">
           <i class="fas fa-bolt"></i> Quick Commands
@@ -303,7 +315,7 @@
         </div>
       </div>
 
-      <!-- GITHUB -->
+      <!-- GITHUB PANEL -->
       <div class="panel" id="panel-github">
         <div class="settings-section">
           <h3><i class="fab fa-github"></i> Git Identity</h3>
@@ -315,6 +327,10 @@
           <h3><i class="fas fa-key"></i> GitHub Token</h3>
           <input type="password" id="ghToken" placeholder="ghp_..." style="margin-bottom:10px" />
           <button class="btn" id="ghSaveToken" style="width:100%;justify-content:center;padding:10px">Save Token</button>
+          <p style="font-size:11px;color:var(--fg-3);margin-top:8px;line-height:1.5">
+            <i class="fas fa-lock" style="color:var(--green)"></i>
+            Token is stored server-side in <code>~/.deepseek-secrets.json</code> (mode 0600) and never appears in git config or process args.
+          </p>
         </div>
         <div class="settings-section">
           <h3><i class="fas fa-code-branch"></i> Repository</h3>
@@ -340,7 +356,7 @@
         </div>
         <div class="settings-section">
           <h3><i class="fas fa-edit"></i> Changes</h3>
-          <div id="ghChangesList" style="font-size:11px;max-height:220px;overflow-y:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-sm);padding:10px;margin-bottom:10px">No changes</div>
+          <div id="ghChangesList" class="git-changes-list">No changes</div>
           <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
             <button class="btn" id="ghAddAllBtn" style="justify-content:center;padding:10px">Stage All</button>
             <button class="btn" id="ghResetAllBtn" style="justify-content:center;padding:10px">Unstage All</button>
@@ -404,7 +420,7 @@
         </div>
       </div>
 
-      <!-- DEPLOY -->
+      <!-- DEPLOY PANEL -->
       <div class="panel" id="panel-deploy">
         <div class="settings-section">
           <h3><i class="fas fa-rocket"></i> Build Android App</h3>
@@ -456,7 +472,7 @@
         </div>
       </div>
 
-      <!-- BACKUP -->
+      <!-- BACKUP PANEL -->
       <div class="panel" id="panel-backup">
         <div class="settings-section">
           <h3><i class="fas fa-hdd"></i> SD Card Backup</h3>
@@ -473,7 +489,7 @@
         </div>
       </div>
 
-      <!-- SETTINGS -->
+      <!-- SETTINGS PANEL -->
       <div class="panel" id="panel-settings">
         <div class="settings-section">
           <h3>AI Provider</h3>
@@ -577,15 +593,20 @@
           <p id="licenseStatus" style="font-size:11px;margin-top:10px;color:var(--fg-3)">Checking…</p>
         </div>
         <div class="settings-section">
-          <h3>Backend</h3>
+          <h3><i class="fas fa-server"></i> Backend</h3>
           <p id="backendStatus" style="color:var(--red)">Checking…</p>
           <p id="backendVersion" style="color:var(--fg-3);font-size:11px;margin-top:4px"></p>
+          <div id="libsStatus" class="libs-status"></div>
         </div>
         <div class="settings-section">
           <h3>Terminal</h3>
           <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
             <input type="checkbox" id="termAutoScrollToggle" style="width:auto" checked />
             Auto-scroll to bottom
+          </label>
+          <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
+            <input type="checkbox" id="termWebglToggle" style="width:auto" checked />
+            Use GPU renderer (WebGL)
           </label>
         </div>
         <div class="settings-section">
@@ -623,9 +644,7 @@
   </div>
 </div>
 
-<!-- ═══════════ MODALS ═══════════ -->
-
-<!-- New File Modal -->
+<!-- MODALS -->
 <div class="modal-overlay" id="newFileModal">
   <div class="modal-box">
     <div class="modal-title">Create new file</div>
@@ -639,18 +658,15 @@
   </div>
 </div>
 
-<!-- API Key Wizard -->
 <div class="modal-overlay" id="apiKeyWizardModal">
   <div class="modal-box">
     <div class="modal-title">
       <i class="fas fa-key" style="color:var(--yellow)"></i>
       Get a DeepSeek API Key
     </div>
-
     <p style="font-size:12px;color:var(--fg-3);margin-bottom:16px;line-height:1.5">
       DeepSeek charges per token used — no subscription. <strong style="color:var(--fg-1)">$5 typically covers weeks of coding.</strong>
     </p>
-
     <div class="wizard-step" id="wizStep1">
       <div class="wizard-num">1</div>
       <div class="wizard-body">
@@ -661,7 +677,6 @@
         </button>
       </div>
     </div>
-
     <div class="wizard-step" id="wizStep2">
       <div class="wizard-num">2</div>
       <div class="wizard-body">
@@ -672,7 +687,6 @@
         </button>
       </div>
     </div>
-
     <div class="wizard-step" id="wizStep3">
       <div class="wizard-num">3</div>
       <div class="wizard-body">
@@ -683,7 +697,6 @@
         </button>
       </div>
     </div>
-
     <div class="wizard-step" id="wizStep4">
       <div class="wizard-num">4</div>
       <div class="wizard-body">
@@ -704,7 +717,6 @@
         <div class="wizard-status" id="wizStatus"></div>
       </div>
     </div>
-
     <div class="modal-buttons" style="margin-top:14px">
       <button class="btn" onclick="closeApiKeyWizard()">Cancel</button>
       <button class="btn primary" onclick="closeApiKeyWizard()">Done</button>
@@ -712,7 +724,6 @@
   </div>
 </div>
 
-<!-- Context Menu -->
 <div class="ctx-menu" id="ctxMenu">
   <div class="ctx-title" id="ctxTitle">item</div>
   <div class="ctx-item" id="ctxOpen"><i class="fas fa-folder-open"></i> Open in Editor</div>
@@ -726,7 +737,6 @@
   <div class="ctx-item danger" id="ctxDelete"><i class="fas fa-trash"></i> Delete</div>
 </div>
 
-<!-- Confirm -->
 <div class="confirm-overlay" id="confirmModal">
   <div class="confirm-box">
     <div class="confirm-title" id="confirmTitle">Are you sure?</div>
@@ -739,8 +749,11 @@
 </div>
 
 <script>
-console.log('[DS] starting v3');
+console.log('[DS] boot v2.1');
 
+/* ═══════════════════════════════════════════════════════════════════
+   GLOBAL STATE
+   ═══════════════════════════════════════════════════════════════════ */
 var API = 'http://127.0.0.1:3001';
 var editor = null;
 var monacoLoaded = false;
@@ -753,6 +766,7 @@ var bookmarks = JSON.parse(localStorage.getItem('ds_bookmarks') || '[]');
 var recentFiles = JSON.parse(localStorage.getItem('ds_recent') || '[]');
 var chatHistory = JSON.parse(localStorage.getItem('ds_chat') || '[]');
 var term = null;
+var termAddons = { fit: null, search: null, serialize: null, webgl: null, webLinks: null };
 var ws = null;
 var isMobile = window.innerWidth <= 900;
 var currentProject = localStorage.getItem('ds_current_project') || null;
@@ -770,15 +784,17 @@ var modifiedFiles = {};
 var cmdHistory = JSON.parse(localStorage.getItem('ds_cmd_history') || '[]');
 var envVars = JSON.parse(localStorage.getItem('ds_env_vars') || '{}');
 var termAutoScroll = localStorage.getItem('term_auto_scroll') !== 'false';
+var termWebgl = localStorage.getItem('term_webgl') !== 'false';
 var editorWordWrap = localStorage.getItem('editor_word_wrap') !== 'false';
 var editorMinimap = localStorage.getItem('editor_minimap') === 'true';
 var editorFontSize = parseInt(localStorage.getItem('editor_font_size') || '13');
 var isAITyping = false;
 var aiTypingEl = null;
-var isOnline = true;
 var newFilePrefix = '';
 
-/* ══════════ AI PROVIDER ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   AI PROVIDER
+   ═══════════════════════════════════════════════════════════════════ */
 function getAIProvider() { return localStorage.getItem('ai_provider') || 'deepseek'; }
 function getAIEndpoint() {
   var provider = getAIProvider();
@@ -789,7 +805,9 @@ function getAIEndpoint() {
   return { provider: 'deepseek', url: 'https://api.deepseek.com/v1/chat/completions', key: localStorage.getItem('ds_key') || '' };
 }
 
-/* ══════════ TOAST ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   TOAST
+   ═══════════════════════════════════════════════════════════════════ */
 function toast(msg, type) {
   type = type || 'info';
   var t = document.createElement('div');
@@ -800,7 +818,9 @@ function toast(msg, type) {
   setTimeout(function() { t.remove(); }, 3200);
 }
 
-/* ══════════ FS HELPERS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   FS HELPERS
+   ═══════════════════════════════════════════════════════════════════ */
 function fsList(p) { return fetch(API + '/api/fs/list?path=' + encodeURIComponent(p || '')).then(function(r) { return r.json(); }); }
 function fsRead(p) { return fetch(API + '/api/fs/read?path=' + encodeURIComponent(p)).then(function(r) { return r.json(); }); }
 function fsWrite(p, content) { return fetch(API + '/api/fs/write', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: p, content: content }) }).then(function(r) { return r.json(); }); }
@@ -808,25 +828,9 @@ function fsDelete(p) { return fetch(API + '/api/fs/delete?path=' + encodeURIComp
 function fsRename(oldPath, newPath) { return fetch(API + '/api/fs/rename', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ oldPath: oldPath, newPath: newPath }) }).then(function(r) { return r.json(); }); }
 async function ghCall(endpoint, body) { var r = await fetch(API + endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }); return r.json(); }
 
-/* ══════════ TERMINAL HELPERS ══════════ */
-function sendToTerminal(cmd, silent) {
-  if (!term) { toast('Terminal not ready', 'error'); return; }
-  switchPrimaryPanel('terminal');
-  if (ws && ws.readyState === 1) {
-    ws.send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
-    if (!silent) {
-      cmdHistory = cmdHistory.filter(function(c) { return c !== cmd; });
-      cmdHistory.unshift(cmd);
-      cmdHistory = cmdHistory.slice(0, 50);
-      localStorage.setItem('ds_cmd_history', JSON.stringify(cmdHistory));
-      renderCmdHistory();
-    }
-  } else {
-    toast('Terminal disconnected', 'error');
-  }
-}
-
-/* ══════════ DRAWERS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   DRAWERS / TABS
+   ═══════════════════════════════════════════════════════════════════ */
 function openDrawer(which) {
   var map = { left: 'fileTree', right: 'sidebar' };
   var el = document.getElementById(map[which]);
@@ -839,8 +843,6 @@ function closeDrawers() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('backdrop').classList.remove('active');
 }
-
-/* ══════════ PRIMARY TABS ══════════ */
 function setupPrimaryTabs() {
   document.querySelectorAll('.ptab').forEach(function(tab) {
     tab.onclick = function() { switchPrimaryPanel(this.getAttribute('data-panel')); };
@@ -855,8 +857,8 @@ function switchPrimaryPanel(name) {
   if (tab) tab.classList.add('active');
   if (panel) panel.classList.add('active');
   if (name === 'editor' && !monacoLoaded) loadMonaco();
-  if (name === 'terminal' && term && term._fitAddon) {
-    setTimeout(function() { try { term._fitAddon.fit(); } catch (e) {} }, 200);
+  if (name === 'terminal' && term && termAddons.fit) {
+    setTimeout(function() { try { termAddons.fit.fit(); } catch (e) {} }, 200);
   }
   if (name === 'editor') showTabBadge('editor', false);
   if (name === 'terminal') showTabBadge('terminal', false);
@@ -866,7 +868,9 @@ function showTabBadge(tabName, show) {
   if (badge) badge.className = 'tab-badge' + (show ? ' show' : '');
 }
 
-/* ══════════ FILE TREE ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   FILE TREE
+   ═══════════════════════════════════════════════════════════════════ */
 function refreshTree() { treeCache = {}; loadTreeLevel(''); }
 function loadTreeLevel(parentPath) { fsList(parentPath).then(function(items) { treeCache[parentPath] = items; renderTree(); }); }
 function renderTree() {
@@ -874,7 +878,7 @@ function renderTree() {
   body.innerHTML = '';
   var rootItems = treeCache[''] || [];
   if (!rootItems.length) {
-    body.innerHTML = '<div style="padding:20px;color:var(--fg-4);font-size:12px;text-align:center;line-height:1.6">Empty workspace<br><br>Use <b>Templates</b><br>or <b>Generate</b></div>';
+    body.innerHTML = '<div class="ft-empty">Empty workspace<br><br>Use <b>Templates</b><br>or <b>Generate</b></div>';
     return;
   }
   renderItems(rootItems, 0, body);
@@ -893,14 +897,16 @@ function renderItems(items, depth, container) {
     var badgeHtml = '';
     if (!it.isDir && modifiedFiles[it.path]) badgeHtml = '<span class="file-badge modified">M</span>';
     div.innerHTML = chevronHtml + '<i class="fas ' + iconClass + ' tree-icon" style="' + iconColor + '"></i><span class="tree-name">' + it.name + '</span>' + badgeHtml;
-    div.onclick = function(e) {
+    div.onclick = function() {
       if (it.isDir) {
         if (expandedFolders[it.path]) { delete expandedFolders[it.path]; renderTree(); }
         else { expandedFolders[it.path] = true; if (!treeCache[it.path]) loadTreeLevel(it.path); else renderTree(); }
       } else { openFileFromTree(it.path); if (isMobile) closeDrawers(); }
     };
     var pressTimer = null;
-    div.addEventListener('touchstart', function() { pressTimer = setTimeout(function() { showContextMenu(it, e); if (navigator.vibrate) navigator.vibrate(30); }, 550); });
+    div.addEventListener('touchstart', function(e) {
+      pressTimer = setTimeout(function() { showContextMenu(it, e); if (navigator.vibrate) navigator.vibrate(30); }, 550);
+    }, { passive: true });
     div.addEventListener('touchend', function() { clearTimeout(pressTimer); });
     div.addEventListener('touchmove', function() { clearTimeout(pressTimer); });
     div.addEventListener('contextmenu', function(e) { e.preventDefault(); showContextMenu(it, e); });
@@ -943,7 +949,9 @@ function fileIconColor(name, isDir) {
   return 'color:var(--orange)';
 }
 
-/* ══════════ CONTEXT MENU ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   CONTEXT MENU / CONFIRM
+   ═══════════════════════════════════════════════════════════════════ */
 function showContextMenu(it, e) {
   ctxItem = it;
   var m = document.getElementById('ctxMenu');
@@ -959,7 +967,6 @@ function showContextMenu(it, e) {
 }
 function hideContextMenu() { document.getElementById('ctxMenu').classList.remove('active'); ctxItem = null; }
 
-/* ══════════ CONFIRM ══════════ */
 function showConfirm(title, msg, cb, okLabel) {
   document.getElementById('confirmTitle').textContent = title;
   document.getElementById('confirmMsg').textContent = msg;
@@ -969,7 +976,9 @@ function showConfirm(title, msg, cb, okLabel) {
 }
 function hideConfirm() { document.getElementById('confirmModal').classList.remove('active'); confirmCallback = null; }
 
-/* ══════════ FILE OPERATIONS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   FILE OPERATIONS
+   ═══════════════════════════════════════════════════════════════════ */
 function renameItem(item) {
   var newName = window.prompt('Rename to:', item.name);
   if (!newName || newName === item.name) { hideContextMenu(); return; }
@@ -1041,10 +1050,7 @@ function openFileFromTree(path) {
 function renderEditorTabs() {
   var bar = document.getElementById('editorTabsBar');
   bar.innerHTML = '';
-  if (!openTabs.length) {
-    bar.style.display = 'none';
-    return;
-  }
+  if (!openTabs.length) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
   openTabs.forEach(function(p) {
     var tab = document.createElement('div');
@@ -1094,9 +1100,8 @@ function saveAsFile() {
 }
 function reloadFile() {
   if (!openFile) return;
-  if (fileModified) {
-    showConfirm('Reload?', 'Unsaved changes will be lost.', function() { doReloadFile(); hideConfirm(); }, 'Reload');
-  } else doReloadFile();
+  if (fileModified) showConfirm('Reload?', 'Unsaved changes will be lost.', function() { doReloadFile(); hideConfirm(); }, 'Reload');
+  else doReloadFile();
 }
 function doReloadFile() {
   fsRead(openFile).then(function(r) {
@@ -1109,13 +1114,6 @@ function doReloadFile() {
     toast('Reloaded', 'success');
   });
 }
-function toggleBookmark() {
-  if (!openFile) return;
-  var idx = bookmarks.indexOf(openFile);
-  if (idx >= 0) { bookmarks.splice(idx, 1); toast('Bookmark removed'); }
-  else { bookmarks.push(openFile); toast('Bookmarked', 'success'); }
-  localStorage.setItem('ds_bookmarks', JSON.stringify(bookmarks));
-}
 function closeCurrentTab() {
   if (!activeTabPath) return;
   openTabs = openTabs.filter(function(x) { return x !== activeTabPath; });
@@ -1125,7 +1123,9 @@ function closeCurrentTab() {
   renderEditorTabs();
 }
 
-/* ══════════ NEW FILE / FOLDER ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   NEW FILE MODAL
+   ═══════════════════════════════════════════════════════════════════ */
 function openNewFileModal(prefix) {
   newFilePrefix = prefix || '';
   var m = document.getElementById('newFileModal');
@@ -1167,7 +1167,9 @@ function setupNewFileModal() {
   document.getElementById('newFilePath').onkeydown = function(e) { if (e.key === 'Enter') { e.preventDefault(); createFromModal(); } };
 }
 
-/* ══════════ CURRENT PROJECT ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   CURRENT PROJECT
+   ═══════════════════════════════════════════════════════════════════ */
 function setCurrentProject(name) {
   currentProject = name;
   localStorage.setItem('ds_current_project', name || '');
@@ -1217,7 +1219,9 @@ function loadWorkspaceSelector() {
   };
 }
 
-/* ══════════ TEMPLATES ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   TEMPLATES
+   ═══════════════════════════════════════════════════════════════════ */
 var TEMPLATES = [
   { id: 'kotlin-hello', name: 'Kotlin Hello World', desc: 'Gradle Kotlin JVM project',
     files: { 'build.gradle.kts': 'plugins {\n    kotlin("jvm") version "1.9.22"\n    application\n}\nrepositories { mavenCentral() }\ndependencies { implementation(kotlin("stdlib")) }\napplication { mainClass.set("MainKt") }\n', 'src/main/kotlin/Main.kt': 'fun main() {\n    println("Hello from Kotlin!")\n}\n' }
@@ -1232,7 +1236,7 @@ var TEMPLATES = [
     files: { 'package.json': '{\n  "name": "my-api",\n  "version": "1.0.0",\n  "main": "server.js",\n  "scripts": { "start": "node server.js" },\n  "dependencies": { "express": "^4.18.2" }\n}\n', 'server.js': 'const express = require("express");\nconst app = express();\nconst PORT = process.env.PORT || 8080;\napp.get("/", (q,s) => s.json({ message: "Hello!" }));\napp.listen(PORT, () => console.log("Server on " + PORT));\n' }
   },
   { id: 'web-static', name: 'Static Website', desc: 'HTML + CSS + JS starter',
-    files: { 'index.html': '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>My Site<\/title>\n<link rel="stylesheet" href="style.css">\n<\/head>\n<body>\n<h1>Hello World<\/h1>\n<button onclick="alert(\'Clicked!\')">Click me<\/button>\n<\/body>\n<\/html>\n', 'style.css': 'body { font-family: sans-serif; text-align: center; padding: 40px; }\nh1 { color: #58a6ff; }\n', 'app.js': 'console.log("App loaded");\n' }
+    files: { 'index.html': '<!DOCTYPE html>\n<html>\n<head>\n<meta charset="UTF-8">\n<title>My Site</title>\n<link rel="stylesheet" href="style.css">\n</head>\n<body>\n<h1>Hello World</h1>\n<button onclick="alert(\'Clicked!\')">Click me</button>\n</body>\n</html>\n', 'style.css': 'body { font-family: sans-serif; text-align: center; padding: 40px; }\nh1 { color: #58a6ff; }\n', 'app.js': 'console.log("App loaded");\n' }
   },
   { id: 'rust-cli', name: 'Rust CLI', desc: 'Cargo binary project',
     files: { 'Cargo.toml': '[package]\nname = "my-rust-app"\nversion = "0.1.0"\nedition = "2021"\n\n[dependencies]\n', 'src/main.rs': 'fn main() {\n    println!("Hello from Rust!");\n}\n' }
@@ -1272,7 +1276,9 @@ function setupTemplates() {
   });
 }
 
-/* ══════════ AI PROJECT GENERATOR ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   AI GENERATOR
+   ═══════════════════════════════════════════════════════════════════ */
 function setupGenerator() {
   var btn = document.getElementById('genBtn');
   if (!btn) return;
@@ -1328,7 +1334,9 @@ function setupGenerator() {
   };
 }
 
-/* ══════════ AI TOOLS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   AI TOOLS
+   ═══════════════════════════════════════════════════════════════════ */
 var AI_TOOLS = [
   { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file. Paths are relative to project root.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
   { type: 'function', function: { name: 'apply_patch', description: 'Edit an existing file by finding the search string and replacing it with the replace string. Use this INSTEAD of write_file for ANY change to an existing file. Include 3-5 lines of surrounding context in the search string so it matches exactly once.', parameters: { type: 'object', properties: { path: { type: 'string' }, search: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'search', 'replace'] } } },
@@ -1347,7 +1355,9 @@ function callTool(name, args) {
     .catch(function(e) { return { ok: false, error: e.message }; });
 }
 
-/* ══════════ CHAT RENDERING ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   CHAT RENDERING
+   ═══════════════════════════════════════════════════════════════════ */
 function renderChatContent(content) {
   var parts = content.split(/(```[\s\S]*?```)/g);
   var html = '';
@@ -1390,7 +1400,6 @@ function appendMessage(role, content, skipSave) {
     });
   } else div.textContent = content;
 
-  /* ---- COPY BUTTON (inline SVG) ---- */
   var copyBtn = document.createElement('button');
   copyBtn.className = 'msg-copy-btn';
   copyBtn.type = 'button';
@@ -1412,12 +1421,8 @@ function appendMessage(role, content, skipSave) {
     };
     var fail = function() { toast('Copy failed', 'error'); };
     if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(content).then(ok).catch(function() {
-        fallbackCopy(content) ? ok() : fail();
-      });
-    } else {
-      fallbackCopy(content) ? ok() : fail();
-    }
+      navigator.clipboard.writeText(content).then(ok).catch(function() { fallbackCopy(content) ? ok() : fail(); });
+    } else { fallbackCopy(content) ? ok() : fail(); }
   };
   div.appendChild(copyBtn);
 
@@ -1430,7 +1435,6 @@ function appendMessage(role, content, skipSave) {
   }
   return div;
 }
-
 function fallbackCopy(text) {
   try {
     var ta = document.createElement('textarea');
@@ -1473,7 +1477,7 @@ function makeToolBubble(name, args) {
   div.className = 'tool-call running';
   var argPreview = '';
   if (name === 'write_file') argPreview = args.path || '';
-  else if (name === 'apply_patch') argPreview = (args.path || '') + ' -> ' + ((args.search || '').slice(0, 40).replace(/\n/g, ' '));
+  else if (name === 'apply_patch') argPreview = (args.path || '') + ' → ' + ((args.search || '').slice(0, 40).replace(/\n/g, ' '));
   else if (name === 'notify') argPreview = (args.message || '').slice(0, 60);
   else if (['read_file','list_files','create_folder','delete_file'].indexOf(name) >= 0) argPreview = args.path || '';
   else if (name === 'run_command') argPreview = (args.command || '').slice(0, 60);
@@ -1504,7 +1508,8 @@ function updateToolBubble(bubble, result) {
     }
     bubble.appendChild(out);
   }
-  document.getElementById('chatMessages').scrollTop = 999999;
+  var box = document.getElementById('chatMessages');
+  box.scrollTop = box.scrollHeight;
 }
 function showFileWrittenToast(path) {
   var t = document.createElement('div');
@@ -1517,7 +1522,9 @@ function showFileWrittenToast(path) {
   setTimeout(function() { t.remove(); }, 4900);
 }
 
-/* ══════════ SEND CHAT ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   SEND CHAT
+   ═══════════════════════════════════════════════════════════════════ */
 async function sendChat() {
   var input = document.getElementById('aiInput');
   var msg = (input.value || '').trim();
@@ -1531,24 +1538,24 @@ async function sendChat() {
   showTypingIndicator();
 
   var sysPrompt = 'You are DeepSeek Studio, an AI coding agent running on Termux (Android). ' +
-    'Project: "' + currentProject + '". All paths are relative to "' + currentProject + '/".\\n\\n' +
-    '## Behavior\\n' +
-    '- BE DECISIVE. Act on the task; do not just analyze or explain what you would do.\\n' +
-    '- Spend AT MOST 2-3 read/search operations to understand the code, then start editing.\\n' +
-    '- If the request is ambiguous, make a reasonable assumption and act.\\n' +
-    '- When you finish a coherent chunk of work, STOP calling tools and give a 1-2 sentence summary of what changed.\\n\\n' +
-    '## Tool usage\\n' +
-    '- Use apply_patch for ANY change to an EXISTING file. Provide 3-5 lines of unique context in the search string.\\n' +
-    '- Use write_file ONLY for brand-new files or complete rewrites (rare).\\n' +
-    '- Use read_file when you need to see current content before editing.\\n' +
-    '- Use grep_search to find symbols and usages across the project - never run grep via run_command.\\n' +
-    '- Use find_files to locate files by name - never run find via run_command.\\n' +
-    '- Use run_command for installs, tests, builds, and running scripts. Set background=true for servers and watchers.\\n' +
-    '- If a run_command takes longer than about 60 seconds (builds, installs), call notify with a short status afterwards.\\n\\n' +
-    '## Boundaries\\n' +
-    '- Never modify files outside "' + currentProject + '/".\\n' +
-    '- Do NOT touch node_modules, .git, build, .dart_tool, dist, .next.\\n' +
-    '- Do not install packages unless the task requires it.\\n\\n' +
+    'Project: "' + currentProject + '". All paths are relative to "' + currentProject + '/".\n\n' +
+    '## Behavior\n' +
+    '- BE DECISIVE. Act on the task; do not just analyze or explain what you would do.\n' +
+    '- Spend AT MOST 2-3 read/search operations to understand the code, then start editing.\n' +
+    '- If the request is ambiguous, make a reasonable assumption and act.\n' +
+    '- When you finish a coherent chunk of work, STOP calling tools and give a 1-2 sentence summary of what changed.\n\n' +
+    '## Tool usage\n' +
+    '- Use apply_patch for ANY change to an EXISTING file. Provide 3-5 lines of unique context in the search string.\n' +
+    '- Use write_file ONLY for brand-new files or complete rewrites (rare).\n' +
+    '- Use read_file when you need to see current content before editing.\n' +
+    '- Use grep_search to find symbols and usages across the project - never run grep via run_command.\n' +
+    '- Use find_files to locate files by name - never run find via run_command.\n' +
+    '- Use run_command for installs, tests, builds, and running scripts. Set background=true for servers and watchers.\n' +
+    '- If a run_command takes longer than about 60 seconds (builds, installs), call notify with a short status afterwards.\n\n' +
+    '## Boundaries\n' +
+    '- Never modify files outside "' + currentProject + '/".\n' +
+    '- Do NOT touch node_modules, .git, build, .dart_tool, dist, .next.\n' +
+    '- Do not install packages unless the task requires it.\n\n' +
     'When done, give a 1-2 sentence summary of what changed.';
   if (openFile) sysPrompt += '\n\nCurrently open file: ' + openFile + '\nContents:\n' + fileContent.slice(0, 2000);
 
@@ -1636,7 +1643,9 @@ function insertCodeToEditor(code) {
   }, 100);
 }
 
-/* ══════════ MONACO ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   MONACO
+   ═══════════════════════════════════════════════════════════════════ */
 function loadMonaco() {
   if (monacoLoaded) return;
   var loader = document.createElement('script');
@@ -1674,38 +1683,191 @@ function loadMonaco() {
   document.head.appendChild(loader);
 }
 
-/* ══════════ TERMINAL ══════════ */
-function initTerminal() {
-  try {
-    var xtermJs = document.createElement('script');
-    xtermJs.src = 'https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js';
-    xtermJs.onload = function() {
-      var fitJs = document.createElement('script');
-      fitJs.src = 'https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js';
-      fitJs.onload = function() {
-        term = new Terminal({
-          cursorBlink: true, fontFamily: 'monospace', fontSize: 12,
-          theme: { background: '#0a0e14', foreground: '#e6edf3', cursor: '#58a6ff' },
-          scrollback: 5000
-        });
-        var fit = new FitAddon.FitAddon();
-        term.loadAddon(fit);
-        term._fitAddon = fit;
-        term.open(document.getElementById('terminal'));
-        setTimeout(function() { try { fit.fit(); } catch (e) {} }, 300);
-        ws = new WebSocket('ws://127.0.0.1:3001/pty');
-        ws.onopen = function() { term.writeln('\x1b[32mConnected to Termux\x1b[0m\r\n'); updateTermInfo('Connected', true); };
-        ws.onmessage = function(e) { term.write(e.data); if (termAutoScroll) term.scrollToBottom(); };
-        ws.onclose = function() { term.writeln('\r\n\x1b[31mDisconnected\x1b[0m'); updateTermInfo('Disconnected', false); };
-        ws.onerror = function() { updateTermInfo('Error', false); };
-        term.onData(function(data) { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: data })); });
-        window.addEventListener('resize', function() { setTimeout(function() { try { fit.fit(); } catch (e) {} }, 100); });
-      };
-      document.head.appendChild(fitJs);
-    };
-    document.head.appendChild(xtermJs);
-  } catch(e) { console.log('terminal init failed', e); }
+/* ═══════════════════════════════════════════════════════════════════
+   TERMINAL — v2.1 with corrected CDN + fallback chain
+   ═══════════════════════════════════════════════════════════════════ */
+
+/**
+ * Load a script with a promise, resolving the global name once loaded.
+ * Returns: { src, globalName, instance } or null if it failed.
+ */
+function loadScript(src) {
+  return new Promise(function(resolve, reject) {
+    var s = document.createElement('script');
+    s.src = src;
+    s.async = false;
+    s.onload = function() { resolve(src); };
+    s.onerror = function() { reject(new Error('Failed: ' + src)); };
+    document.head.appendChild(s);
+  });
 }
+
+/** Try each source in order; return the first that loads. Reject if all fail. */
+function loadScriptFromAny(sources) {
+  var i = 0;
+  function attempt() {
+    if (i >= sources.length) return Promise.reject(new Error('All sources failed: ' + sources.join(', ')));
+    var src = sources[i++];
+    return loadScript(src).catch(attempt);
+  }
+  return attempt();
+}
+
+function initTerminal() {
+  var CDN = 'https://cdn.jsdelivr.net/npm/';
+
+  // ── Core library: try @xterm/xterm (current) then xterm (deprecated fallback) ──
+  var CORE_SOURCES = [
+    CDN + '@xterm/xterm@5.5.0/lib/xterm.min.js',
+    CDN + '@xterm/xterm@5.5.0/lib/xterm.js',
+    CDN + 'xterm@5.3.0/lib/xterm.js'   // legacy fallback
+  ];
+
+  // ── Addons: each has a primary + fallback URL ──
+  var ADDONS = [
+    { key: 'fit',       globalName: 'FitAddon',
+      urls: [CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.min.js', CDN + '@xterm/addon-fit@0.10.0/lib/addon-fit.js', CDN + 'xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js'] },
+    { key: 'webLinks',  globalName: 'WebLinksAddon',
+      urls: [CDN + '@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js', CDN + '@xterm/addon-web-links@0.11.0/lib/addon-web-links.js'] },
+    { key: 'search',    globalName: 'SearchAddon',
+      urls: [CDN + '@xterm/addon-search@0.15.0/lib/addon-search.min.js', CDN + '@xterm/addon-search@0.15.0/lib/addon-search.js'] },
+    { key: 'unicode11', globalName: 'Unicode11Addon',
+      urls: [CDN + '@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.min.js', CDN + '@xterm/addon-unicode11@0.8.0/lib/addon-unicode11.js'] },
+    { key: 'webgl',     globalName: 'WebglAddon',
+      urls: [CDN + '@xterm/addon-webgl@0.18.0/lib/addon-webgl.min.js', CDN + '@xterm/addon-webgl@0.18.0/lib/addon-webgl.js'] },
+    { key: 'serialize', globalName: 'SerializeAddon',
+      urls: [CDN + '@xterm/addon-serialize@0.13.0/lib/addon-serialize.min.js', CDN + '@xterm/addon-serialize@0.13.0/lib/addon-serialize.js'] }
+  ];
+
+  console.log('[term] loading core from CDN…');
+  loadScriptFromAny(CORE_SOURCES).then(function(loadedCoreSrc) {
+    console.log('[term] core loaded:', loadedCoreSrc);
+
+    // Verify the global exists
+    if (typeof Terminal === 'undefined') {
+      throw new Error('Core loaded but `Terminal` global is missing');
+    }
+
+    // Load addons in parallel (each independently, ignoring failures)
+    return Promise.all(ADDONS.map(function(a) {
+      return loadScriptFromAny(a.urls)
+        .then(function(src) { return { key: a.key, globalName: a.globalName, src: src }; })
+        .catch(function(err) {
+          console.warn('[term] addon failed:', a.key, err.message);
+          return null;
+        });
+    }));
+  }).then(function(loaded) {
+    var ok = {};
+    loaded.forEach(function(a) { if (a) ok[a.key] = a; });
+    console.log('[term] addons loaded:', Object.keys(ok).join(', ') || 'none');
+
+    // Build terminal
+    term = new Terminal({
+      cursorBlink: true,
+      fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace",
+      fontSize: 13,
+      lineHeight: 1.2,
+      theme: { background: '#0a0e14', foreground: '#e6edf3', cursor: '#58a6ff', selectionBackground: '#1f6feb55' },
+      scrollback: 10000,
+      allowProposedApi: true,
+      convertEol: false,
+      cursorStyle: 'block'
+    });
+
+    if (ok.fit && window.FitAddon) {
+      try { var fit = new FitAddon.FitAddon(); term.loadAddon(fit); termAddons.fit = fit; }
+      catch (e) { console.warn('[term] fit load failed', e); }
+    }
+    if (ok.webLinks && window.WebLinksAddon) {
+      try { var wl = new WebLinksAddon.WebLinksAddon(); term.loadAddon(wl); termAddons.webLinks = wl; }
+      catch (e) { console.warn('[term] webLinks load failed', e); }
+    }
+    if (ok.search && window.SearchAddon) {
+      try { var search = new SearchAddon.SearchAddon(); term.loadAddon(search); termAddons.search = search; }
+      catch (e) { console.warn('[term] search load failed', e); }
+    }
+    if (ok.unicode11 && window.Unicode11Addon) {
+      try {
+        term.loadAddon(new Unicode11Addon.Unicode11Addon());
+        term.unicode.activeVersion = '11';
+      } catch (e) { console.warn('[term] unicode11 activate failed', e); }
+    }
+    if (ok.serialize && window.SerializeAddon) {
+      try { var sz = new SerializeAddon.SerializeAddon(); term.loadAddon(sz); termAddons.serialize = sz; }
+      catch (e) { console.warn('[term] serialize load failed', e); }
+    }
+
+    var host = document.getElementById('terminal');
+    if (!host) throw new Error('No #terminal host element');
+    term.open(host);
+
+    // WebGL — must load AFTER open() and with fallback
+    if (termWebgl && ok.webgl && window.WebglAddon) {
+      try {
+        var webgl = new WebglAddon.WebglAddon();
+        webgl.onContextLoss(function() {
+          console.warn('[term] WebGL context lost — falling back to DOM renderer');
+          try { webgl.dispose(); } catch (e) {}
+          termAddons.webgl = null;
+        });
+        term.loadAddon(webgl);
+        termAddons.webgl = webgl;
+      } catch (e) {
+        console.warn('[term] WebGL addon load failed:', e.message);
+      }
+    }
+
+    setTimeout(function() { try { termAddons.fit && termAddons.fit.fit(); } catch (e) {} }, 300);
+
+    // Connect WebSocket
+    var wsUrl = 'ws://' + location.hostname + ':3001/pty';
+    try { ws = new WebSocket(wsUrl); }
+    catch (e) { ws = new WebSocket('ws://127.0.0.1:3001/pty'); }
+
+    ws.onopen = function() {
+      term.writeln('\x1b[32m● Connected to Termux\x1b[0m');
+      updateTermInfo('Connected', true);
+      try { termAddons.fit && termAddons.fit.fit(); } catch (e) {}
+    };
+    ws.onmessage = function(e) {
+      term.write(e.data);
+      if (termAutoScroll) term.scrollToBottom();
+    };
+    ws.onclose = function() {
+      term.writeln('\r\n\x1b[31m● Disconnected\x1b[0m');
+      updateTermInfo('Disconnected', false);
+    };
+    ws.onerror = function() { updateTermInfo('Error', false); };
+
+    term.onData(function(data) {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: data }));
+    });
+    term.onResize(function(size) {
+      if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: size.cols, rows: size.rows }));
+    });
+
+    var resizeTimer = null;
+    window.addEventListener('resize', function() {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(function() { try { termAddons.fit && termAddons.fit.fit(); } catch (e) {} }, 150);
+    });
+
+    setupTerminalSearch();
+  }).catch(function(e) {
+    console.error('[term] init failed:', e);
+    var el = document.getElementById('terminal');
+    if (el) {
+      el.innerHTML =
+        '<div style="padding:20px;color:var(--red);font-family:monospace;font-size:12px;line-height:1.6">' +
+        '<b>Terminal failed to load</b><br>' + String(e.message || e) + '<br><br>' +
+        '<span style="color:var(--fg-3)">Check your internet connection and try a hard reload (Ctrl+Shift+R).<br>' +
+        'If it persists, the CDN may be blocked — the rest of the app still works.</span>' +
+        '</div>';
+    }
+  });
+}
+
 function updateTermInfo(text, online) {
   var t = document.getElementById('termInfoText');
   var p = document.getElementById('termPulse');
@@ -1713,7 +1875,75 @@ function updateTermInfo(text, online) {
   if (p) p.style.background = online ? 'var(--green)' : 'var(--red)';
 }
 
-/* ══════════ BACKEND CHECK ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   TERMINAL SEARCH
+   ═══════════════════════════════════════════════════════════════════ */
+function setupTerminalSearch() {
+  var bar = document.getElementById('termSearchBar');
+  var btn = document.getElementById('termSearchBtn');
+  var input = document.getElementById('termSearchInput');
+  var prev = document.getElementById('termSearchPrev');
+  var next = document.getElementById('termSearchNext');
+  var close = document.getElementById('termSearchClose');
+  var caseChk = document.getElementById('termSearchCase');
+  var regexChk = document.getElementById('termSearchRegex');
+  if (!btn || !bar) return;
+
+  function openSearch() {
+    bar.classList.add('active');
+    setTimeout(function() { input.focus(); input.select(); }, 50);
+  }
+  function closeSearch() {
+    bar.classList.remove('active');
+    if (termAddons.search) { try { termAddons.search.clearDecorations(); } catch (e) {} }
+    if (term) term.focus();
+  }
+  function opts() {
+    return { caseSensitive: caseChk.checked, regex: regexChk.checked, incremental: true };
+  }
+  function findNext() { if (termAddons.search && input.value) termAddons.search.findNext(input.value, opts()); }
+  function findPrev() { if (termAddons.search && input.value) termAddons.search.findPrevious(input.value, opts()); }
+
+  btn.onclick = function() {
+    if (bar.classList.contains('active')) closeSearch();
+    else openSearch();
+  };
+  close.onclick = closeSearch;
+  input.oninput = findNext;
+  input.onkeydown = function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); if (e.shiftKey) findPrev(); else findNext(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closeSearch(); }
+    else if (e.key === 'F3') { e.preventDefault(); findNext(); }
+  };
+  prev.onclick = findPrev;
+  next.onclick = findNext;
+  caseChk.onchange = findNext;
+  regexChk.onchange = findNext;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   TERMINAL HELPERS
+   ═══════════════════════════════════════════════════════════════════ */
+function sendToTerminal(cmd, silent) {
+  if (!term) { toast('Terminal not ready', 'error'); return; }
+  switchPrimaryPanel('terminal');
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: 'input', data: cmd + '\n' }));
+    if (!silent) {
+      cmdHistory = cmdHistory.filter(function(c) { return c !== cmd; });
+      cmdHistory.unshift(cmd);
+      cmdHistory = cmdHistory.slice(0, 50);
+      localStorage.setItem('ds_cmd_history', JSON.stringify(cmdHistory));
+      renderCmdHistory();
+    }
+  } else {
+    toast('Terminal disconnected', 'error');
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BACKEND CHECK
+   ═══════════════════════════════════════════════════════════════════ */
 function checkBackend() {
   var dot = document.getElementById('statusDot');
   var txt = document.getElementById('statusText');
@@ -1735,17 +1965,43 @@ function checkBackend() {
     var ver = document.getElementById('backendVersion');
     if (ver) ver.textContent = 'v' + (d.version || '?') + ' · Node ' + (d.node || '?');
     banner.classList.remove('active');
+    renderLibsStatus(d.libs || {});
   }).catch(function() {
     dot.className = 'dot off';
     txt.textContent = 'Error';
     if (bs) { bs.style.color = 'var(--red)'; bs.textContent = 'Backend not reachable'; }
     banner.classList.add('active');
+    renderLibsStatus(null);
   });
+}
+function renderLibsStatus(libs) {
+  var el = document.getElementById('libsStatus');
+  if (!el) return;
+  if (!libs) { el.innerHTML = ''; return; }
+  var labels = {
+    'simple-git': 'Git (simple-git)',
+    '@octokit/rest': 'GitHub (Octokit)',
+    'node-pty': 'Real PTY',
+    'editkit': 'Fuzzy patches'
+  };
+  var html = '<div style="margin-top:10px;display:flex;flex-direction:column;gap:4px">';
+  Object.keys(labels).forEach(function(k) {
+    var on = !!libs[k];
+    html += '<div class="lib-badge ' + (on ? 'on' : 'off') + '">' +
+      '<i class="fas ' + (on ? 'fa-check-circle' : 'fa-circle-notch') + '"></i> ' +
+      '<span>' + labels[k] + '</span>' +
+      '<span class="lib-status">' + (on ? 'active' : 'fallback') + '</span>' +
+    '</div>';
+  });
+  html += '</div>';
+  el.innerHTML = html;
 }
 window.addEventListener('online', checkBackend);
 window.addEventListener('offline', checkBackend);
 
-/* ══════════ SIDEBAR TABS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   SIDEBAR TABS
+   ═══════════════════════════════════════════════════════════════════ */
 function setupSideTabs() {
   document.querySelectorAll('.stab').forEach(function(tab) {
     tab.onclick = function() {
@@ -1764,8 +2020,14 @@ function setupSideTabs() {
   });
 }
 
-/* ══════════ QUICK COMMANDS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   QUICK COMMANDS
+   ═══════════════════════════════════════════════════════════════════ */
 var QUICK_COMMANDS = [
+  { icon: 'fa-search', cmd: null, label: 'Find in terminal', action: function() {
+      switchPrimaryPanel('terminal');
+      setTimeout(function() { document.getElementById('termSearchBtn').click(); }, 150);
+  }},
   { icon: 'fa-folder', cmd: 'ls -la', label: 'List files' },
   { icon: 'fa-terminal', cmd: 'pwd', label: 'Print working dir' },
   { icon: 'fa-info-circle', cmd: 'uname -a', label: 'System info' },
@@ -1786,13 +2048,19 @@ function renderQuickCommands() {
   QUICK_COMMANDS.forEach(function(qc) {
     var div = document.createElement('div');
     div.className = 'quick-cmd';
-    div.innerHTML = '<i class="fas ' + qc.icon + '"></i><span class="qc-cmd">' + qc.cmd + '</span><span class="qc-label">' + qc.label + '</span>';
-    div.onclick = function() { sendToTerminal(qc.cmd); if (isMobile) closeDrawers(); };
+    div.innerHTML = '<i class="fas ' + qc.icon + '"></i><span class="qc-cmd">' + (qc.cmd || '(action)') + '</span><span class="qc-label">' + qc.label + '</span>';
+    div.onclick = function() {
+      if (qc.action) qc.action();
+      else sendToTerminal(qc.cmd);
+      if (isMobile) closeDrawers();
+    };
     list.appendChild(div);
   });
 }
 
-/* ══════════ ENV VARS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   ENV VARS / CMD HISTORY / PROCESSES
+   ═══════════════════════════════════════════════════════════════════ */
 function renderEnvVars() {
   var list = document.getElementById('envVarsList');
   if (!list) return;
@@ -1811,8 +2079,6 @@ function renderEnvVars() {
     list.appendChild(row);
   });
 }
-
-/* ══════════ COMMAND HISTORY ══════════ */
 function renderCmdHistory() {
   var list = document.getElementById('cmdHistoryList');
   if (!list) return;
@@ -1826,8 +2092,6 @@ function renderCmdHistory() {
     list.appendChild(div);
   });
 }
-
-/* ══════════ PROCESSES ══════════ */
 function refreshProcesses() {
   var list = document.getElementById('processesList');
   if (!list) return;
@@ -1846,7 +2110,19 @@ function refreshProcesses() {
   }).catch(function() { list.innerHTML = '<div style="padding:8px;color:var(--red)">Backend offline</div>'; });
 }
 
-/* ══════════ GIT ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   GIT PANEL
+   ═══════════════════════════════════════════════════════════════════ */
+function colorForGitStatus(st) {
+  if (!st) return 'var(--fg-2)';
+  var s = String(st).trim();
+  if (s === '??') return 'var(--fg-3)';
+  if (s.indexOf('U') >= 0 || s === 'AA' || s === 'DD') return 'var(--red)';
+  if (s.indexOf('A') >= 0) return 'var(--green)';
+  if (s.indexOf('D') >= 0) return 'var(--red)';
+  if (s.indexOf('M') >= 0 || s.indexOf('R') >= 0) return 'var(--yellow)';
+  return 'var(--fg-2)';
+}
 function setupGithub() {
   var tIn = document.getElementById('ghToken');
   if (!tIn) return;
@@ -1862,25 +2138,40 @@ function setupGithub() {
   }
   function refreshAllGitState() {
     if (!currentProject) return;
+
     ghCall('/api/git/status/detailed', { cwd: currentProject }).then(function(r) {
       var list = document.getElementById('ghChangesList');
-      if (!r.files || !r.files.length) { list.innerHTML = 'No changes'; return; }
+      if (!r.files || !r.files.length) { list.innerHTML = '<div class="git-empty">✓ Working tree clean</div>'; return; }
       list.innerHTML = r.files.map(function(f) {
-        var color = f.status === '??' ? 'var(--fg-3)' : f.status.indexOf('M') >= 0 ? 'var(--yellow)' : 'var(--green)';
-        return '<div style="padding:4px 0;display:flex;gap:8px"><span style="color:' + color + ';font-family:monospace;min-width:26px;font-size:10px">' + f.status + '</span><span style="font-family:monospace;word-break:break-all;font-size:11px">' + f.path + '</span></div>';
+        var st = f.status || '??';
+        var color = colorForGitStatus(st);
+        return '<div class="git-change-row"><span class="git-status-code" style="color:' + color + '">' + st + '</span><span class="git-path">' + f.path + '</span></div>';
       }).join('');
     }).catch(function() {});
+
     ghCall('/api/git/branches', { cwd: currentProject }).then(function(r) {
       var list = document.getElementById('ghBranchList');
       if (!r.branches || !r.branches.length) { list.innerHTML = 'No branches'; return; }
-      list.innerHTML = r.branches.map(function(b) { return '<div style="padding:4px 0;color:' + (b === r.current ? 'var(--blue)' : 'var(--fg-2)') + ';font-family:monospace;font-size:11px">' + (b === r.current ? '★ ' : '  ') + b + '</div>'; }).join('');
+      list.innerHTML = r.branches.map(function(b) {
+        return '<div style="padding:4px 0;color:' + (b === r.current ? 'var(--blue)' : 'var(--fg-2)') + ';font-family:monospace;font-size:11px">' + (b === r.current ? '★ ' : '  ') + b + '</div>';
+      }).join('');
       document.getElementById('ghBranchInfo').textContent = 'Branch: ' + (r.current || '-');
     }).catch(function() {});
+
     ghCall('/api/git/log/detailed', { cwd: currentProject, limit: 20 }).then(function(r) {
       var list = document.getElementById('ghLogList');
       if (!r.commits || !r.commits.length) { list.innerHTML = 'No commits'; return; }
-      list.innerHTML = r.commits.map(function(c) { return '<div style="padding:8px 0;border-bottom:1px solid var(--border-2)"><div style="color:var(--blue);font-family:monospace;font-size:10px">' + c.hash + ' · ' + c.date + '</div><div style="color:var(--fg-1);font-size:12px;margin:3px 0">' + c.message + '</div><div style="color:var(--fg-3);font-size:10px">by ' + c.author + '</div></div>'; }).join('');
+      list.innerHTML = r.commits.map(function(c) {
+        var date = c.date || c.when || '';
+        var msg = c.message || c.subject || '';
+        return '<div style="padding:8px 0;border-bottom:1px solid var(--border-2)">' +
+          '<div style="color:var(--blue);font-family:monospace;font-size:10px">' + String(c.hash || '').slice(0, 7) + ' · ' + date + '</div>' +
+          '<div style="color:var(--fg-1);font-size:12px;margin:3px 0">' + msg + '</div>' +
+          '<div style="color:var(--fg-3);font-size:10px">by ' + (c.author || '?') + '</div>' +
+        '</div>';
+      }).join('');
     }).catch(function() {});
+
     ghCall('/api/git/status', { cwd: currentProject }).then(function(r) {
       var el = document.getElementById('ghRepoInfo');
       el.textContent = r.isRepo ? (r.remote || '(no remote set)') : 'Not a git repo';
@@ -1888,32 +2179,44 @@ function setupGithub() {
   }
   window.refreshAllGitState = refreshAllGitState;
 
-  document.getElementById('ghSaveToken').onclick = function() { localStorage.setItem('gh_token', tIn.value.trim()); toast('Token saved', 'success'); };
+  document.getElementById('ghSaveToken').onclick = function() {
+    var token = tIn.value.trim();
+    if (!token) { toast('Enter a token', 'error'); return; }
+    fetch(API + '/api/secrets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'github_token', value: token }) })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) { toast('Token saved server-side', 'success'); }
+        else { localStorage.setItem('gh_token', token); toast('Saved locally (server rejected)', 'warn'); }
+      })
+      .catch(function() { localStorage.setItem('gh_token', token); toast('Saved locally', 'info'); });
+  };
+
   document.getElementById('ghSaveIdentity').onclick = function() {
     var n = document.getElementById('ghName').value.trim();
     var e = document.getElementById('ghEmail').value.trim();
     if (!n || !e) { toast('Name + email required', 'error'); return; }
     localStorage.setItem('gh_name', n); localStorage.setItem('gh_email', e);
-    ghCall('/api/git/set-identity', { name: n, email: e }).then(function(r) { toast(r.code === 0 ? 'Identity saved' : 'Failed', r.code === 0 ? 'success' : 'error'); });
+    ghCall('/api/git/set-identity', { name: n, email: e }).then(function(r) {
+      toast(r.code === 0 ? 'Identity saved' : 'Failed', r.code === 0 ? 'success' : 'error');
+    });
   };
+
   document.getElementById('ghCloneBtn').onclick = async function() {
     var url = document.getElementById('ghCloneUrl').value.trim();
     if (!url) { toast('URL required', 'error'); return; }
-    var token = localStorage.getItem('gh_token') || '';
-    var finalUrl = url;
-    if (token && url.indexOf('https://github.com/') === 0) finalUrl = url.replace('https://', 'https://' + token + '@');
     toast('Cloning…', 'info');
-    var r = await ghCall('/api/git/clone', { url: finalUrl });
-    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    var r = await ghCall('/api/git/clone', { url: url });
+    showGhOutput((r.stdout || '') + (r.stderr || ''), r.code !== 0);
     if (r.code === 0) { toast('Cloned into ' + r.dir, 'success'); refreshTree(); loadWorkspaceSelector(); setCurrentProject(r.dir); }
     else toast('Clone failed', 'error');
   };
+
   document.getElementById('ghCreateBranchBtn').onclick = async function() {
     if (!currentProject) { toast('Select a project first', 'error'); return; }
     var name = document.getElementById('ghNewBranchName').value.trim();
     if (!name) { toast('Branch name required', 'error'); return; }
     var r = await ghCall('/api/git/branch/create', { cwd: currentProject, name: name, checkout: true });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Branch created' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
@@ -1922,7 +2225,7 @@ function setupGithub() {
     var name = document.getElementById('ghNewBranchName').value.trim();
     if (!name) return;
     var r = await ghCall('/api/git/branch/checkout', { cwd: currentProject, name: name });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Checked out ' + name : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
@@ -1931,14 +2234,14 @@ function setupGithub() {
     var src = document.getElementById('ghMergeSource').value.trim();
     if (!src) return;
     var r = await ghCall('/api/git/branch/merge', { cwd: currentProject, source: src });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     if (r.conflicted) { toast('Merge conflicts', 'error'); document.getElementById('ghAbortMergeBtn').style.display = 'inline-flex'; }
     else if (r.ok) { toast('Merged', 'success'); document.getElementById('ghAbortMergeBtn').style.display = 'none'; }
     refreshAllGitState();
   };
   document.getElementById('ghAbortMergeBtn').onclick = async function() {
     var r = await ghCall('/api/git/merge/abort', { cwd: currentProject });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Merge aborted' : 'Failed', r.ok ? 'success' : 'error');
     document.getElementById('ghAbortMergeBtn').style.display = 'none';
     refreshAllGitState();
@@ -1946,14 +2249,14 @@ function setupGithub() {
   document.getElementById('ghAddAllBtn').onclick = async function() {
     if (!currentProject) return;
     var r = await ghCall('/api/git/add', { cwd: currentProject });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Staged all' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
   document.getElementById('ghResetAllBtn').onclick = async function() {
     if (!currentProject) return;
     var r = await ghCall('/api/git/reset', { cwd: currentProject });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Unstaged all' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
@@ -1961,7 +2264,7 @@ function setupGithub() {
     if (!currentProject) return;
     var msg = document.getElementById('ghCommitMsg').value.trim() || 'Update';
     var r = await ghCall('/api/git/push', { cwd: currentProject, message: msg, commitOnly: true });
-    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), r.code !== 0);
     toast(r.code === 0 ? 'Committed' : 'Failed', r.code === 0 ? 'success' : 'error');
     refreshAllGitState();
   };
@@ -1969,28 +2272,28 @@ function setupGithub() {
     if (!currentProject) return;
     var msg = document.getElementById('ghCommitMsg').value.trim() || 'Update';
     var r = await ghCall('/api/git/push', { cwd: currentProject, message: msg });
-    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), r.code !== 0);
     toast(r.code === 0 ? 'Pushed' : 'Push warnings', r.code === 0 ? 'success' : 'error');
     refreshAllGitState();
   };
   document.getElementById('ghPullBtn').onclick = async function() {
     if (!currentProject) return;
     var r = await ghCall('/api/git/pull', { cwd: currentProject });
-    showGhOutput(r.stdout + r.stderr, r.code !== 0);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), r.code !== 0);
     toast(r.code === 0 ? 'Pulled' : 'Pull failed', r.code === 0 ? 'success' : 'error');
     refreshAllGitState();
   };
   document.getElementById('ghPullRebaseBtn').onclick = async function() {
     if (!currentProject) return;
     var r = await ghCall('/api/git/pull/rebase', { cwd: currentProject });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Pulled (rebase)' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
   document.getElementById('ghFetchBtn').onclick = async function() {
     if (!currentProject) return;
     var r = await ghCall('/api/git/fetch', { cwd: currentProject });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Fetched' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
@@ -1998,14 +2301,14 @@ function setupGithub() {
     if (!currentProject) return;
     var msg = document.getElementById('ghStashMsg').value.trim();
     var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'push', message: msg });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Stashed' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
   document.getElementById('ghStashPopBtn').onclick = async function() {
     if (!currentProject) return;
     var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'pop' });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Popped' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
@@ -2017,8 +2320,8 @@ function setupGithub() {
   document.getElementById('ghStashClearBtn').onclick = function() {
     if (!currentProject) return;
     showConfirm('Clear all stashes?', 'This cannot be undone.', async function() {
-      var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'clear' });
-      showGhOutput(r.stdout + r.stderr, !r.ok);
+      var r = await ghCall('/api/git/stash', { cwd: currentProject, action: 'clear', confirm: true });
+      showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
       hideConfirm();
     }, 'Clear');
   };
@@ -2028,21 +2331,21 @@ function setupGithub() {
     var name = document.getElementById('ghTagName').value.trim();
     if (!name) return;
     var r = await ghCall('/api/git/tags', { cwd: currentProject, action: 'create', name: name, message: name });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Tag created' : 'Failed', r.ok ? 'success' : 'error');
     refreshAllGitState();
   };
   document.getElementById('ghTagPushBtn').onclick = async function() {
     if (!currentProject) return;
     var r = await ghCall('/api/git/tags', { cwd: currentProject, action: 'push' });
-    showGhOutput(r.stdout + r.stderr, !r.ok);
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
     toast(r.ok ? 'Tags pushed' : 'Failed', r.ok ? 'success' : 'error');
   };
   document.getElementById('ghUndoBtn').onclick = function() {
     if (!currentProject) return;
     showConfirm('Revert last commit?', 'Creates a new commit undoing the last.', async function() {
       var r = await ghCall('/api/git/undo', { cwd: currentProject });
-      showGhOutput(r.output || '', !r.ok);
+      showGhOutput(r.output || r.stdout || '', !r.ok);
       toast(r.ok ? 'Reverted' : 'Failed', r.ok ? 'success' : 'error');
       hideConfirm(); refreshAllGitState();
     }, 'Revert');
@@ -2050,15 +2353,17 @@ function setupGithub() {
   document.getElementById('ghHardResetBtn').onclick = function() {
     if (!currentProject) return;
     showConfirm('Hard reset?', 'ALL uncommitted changes will be LOST.', async function() {
-      var r = await ghCall('/api/git/reset', { cwd: currentProject, hard: true });
-      showGhOutput(r.stdout + r.stderr, !r.ok);
+      var r = await ghCall('/api/git/reset', { cwd: currentProject, hard: true, confirm: true });
+      showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
       toast(r.ok ? 'Hard reset done' : 'Failed', r.ok ? 'success' : 'error');
       hideConfirm(); refreshAllGitState();
     }, 'Reset');
   };
 }
 
-/* ══════════ DEPLOY ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   DEPLOY / BACKUP / LICENSE / PWA / WIZARD
+   ═══════════════════════════════════════════════════════════════════ */
 async function checkToolchain() {
   var statusEl = document.getElementById('toolchainStatus');
   var installBtn = document.getElementById('installToolsBtn');
@@ -2107,8 +2412,8 @@ async function loadKeystores() {
     var data = await r.json();
     sel.innerHTML = '<option value="">-- no signing (debug) --</option>';
     if (!data.keystores || !data.keystores.length) { list.innerHTML = '<span style="color:var(--fg-4)">No keystores yet</span>'; return; }
-    data.keystores.forEach(function(k) { var opt = document.createElement('option'); opt.value = k.name; opt.textContent = k.name + ' (' + (k.size / 1024).toFixed(1) + ' KB)'; sel.appendChild(opt); });
-    list.innerHTML = data.keystores.map(function(k) { return '• ' + k.name; }).join('<br>');
+    data.keystores.forEach(function(k) { var opt = document.createElement('option'); opt.value = k; opt.textContent = k; sel.appendChild(opt); });
+    list.innerHTML = data.keystores.map(function(k) { return '• ' + k; }).join('<br>');
   } catch (e) { list.innerHTML = '<span style="color:var(--red)">Backend offline</span>'; }
 }
 async function loadProjectsForDeploy() {
@@ -2137,7 +2442,7 @@ async function buildDeploy() {
     var r = await fetch(API + '/api/deploy/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd: cwd, keystore: keystore, password: password, output: output }) });
     var data = await r.json();
     out.textContent = data.output || data.error || '(no output)';
-    if (data.artifact) { out.textContent += '\n\n✅ Artifact: ' + data.artifact.path + ' (' + data.artifact.sizeStr + ')'; toast('Build succeeded', 'success'); }
+    if (data.artifact) { out.textContent += '\n\n✅ Artifact: ' + data.artifact.path; toast('Build succeeded', 'success'); }
     else if (data.ok) toast('Build finished', 'info');
     else toast(data.error || 'Build failed', 'error');
     refreshArtifacts();
@@ -2151,11 +2456,9 @@ async function refreshArtifacts() {
     var r = await fetch(API + '/api/deploy/artifacts');
     var data = await r.json();
     if (!data.artifacts || !data.artifacts.length) { list.innerHTML = '<span style="color:var(--fg-4)">No builds yet.</span>'; return; }
-    list.innerHTML = data.artifacts.map(function(a) { return '<div class="backup-item"><div class="bk-name">' + a.name + '</div><div class="bk-meta">' + a.sizeStr + ' · ' + a.path + '</div></div>'; }).join('');
+    list.innerHTML = data.artifacts.map(function(a) { return '<div class="backup-item"><div class="bk-name">' + a.name + '</div><div class="bk-meta">' + (a.sizeStr || '') + ' · ' + a.path + '</div></div>'; }).join('');
   } catch (e) { list.innerHTML = '<span style="color:var(--red)">Backend offline</span>'; }
 }
-
-/* ══════════ LICENSE ══════════ */
 async function refreshLicenseStatus() {
   var el = document.getElementById('licenseStatus');
   if (!el) return;
@@ -2166,8 +2469,6 @@ async function refreshLicenseStatus() {
     else { el.textContent = 'Free tier — AAB builds locked'; el.style.color = 'var(--fg-3)'; }
   } catch (e) { el.textContent = 'Backend offline'; el.style.color = 'var(--red)'; }
 }
-
-/* ══════════ BACKUP ══════════ */
 function setupBackup() {
   var nowBtn = document.getElementById('backupNowBtn');
   if (!nowBtn) return;
@@ -2176,7 +2477,7 @@ function setupBackup() {
     try {
       var r = await fetch(API + '/api/backup/create', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       var data = await r.json();
-      if (data.ok) { toast('Backed up ' + data.fileCount + ' files (' + data.size + ')', 'success'); refreshBackupList(); }
+      if (data.ok) { toast('Backed up', 'success'); refreshBackupList(); }
       else toast('Backup failed: ' + (data.error || 'unknown'), 'error');
     } catch (e) { toast('Backup failed: ' + e.message, 'error'); }
   };
@@ -2185,13 +2486,12 @@ function setupBackup() {
 }
 async function checkBackupAvailability() {
   try {
-    var r = await fetch(API + '/api/backup/check');
+    var r = await fetch(API + '/api/backup/list');
     var data = await r.json();
     var el = document.getElementById('backupStatus');
     if (!el) return;
-    if (data.exists && data.writable) { el.textContent = '✅ SD card detected and writable'; el.style.color = 'var(--green)'; }
-    else if (data.exists) { el.textContent = '⚠️ SD card found but not writable'; el.style.color = 'var(--yellow)'; }
-    else { el.textContent = '❌ SD card not found'; el.style.color = 'var(--red)'; }
+    if (data.available) { el.textContent = '✅ SD card detected'; el.style.color = 'var(--green)'; }
+    else { el.textContent = '❌ SD card not found (run termux-setup-storage)'; el.style.color = 'var(--red)'; }
   } catch (e) {}
 }
 async function refreshBackupList() {
@@ -2212,7 +2512,7 @@ async function refreshBackupList() {
       btn.onclick = function() {
         var name = this.getAttribute('data-name');
         showConfirm('Restore from backup?', 'Overwrites workspace with ' + name + '.', async function() {
-          var r = await fetch(API + '/api/backup/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name }) });
+          var r = await fetch(API + '/api/backup/restore', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, confirm: true }) });
           var data = await r.json();
           toast(data.ok ? 'Restored' : 'Restore failed', data.ok ? 'success' : 'error');
           hideConfirm(); refreshTree();
@@ -2233,7 +2533,9 @@ async function refreshBackupList() {
   } catch (e) { list.innerHTML = '<div style="color:var(--red);font-size:12px;text-align:center;padding:14px">Backend offline</div>'; }
 }
 
-/* ══════════ API KEY WIZARD ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   API KEY WIZARD
+   ═══════════════════════════════════════════════════════════════════ */
 function openApiKeyWizard() {
   document.getElementById('wizKeyInput').value = localStorage.getItem('ds_key') || '';
   document.getElementById('wizStatus').textContent = '';
@@ -2260,7 +2562,9 @@ async function verifyAndSaveWizardKey() {
   } catch (e) { statusEl.textContent = '❌ Network error: ' + e.message; statusEl.className = 'wizard-status err'; }
 }
 
-/* ══════════ PWA ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   PWA
+   ═══════════════════════════════════════════════════════════════════ */
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('/sw.js').catch(function() {}); });
 }
@@ -2289,7 +2593,9 @@ function setupPwa() {
   }
 }
 
-/* ══════════ CONTEXT MENU HANDLERS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   CONTEXT MENU / CONFIRM / SNIPPETS
+   ═══════════════════════════════════════════════════════════════════ */
 function setupContextMenu() {
   document.getElementById('ctxOpen').onclick = function() {
     if (!ctxItem || ctxItem.isDir) return;
@@ -2361,15 +2667,12 @@ function setupContextMenu() {
     if (menu.classList.contains('active') && !menu.contains(e.target)) hideContextMenu();
   });
 }
-
-/* ══════════ CONFIRM MODAL ══════════ */
 function setupConfirmModal() {
   document.getElementById('confirmCancel').onclick = hideConfirm;
   document.getElementById('confirmOk').onclick = function() { if (confirmCallback) confirmCallback(); };
   document.getElementById('confirmModal').onclick = function(e) { if (e.target === this) hideConfirm(); };
 }
 
-/* ══════════ SNIPPETS ══════════ */
 var SNIPPETS = [
   { name: 'Python script', desc: 'Basic Python script template', cmd: 'Create a Python script that ' },
   { name: 'REST API', desc: 'Express/FastAPI server', cmd: 'Create a REST API with endpoints for ' },
@@ -2422,7 +2725,9 @@ function setupSnippets() {
   });
 }
 
-/* ══════════ CLIPBOARD + REVEAL HELPERS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   CLIPBOARD HELPERS
+   ═══════════════════════════════════════════════════════════════════ */
 function readClipboardInto(inputEl, statusCb) {
   if (!inputEl) return;
   var set = function(text) {
@@ -2443,13 +2748,14 @@ function readClipboardInto(inputEl, statusCb) {
     if (statusCb) statusCb('Clipboard not available — paste manually', 'warn');
   }
 }
-
 function toggleReveal(inputEl) {
   if (!inputEl) return;
-  inputEl.type = inputEl.type === 'password' ? 'text' : 'password';
+  inputEl.type = inputEl.type === 'text' ? 'password' : 'text';
 }
 
-/* ══════════ BIND HEADER BUTTONS ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   BIND HEADER BUTTONS
+   ═══════════════════════════════════════════════════════════════════ */
 function bindHeaderButtons() {
   var mL = document.getElementById('menuLeftBtn');
   var mR = document.getElementById('menuRightBtn');
@@ -2479,7 +2785,6 @@ function bindHeaderButtons() {
   if (saveBtn) saveBtn.onclick = saveFile;
   if (aiSend) aiSend.onclick = sendChat;
 
-  // Editor actions (moved to AI sidebar)
   var aSA = document.getElementById('actSaveAs');
   var aRL = document.getElementById('actReload');
   var aCT = document.getElementById('actClose');
@@ -2524,7 +2829,8 @@ function bindHeaderButtons() {
       if (aR2) aR2.checked = autoRunEnabled;
       var lbl = document.getElementById('autoRunLabel');
       if (lbl) lbl.classList.toggle('on', autoRunEnabled);
-      document.getElementById('autoRunHint').textContent = autoRunEnabled ? '(auto-run)' : '(off = confirm)';
+      var hint = document.getElementById('autoRunHint');
+      if (hint) hint.textContent = autoRunEnabled ? '(auto-run)' : '(off = confirm)';
       toast(autoRunEnabled ? 'Auto-run ON' : 'Auto-run OFF', 'info');
     };
     if (autoRunEnabled) {
@@ -2563,7 +2869,6 @@ function bindHeaderButtons() {
   };
   if (aW) aW.onclick = openApiKeyWizard;
 
-  /* ── NEW: paste + reveal + wizard paste ── */
   var apiKeyPaste = document.getElementById('apiKeyPasteBtn');
   var apiKeyReveal = document.getElementById('apiKeyRevealBtn');
   var wizPaste = document.getElementById('wizPasteBtn');
@@ -2679,6 +2984,16 @@ function bindHeaderButtons() {
   var tas = document.getElementById('termAutoScrollToggle');
   if (tas) { tas.checked = termAutoScroll; tas.onchange = function() { termAutoScroll = this.checked; localStorage.setItem('term_auto_scroll', termAutoScroll ? 'true' : 'false'); }; }
 
+  var twgl = document.getElementById('termWebglToggle');
+  if (twgl) {
+    twgl.checked = termWebgl;
+    twgl.onchange = function() {
+      termWebgl = this.checked;
+      localStorage.setItem('term_webgl', termWebgl ? 'true' : 'false');
+      toast(termWebgl ? 'GPU renderer will load on next connect' : 'Using DOM renderer');
+    };
+  }
+
   var eww = document.getElementById('editorWordWrapToggle');
   var emm = document.getElementById('editorMinimapToggle');
   var efs = document.getElementById('editorFontSize');
@@ -2703,11 +3018,18 @@ function bindHeaderButtons() {
     if ((e.ctrlKey || e.metaKey) && e.key === 'r' && activeTabPanel === 'editor') { e.preventDefault(); reloadFile(); }
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); sendToTerminal('clear'); }
     if ((e.ctrlKey || e.metaKey) && e.key === 'w') { e.preventDefault(); closeCurrentTab(); }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'f' && activeTabPanel === 'terminal') {
+      e.preventDefault();
+      var btn = document.getElementById('termSearchBtn');
+      if (btn) btn.click();
+    }
     if (e.key === 'F5') { e.preventDefault(); checkBackend(); }
   });
 }
 
-/* ══════════ COMPILE ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   COMPILE
+   ═══════════════════════════════════════════════════════════════════ */
 async function compileCurrent() {
   if (!openFile) { toast('Open a file first', 'error'); return; }
   if (fileModified) { toast('Saving before compile…', 'info'); await saveFile(); }
@@ -2727,58 +3049,43 @@ async function compileCurrent() {
   } catch (e) { toast('Compile failed: ' + e.message, 'error'); }
 }
 
-
-/* ══════════ AUTO-VERIFY + AUTO-TEST ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   AUTO-VERIFY API KEY
+   ═══════════════════════════════════════════════════════════════════ */
 (function setupAutoVerify() {
   var input = document.getElementById('apiKeyInput');
   if (!input) return;
   var statusEl = document.getElementById('apiKeyStatus');
 
-  /* Live feedback as the user types/pastes */
   input.addEventListener('input', function() {
     if (!statusEl) return;
     var v = (this.value || '').trim();
-    if (!v) {
-      statusEl.textContent = 'Not verified';
-      statusEl.style.color = 'var(--fg-3)';
-      return;
-    }
-    if (!v.startsWith('sk-')) {
-      statusEl.textContent = '⚠ Keys start with sk-';
-      statusEl.style.color = 'var(--yellow)';
-      return;
-    }
-    if (v.length < 20) {
-      statusEl.textContent = '⚠ Too short — ' + v.length + ' chars';
-      statusEl.style.color = 'var(--yellow)';
-      return;
-    }
+    if (!v) { statusEl.textContent = 'Not verified'; statusEl.style.color = 'var(--fg-3)'; return; }
+    if (!v.startsWith('sk-')) { statusEl.textContent = '⚠ Keys start with sk-'; statusEl.style.color = 'var(--yellow)'; return; }
+    if (v.length < 20) { statusEl.textContent = '⚠ Too short — ' + v.length + ' chars'; statusEl.style.color = 'var(--yellow)'; return; }
     statusEl.textContent = '✓ Key format looks valid — click Test to confirm';
     statusEl.style.color = 'var(--green)';
   });
 
-  /* Auto-test 600ms after a change lands a plausible key.
-     Only fires when the test button exists and we haven't just tested. */
   var autoTestTimer = null;
   var lastTested = '';
   input.addEventListener('change', function() {
     var v = (this.value || '').trim();
     if (!v || !v.startsWith('sk-') || v.length < 20) return;
-    if (v === lastTested) return;                // dedupe
+    if (v === lastTested) return;
     clearTimeout(autoTestTimer);
     autoTestTimer = setTimeout(function() {
       var testBtn = document.getElementById('apiKeyTestBtn');
-      if (testBtn) {
-        lastTested = v;
-        testBtn.click();
-      }
+      if (testBtn) { lastTested = v; testBtn.click(); }
     }, 600);
   });
 })();
 
-/* ══════════ START ══════════ */
+/* ═══════════════════════════════════════════════════════════════════
+   START
+   ═══════════════════════════════════════════════════════════════════ */
 function start() {
-  console.log('[DS] starting app v3');
+  console.log('[DS] starting app v2.1');
   isMobile = window.innerWidth <= 900;
 
   try { bindHeaderButtons(); } catch (e) { console.log('bindHeaderButtons fail', e); }

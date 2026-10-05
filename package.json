@@ -1,18 +1,21 @@
 {
   "name": "deepseek-editor",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
+  "version": "2.0.0",
   "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
   "dependencies": {
-    "cors": "^2.8.6",
     "express": "^5.2.1",
-    "ws": "^8.22.0"
+    "cors": "^2.8.6",
+    "ws": "^8.22.0",
+    "simple-git": "^3.27.0",
+    "@octokit/rest": "^21.1.0",
+    "node-pty": "npm:node-pty-android-arm64@^1.1.0",
+    "editkit": "^0.3.0",
+    "web-tree-sitter": "^0.24.0",
+    "tree-sitter-wasms": "^0.1.12"
   }
 }

@@ -53,9 +53,6 @@
 
   /* ── HEADER ── */
   .hero { text-align: center; margin-bottom: 24px; }
-  .hero i {
-    font-size: 0; /* hidden, we use SVG */
-  }
   .hero-icon {
     width: 64px; height: 64px; margin: 0 auto 12px;
     display: flex; align-items: center; justify-content: center;
@@ -65,6 +62,13 @@
   .hero-icon svg { width: 36px; height: 36px; color: #fff; }
   .hero h1 { color: var(--fg-0); font-size: 26px; margin-bottom: 4px; letter-spacing: -.3px; }
   .hero p { color: var(--fg-3); font-size: 14px; }
+  .hero .version-badge {
+    display: inline-block; margin-top: 8px;
+    padding: 2px 10px; border-radius: 20px;
+    background: rgba(31,111,235,.15); border: 1px solid rgba(31,111,235,.35);
+    color: var(--blue); font-size: 11px; font-weight: 600;
+    font-family: ui-monospace, monospace;
+  }
 
   /* ── PRIMARY ACTIONS ── */
   .actions {
@@ -204,6 +208,29 @@
   .tag.b { background: var(--blue-2); color: #fff; }
   .tag.y { background: #9e6a03; color: #fff; }
 
+  /* ── CALLOUT ── */
+  .callout {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 14px;
+    background: rgba(31,111,235,.08);
+    border: 1px solid rgba(31,111,235,.25);
+    border-radius: var(--r-sm);
+    margin: 12px 0;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .callout.green {
+    background: rgba(63,185,80,.08);
+    border-color: rgba(63,185,80,.3);
+  }
+  .callout.yellow {
+    background: rgba(210,153,34,.08);
+    border-color: rgba(210,153,34,.3);
+  }
+  .callout-icon { flex-shrink: 0; font-size: 16px; line-height: 1.2; }
+  .callout-body { flex: 1; color: var(--fg-2); }
+  .callout-body strong { color: var(--fg-0); }
+
   /* ── FOOTER ── */
   .footer {
     margin-top: 32px; padding-top: 20px;
@@ -238,6 +265,14 @@
   body.is-apk .ctx-pwa-only,
   body.is-pwa .ctx-termux-only,
   body.is-pwa .ctx-apk-only { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
 </style>
 </head>
 <body>
@@ -261,6 +296,7 @@
   </div>
   <h1>DeepSeek Studio</h1>
   <p>AI-powered code editor that runs entirely on your phone</p>
+  <span class="version-badge">v2 · Real PTY · WebGL · Fuzzy patches</span>
 </div>
 
 <!-- ── PRIMARY ACTIONS ── -->
@@ -318,10 +354,10 @@
             </button>
           </div>
         </li>
-        <li>Every session, start the backend:
+        <li>Every session, start the backend (one tap after first run):
           <div class="code-wrap">
-            <pre id="code-start-apk">ds-start</pre>
-            <button class="copy-code" data-target="code-start-apk" title="Copy">
+            <pre id="code-launch-apk">ds-launch</pre>
+            <button class="copy-code" data-target="code-launch-apk" title="Copy">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
@@ -337,24 +373,25 @@
         <li>Open the <strong>Termux</strong> app on your phone</li>
         <li>Start the backend:
           <div class="code-wrap">
-            <pre id="code-start-pwa">ds-start</pre>
-            <button class="copy-code" data-target="code-start-pwa" title="Copy">
+            <pre id="code-launch-pwa">ds-launch</pre>
+            <button class="copy-code" data-target="code-launch-pwa" title="Copy">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
             </button>
           </div>
         </li>
         <li>Come back to this page — it'll auto-reload when the server responds</li>
       </ol>
-      <p style="color: var(--fg-3); font-size: 12px; margin-top: 12px;">
-        💡 Install the <strong>Termux:Widget</strong> app to launch with one tap from your home screen.
-      </p>
+      <div class="callout">
+        <span class="callout-icon">💡</span>
+        <span class="callout-body">Install the <strong>Termux:Widget</strong> app to launch with one tap from your home screen. The installer creates a <strong>🚀 DeepSeek</strong> widget automatically.</span>
+      </div>
     </div>
 
     <div class="ctx-termux-only">
       <p>Running from Termux? Start the backend now:</p>
       <div class="code-wrap">
-        <pre id="code-start-termux">ds-start</pre>
-        <button class="copy-code" data-target="code-start-termux" title="Copy">
+        <pre id="code-launch-termux">ds-launch</pre>
+        <button class="copy-code" data-target="code-launch-termux" title="Copy">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
         </button>
       </div>
@@ -426,8 +463,13 @@
       </button>
     </div>
     <p style="color: var(--fg-3); font-size: 12px; margin-top: 8px;">
-      Takes 2–4 minutes. It clones the repo, installs Node.js and npm dependencies, and creates the <code>ds-*</code> commands.
+      Takes 3–5 minutes. It clones the repo, installs Node.js, native libraries (<code>node-pty</code>, <code>simple-git</code>, <code>@octokit/rest</code>, <code>editkit</code>), and creates the <code>ds-*</code> commands. If any optional library fails, the installer continues and reports which fallbacks activated.
     </p>
+
+    <div class="callout green">
+      <span class="callout-icon">✅</span>
+      <span class="callout-body">After install, run <code>ds-doctor</code> to see a full diagnostics report — dependencies, Termux tools, SD card, and which v2 libraries loaded successfully.</span>
+    </div>
   </div>
 </details>
 
@@ -451,21 +493,77 @@
         <th>Command</th>
         <th>What it does</th>
       </tr>
-      <tr><td><code>ds-start</code></td><td>Boot the backend and open Chrome</td></tr>
+      <tr><td><code>ds-launch</code></td><td><strong>One-tap</strong>: start if needed, then open the browser. Best everyday command.</td></tr>
+      <tr><td><code>ds-start</code></td><td>Boot the backend only (doesn't open browser)</td></tr>
       <tr><td><code>ds-stop</code></td><td>Kill the server, save battery</td></tr>
       <tr><td><code>ds-restart</code></td><td>Full restart (use when things act weird)</td></tr>
       <tr><td><code>ds-status</code></td><td>Show version, uptime, PID</td></tr>
       <tr><td><code>ds-log</code></td><td>Tail the live server log (Ctrl+C to exit)</td></tr>
+      <tr><td><code>ds-doctor</code></td><td><strong>Full self-diagnostic</strong> — deps, tools, SD card, loaded libraries, server health</td></tr>
       <tr><td><code>ds-update</code></td><td>Pull latest code + reinstall dependencies</td></tr>
     </table>
 
     <h3>Home screen widgets</h3>
-    <p>With <strong>Termux:Widget</strong> installed:</p>
+    <p>With <strong>Termux:Widget</strong> installed, the installer auto-creates these shortcuts in <code>~/.shortcuts/</code>:</p>
     <ol>
       <li>Long-press your home screen</li>
       <li>Widgets → Termux:Widget → drag to home</li>
-      <li>Pick <span class="tag g">🚀 DeepSeek</span>, <span class="tag r">🛑 Stop</span>, <span class="tag b">🔄 Restart</span> or <strong>ℹ️ Status</strong></li>
+      <li>Pick one of the installed shortcuts:
+        <br><span class="tag g">🚀 DeepSeek</span> <span class="tag b">🐳 Start</span> <span class="tag r">🛑 Stop</span> <span class="tag y">🔄 Restart</span> <span class="tag b">ℹ️ Status</span> <span class="tag g">🩺 Doctor</span>
+      </li>
     </ol>
+  </div>
+</details>
+
+<!-- ── WHAT'S NEW IN V2 ── -->
+<details>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      What's new in v2
+      <small>Real PTY · WebGL · Fuzzy patches · Octokit</small>
+    </div>
+  </summary>
+  <div class="section-body">
+    <p>v2 upgrades four core systems. Every library is loaded <strong>defensively</strong> — if one is missing, the feature falls back and the app keeps working.</p>
+
+    <h3>🖥️ Terminal — real TTY</h3>
+    <ul>
+      <li>Powered by <code>node-pty</code> instead of plain pipes. <strong>vim, htop, less, nano, ssh</strong> — all interactive TUIs now work properly.</li>
+      <li>True resize events — the terminal reflows correctly when you rotate or resize.</li>
+      <li><strong>Ctrl+F to find</strong> in terminal scrollback (case-sensitive + regex toggles).</li>
+      <li><strong>GPU-accelerated rendering</strong> via WebGL addon — noticeably smoother on long outputs. Auto-falls back to DOM renderer if the GPU rejects it.</li>
+      <li>Clickable URLs in terminal output.</li>
+      <li>Emoji + wide-character (CJK) rendering fixed via Unicode 11 addon.</li>
+    </ul>
+
+    <h3>🔀 Git — fluent + safer</h3>
+    <ul>
+      <li>Powered by <code>simple-git</code> — better error messages, structured results, correct handling of edge cases.</li>
+      <li>Git status now shows precise index vs working-tree state (<code>M </code> = staged, <code> M</code> = modified, <code>??</code> = untracked, <code>UU</code> = conflict).</li>
+      <li>Token still passes via ephemeral <code>GIT_ASKPASS</code> — never lands in <code>.git/config</code>, argv, or <code>ps</code> output.</li>
+    </ul>
+
+    <h3>🐙 GitHub — Octokit</h3>
+    <ul>
+      <li>Powered by <code>@octokit/rest</code> — typed API, automatic pagination, better rate-limit handling.</li>
+      <li>Token now stored <strong>server-side</strong> in <code>~/.deepseek-secrets.json</code> (mode <code>0600</code>) — never in the browser.</li>
+    </ul>
+
+    <h3>🧠 AI edits — fuzzy patches</h3>
+    <ul>
+      <li>Powered by <code>editkit</code> — Aider-style SEARCH/REPLACE matching that tolerates near-miss whitespace.</li>
+      <li>The #1 failure mode of LLM edits (indentation drift) is now handled automatically. Patches that would have failed exact-match now succeed with <em>(fuzzy)</em> label.</li>
+    </ul>
+
+    <div class="callout">
+      <span class="callout-icon">🔍</span>
+      <span class="callout-body">Open the app → <strong>Setup</strong> → <strong>Backend</strong>. You'll see a badge for each library: <strong>active</strong> (green) or <strong>fallback</strong> (grey). If any show "fallback", run <code>ds-update</code> to retry the install.</span>
+    </div>
   </div>
 </details>
 
@@ -489,7 +587,7 @@
     <ul>
       <li><strong>Chat</strong> — describe what you want built. Type <code>/</code> for prompt templates.</li>
       <li><strong>Editor</strong> — Monaco (the VS Code engine) with tabs, find/replace, formatting.</li>
-      <li><strong>Terminal</strong> — full Termux shell. AI commands appear in real-time.</li>
+      <li><strong>Terminal</strong> — full Termux shell with real PTY. Press <strong>Ctrl+F</strong> to search the scrollback. AI commands appear in real-time.</li>
     </ul>
 
     <h3>Sidebar panels</h3>
@@ -498,11 +596,24 @@
       <tr><td><strong>AI</strong></td><td>Quick prompts: Explain, Find bugs, Add docs, Write tests</td></tr>
       <tr><td><strong>Tpl</strong></td><td>7 starter projects (Flutter, Python, Rust, Go, Node, HTML, Kotlin)</td></tr>
       <tr><td><strong>Gen</strong></td><td>Describe an app → AI scaffolds it</td></tr>
-      <tr><td><strong>Term</strong></td><td>Quick commands, package managers, env vars</td></tr>
-      <tr><td><strong>Git</strong></td><td>Clone, branches, commits, stash, tags</td></tr>
+      <tr><td><strong>Term</strong></td><td>Quick commands, package managers, env vars, process list, <strong>Find in terminal</strong></td></tr>
+      <tr><td><strong>Git</strong></td><td>Clone, branches, commits, stash, tags — powered by simple-git + Octokit</td></tr>
       <tr><td><strong>Build</strong></td><td>Android APK/AAB builder with keystore signing</td></tr>
       <tr><td><strong>Backup</strong></td><td>SD-card snapshots (keeps last 5)</td></tr>
-      <tr><td><strong>Setup</strong></td><td>API keys, editor settings, license</td></tr>
+      <tr><td><strong>Setup</strong></td><td>API keys, editor settings, license, <strong>library status</strong></td></tr>
+    </table>
+
+    <h3>Keyboard shortcuts</h3>
+    <table>
+      <tr><th>Shortcut</th><th>Action</th></tr>
+      <tr><td><code>Ctrl+S</code></td><td>Save current file</td></tr>
+      <tr><td><code>Ctrl+Shift+S</code></td><td>Save As…</td></tr>
+      <tr><td><code>Ctrl+R</code></td><td>Reload from disk (Editor tab)</td></tr>
+      <tr><td><code>Ctrl+W</code></td><td>Close current tab</td></tr>
+      <tr><td><code>Ctrl+K</code></td><td>Clear terminal</td></tr>
+      <tr><td><code>Ctrl+F</code></td><td>Find in terminal (Terminal tab)</td></tr>
+      <tr><td><code>Enter</code> / <code>Shift+Enter</code></td><td>Send chat / newline in chat</td></tr>
+      <tr><td><code>F5</code></td><td>Force backend status check</td></tr>
     </table>
   </div>
 </details>
@@ -527,15 +638,31 @@
       <tr><th>Symptom</th><th>Fix</th></tr>
       <tr>
         <td>This page keeps appearing</td>
-        <td>Open Termux and run <code>ds-start</code></td>
+        <td>Open Termux and run <code>ds-launch</code></td>
       </tr>
       <tr>
-        <td>"Cannot GET /api/…"</td>
+        <td>Backend not reachable / "Cannot GET /api/…"</td>
         <td>Run <code>ds-update && ds-restart</code></td>
       </tr>
       <tr>
         <td>Server hangs on startup</td>
         <td>Run <code>ds-log</code> in Termux, look for errors</td>
+      </tr>
+      <tr>
+        <td>Terminal commands show no cursor / no colors</td>
+        <td>Run <code>ds-doctor</code> — if <strong>node-pty</strong> shows ✗, run <code>ds-update</code>. Installer will retry.</td>
+      </tr>
+      <tr>
+        <td>vim / htop render as garbage</td>
+        <td>This means the pipe fallback is active. Same fix as above (<code>ds-update</code>).</td>
+      </tr>
+      <tr>
+        <td>Terminal feels laggy on big output</td>
+        <td>Setup → Terminal → toggle <strong>Use GPU renderer</strong> off then on. Some GPUs prefer DOM renderer.</td>
+      </tr>
+      <tr>
+        <td>Setup → Backend shows a library as "fallback"</td>
+        <td>Run <code>ds-update</code>. If it still falls back, the library may be incompatible with your Termux build — the app still works, just without that feature.</td>
       </tr>
       <tr>
         <td>Wake-lock missing in log</td>
@@ -554,8 +681,16 @@
         <td>In app: <strong>Setup</strong> → paste API key</td>
       </tr>
       <tr>
+        <td>AI patch fails with "no match"</td>
+        <td>Server falls back to exact-match if <code>editkit</code> isn't loaded. Check Setup → Backend. Run <code>ds-update</code>.</td>
+      </tr>
+      <tr>
         <td>Chat is slow / frozen</td>
         <td>Check <code>ds-log</code>. Look for repeated API errors.</td>
+      </tr>
+      <tr>
+        <td>Port 3001 already in use</td>
+        <td>Run <code>pkill -f "node server.js"</code> then <code>ds-start</code></td>
       </tr>
     </table>
   </div>
@@ -571,19 +706,27 @@
     </div>
     <div class="summary-text">
       Where files live
-      <small>Logs, projects, backups</small>
+      <small>Logs, projects, secrets, backups</small>
     </div>
   </summary>
   <div class="section-body">
     <div class="code-wrap">
-      <pre>~/.ds-studio.log                      Server log
-~/.shortcuts/                         Home-screen widget scripts
-~/deepseek-projects/                  Your project files
-~/storage/external-1/DeepSeekBackups/ SD-card backup snapshots
-~/deepseek-projects/deepseek-editor/  The app itself (server + public/)</pre>
+      <pre id="paths">~/.ds-studio.log                       Server log (tail with: ds-log)
+~/.deepseek-secrets.json               API keys + GitHub token (mode 0600)
+~/.deepseek-git-askpass.sh             Ephemeral git helper (token via env)
+~/.deepseek-keystores/                 Android signing keystores
+~/.deepseek-license                    Pro license file
+~/.shortcuts/                          Home-screen widget scripts
+~/deepseek-projects/                   Your project files
+~/storage/external-1/DeepSeekBackups/  SD-card backup snapshots
+~/deepseek-projects/deepseek-editor/   The app itself (server + public/)</pre>
       <button class="copy-code" data-target="paths" title="Copy">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       </button>
+    </div>
+    <div class="callout yellow">
+      <span class="callout-icon">🔐</span>
+      <span class="callout-body"><strong>Secrets:</strong> your API keys and GitHub token live in <code>~/.deepseek-secrets.json</code>. Never commit this file. It's <code>chmod 0600</code> — readable only by your Termux user.</span>
     </div>
   </div>
 </details>
@@ -591,7 +734,7 @@
 <!-- ── FOOTER ── -->
 <div class="footer">
   <p><a href="https://github.com/Coffie3604/deepseek-studio" target="_blank" rel="noopener">github.com/Coffie3604/deepseek-studio</a></p>
-  <p style="margin-top: 6px;">DeepSeek Studio · AI-powered code editor for Android</p>
+  <p style="margin-top: 6px;">DeepSeek Studio v2 · AI-powered code editor for Android</p>
 </div>
 
 <!-- ── TOAST ── -->
@@ -602,9 +745,6 @@
   'use strict';
 
   /* ── CONTEXT DETECTION ── */
-  // If loaded via file:// → we're inside the APK's WebView
-  // If loaded via http://127.0.0.1:3001 → PWA
-  // If loaded via anything else → assume Termux context (unlikely)
   var isFile = location.protocol === 'file:';
   var isLocal = location.protocol === 'http:' && (location.hostname === '127.0.0.1' || location.hostname === 'localhost');
   if (isFile) document.body.classList.add('is-apk');
@@ -660,22 +800,16 @@
   });
 
   /* ── OPEN TERMUX ── */
-  // Android intent to launch Termux. Falls back to a toast if no intent support.
   var termuxBtn = document.getElementById('openTermuxBtn');
   if (termuxBtn) {
     termuxBtn.addEventListener('click', function() {
-      // Intent: launch Termux main activity
-      var intentUrl = 'intent://#Intent;package=com.termux;end';
-      // Some Android versions want the activity explicitly
       var launchUrl = 'intent://com.termux/com.termux.app.TermuxActivity#Intent;package=com.termux;end';
-      // Try the more specific one first; fall back to generic
       var iframe = document.createElement('iframe');
       iframe.style.display = 'none';
       iframe.src = launchUrl;
       document.body.appendChild(iframe);
-      setTimeout(function() { document.body.removeChild(iframe); }, 500);
+      setTimeout(function() { try { document.body.removeChild(iframe); } catch (e) {} }, 500);
       showToast('Opening Termux…');
-      // If Termux isn't installed, nothing happens — fall back to instructions
       setTimeout(function() { showToast('If Termux didn\'t open, launch it manually'); }, 2000);
     });
   }
@@ -706,7 +840,9 @@
       })
       .catch(function() {
         setStatus('checking', 'Backend not running',
-          pollCount === 1 ? 'Looking for server on 127.0.0.1:3001' : 'Retrying… (' + pollCount + ')');
+          pollCount === 1
+            ? 'Looking for server on 127.0.0.1:3001'
+            : 'Retrying… (' + pollCount + ') — run ds-launch in Termux');
       });
   }
 
@@ -715,7 +851,6 @@
 
   /* ── KEYBOARD SHORTCUTS ── */
   document.addEventListener('keydown', function(e) {
-    // R = retry / reload
     if (e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.target.closest('input, textarea')) {
       location.href = '/';
     }
