@@ -2256,8 +2256,8 @@ function updateToolBubble(bubble, result) {
   bubble.classList.remove('running');
   var statusEl = bubble.querySelector('.tool-status');
   var iconEl = bubble.querySelector('.tool-icon');
-  if (result.ok) { bubble.classList.add('success'); if (statusEl) { if (statusEl) statusEl.textContent = '✓'; if (statusEl) statusEl.style.color = 'var(--green)'; } if (iconEl) if (iconEl) iconEl.innerHTML = '<i class="fas fa-check"></i>'; }
-  else { bubble.classList.add('error'); if (statusEl) { if (statusEl) statusEl.textContent = '✗'; if (statusEl) statusEl.style.color = 'var(--red)'; } if (iconEl) if (iconEl) iconEl.innerHTML = '<i class="fas fa-times"></i>'; }
+  if (result.ok) { bubble.classList.add('success'); if (statusEl) { statusEl.textContent = '✓'; statusEl.style.color = 'var(--green)'; } if (iconEl) iconEl.innerHTML = '<i class="fas fa-check"></i>'; }
+  else { bubble.classList.add('error'); if (statusEl) { statusEl.textContent = '✗'; statusEl.style.color = 'var(--red)'; } if (iconEl) iconEl.innerHTML = '<i class="fas fa-times"></i>'; }
   if (result.display) {
     var out = document.createElement('div');
     out.className = 'tool-output';
@@ -3135,7 +3135,7 @@ async function checkToolchain() {
     Object.keys(labels).forEach(function(k) { lines.push((data[k] ? '✅ ' : '❌ ') + labels[k]); if (!data[k]) missing.push(k); });
     statusEl.innerHTML = lines.join('<br>');
     if (installBtn) installBtn.style.display = missing.length > 0 ? 'inline-flex' : 'none';
-  } catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; }
+  } catch (e) { statusEl.textContent = 'Error: ' + e.message; }
 }
 async function installToolchain() {
   var btn = document.getElementById('installToolsBtn');
@@ -3305,8 +3305,8 @@ function openWizardLink(url) { window.open(url, '_blank'); }
 async function verifyAndSaveWizardKey() {
   var key = document.getElementById('wizKeyInput').value.trim();
   var statusEl = document.getElementById('wizStatus');
-  if (!key || !key.startsWith('sk-')) { if (statusEl) statusEl.textContent = 'Key must start with sk-'; statusEl.className = 'wizard-status err'; return; }
-  if (statusEl) statusEl.textContent = 'Verifying…'; statusEl.className = 'wizard-status pending';
+  if (!key || !key.startsWith('sk-')) { statusEl.textContent = 'Key must start with sk-'; statusEl.className = 'wizard-status err'; return; }
+  statusEl.textContent = 'Verifying…'; statusEl.className = 'wizard-status pending';
   try {
     var r = await fetch('https://api.deepseek.com/v1/models', { headers: { 'Authorization': 'Bearer ' + key } });
     if (r.ok) {
@@ -3314,12 +3314,12 @@ async function verifyAndSaveWizardKey() {
       document.getElementById('apiKeyInput').value = key;
       document.getElementById('apiKeyStatus').textContent = '✅ Valid — saved';
       document.getElementById('apiKeyStatus').style.color = 'var(--green)';
-      if (statusEl) statusEl.textContent = '✅ Key verified and saved!'; statusEl.className = 'wizard-status ok';
+      statusEl.textContent = '✅ Key verified and saved!'; statusEl.className = 'wizard-status ok';
       toast('API key saved', 'success');
       logActivity('file', 'DeepSeek API key saved');
       setTimeout(closeApiKeyWizard, 1500);
-    } else { if (statusEl) statusEl.textContent = '❌ Rejected (status ' + r.status + ')'; statusEl.className = 'wizard-status err'; }
-  } catch (e) { if (statusEl) statusEl.textContent = '❌ Network error: ' + e.message; statusEl.className = 'wizard-status err'; }
+    } else { statusEl.textContent = '❌ Rejected (status ' + r.status + ')'; statusEl.className = 'wizard-status err'; }
+  } catch (e) { statusEl.textContent = '❌ Network error: ' + e.message; statusEl.className = 'wizard-status err'; }
 }
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() { navigator.serviceWorker.register('/sw.js').catch(function() {}); });
@@ -3999,11 +3999,11 @@ async function compileCurrent() {
   input.addEventListener('input', function() {
     if (!statusEl) return;
     var v = (this.value || '').trim();
-    if (!v) { if (statusEl) statusEl.textContent = 'Not verified'; if (statusEl) statusEl.style.color = 'var(--fg-3)'; return; }
-    if (!v.startsWith('sk-')) { if (statusEl) statusEl.textContent = '⚠ Keys start with sk-'; if (statusEl) statusEl.style.color = 'var(--yellow)'; return; }
-    if (v.length < 20) { if (statusEl) statusEl.textContent = '⚠ Too short — ' + v.length + ' chars'; if (statusEl) statusEl.style.color = 'var(--yellow)'; return; }
-    if (statusEl) statusEl.textContent = '✓ Key format looks valid — click Test to confirm';
-    if (statusEl) statusEl.style.color = 'var(--green)';
+    if (!v) { statusEl.textContent = 'Not verified'; statusEl.style.color = 'var(--fg-3)'; return; }
+    if (!v.startsWith('sk-')) { statusEl.textContent = '⚠ Keys start with sk-'; statusEl.style.color = 'var(--yellow)'; return; }
+    if (v.length < 20) { statusEl.textContent = '⚠ Too short — ' + v.length + ' chars'; statusEl.style.color = 'var(--yellow)'; return; }
+    statusEl.textContent = '✓ Key format looks valid — click Test to confirm';
+    statusEl.style.color = 'var(--green)';
   });
 
   var autoTestTimer = null;

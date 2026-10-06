@@ -1,10 +1,10 @@
 #!/data/data/com.termux/files/usr/bin/bash
 #
-# DeepSeek Studio — One-time installer (v2)
+# DeepSeek Studio — One-time installer (v2.2)
 # ─────────────────────────────────────────────────────────────────
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/Coffie3604/deepseek-studio/main/install.sh | bash
-#   curl -fsSL .../install.sh | bash -s -- --ref v2.0.0
+#   curl -fsSL .../install.sh | bash -s -- --ref v2.2.0
 #   curl -fsSL .../install.sh | bash -s -- --update
 #
 set -euo pipefail
@@ -55,7 +55,7 @@ fi
 
 echo ""
 printf "${BLUE}╔═══════════════════════════════════════════╗${NC}\n"
-printf "${BLUE}║${NC}   ${BOLD}DeepSeek Studio — Installer v2${NC}          ${BLUE}║${NC}\n"
+printf "${BLUE}║${NC}   ${BOLD}DeepSeek Studio — Installer v2.2${NC}        ${BLUE}║${NC}\n"
 printf "${BLUE}╚═══════════════════════════════════════════╝${NC}\n"
 echo ""
 
@@ -247,7 +247,7 @@ write_script ds-log <<'EOF'
 tail -f "$HOME/.ds-studio.log"
 EOF
 
-# NEW: ds-doctor — full self-diagnostic
+# ds-doctor — full self-diagnostic
 write_script ds-doctor <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 DIR="\${DS_INSTALL_DIR:-$INSTALL_DIR}"
@@ -385,4 +385,5 @@ echo ""
 echo -e "${CYAN}Tip:${NC} add the ${BOLD}🚀 DeepSeek${NC} widget for one-tap launch (Termux:Widget from F-Droid)"
 echo ""
 echo -e "${CYAN}First-time setup:${NC} open the app, tap ${BOLD}Setup${NC} in the sidebar, paste your DeepSeek API key."
+echo -e "${CYAN}What's new in v2.2:${NC} open the ${BOLD}Log${NC} tab in the sidebar to see the changelog + live activity."
 echo ""

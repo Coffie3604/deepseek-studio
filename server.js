@@ -1,24 +1,23 @@
 #!/usr/bin/env node
 /**
- * DeepSeek Studio — Backend v2
+ * DeepSeek Studio — Backend v2.3
  * ─────────────────────────────────────────────────────────────────────
- * Local-first coding backend for Termux (Android). Serves the SPA in
- * ./public, exposes a filesystem + git + GitHub API, a PTY-over-WebSocket
- * terminal, and a provider-agnostic AI proxy.
+ * Local-first coding backend for Termux (Android).
  *
- * v2 upgrades:
- *   • simple-git    — fluent, structured, promise-based git ops
- *   • @octokit/rest — typed GitHub API with pagination + rate-limit awareness
- *   • node-pty      — real PTY (vim / htop / interactive TUIs now work)
- *   • editkit       — Aider-style fuzzy SEARCH/REPLACE matching
+ * v2.3 — FULL DEVELOPER FREEDOM
+ *   ⚡ /api/compile        — language-aware syntax check for the ⚡ button
+ *   🔑 /api/license/*      — Pro license status/save/remove
+ *   🛠️  /api/deploy/install-tools — one-tap pkg install of missing tools
+ *   📦 /api/deploy/artifacts       — recent AAB/APK scan
+ *   🏷️  /api/git/tags/list         — populates the Git panel Tags box
+ *   📱 Expanded Termux:API tools:
+ *      clipboard get/set, battery, torch, vibrate, volume, TTS,
+ *      dialog, wifi info, location, share, camera, fingerprint,
+ *      sms send, call, download, storage info, sensors, contacts
  *
- * Every optional library is loaded defensively: if it's missing, the
- * server logs a warning and falls back to the original code path. Nothing
- * hard-fails.
- *
- * Security: git tokens pass through an ephemeral GIT_ASKPASS helper so they
- * never land in .git/config, argv, or `ps` output. All provider keys stay
- * server-side and are redacted from every log line and error response.
+ * v2.2: /api/changelog + X-DeepSeek-Version header
+ * v2.1: external folder linking + realpath-verified fs
+ * v2.0: simple-git, @octokit/rest, node-pty, editkit
  */
 
 'use strict';
@@ -33,7 +32,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
 
-/* ─── Optional libraries (graceful fallback) ─── */
+/* ─── Optional libraries ─── */
 let simpleGitFactory = null;
 try {
     const sg = require('simple-git');
@@ -52,9 +51,18 @@ try { ptyLib = require('node-pty'); } catch (_) {
 }
 
 let editkitLib = null;
-try { editkitLib = require('editkit'); } catch (_) {
-    console.warn('[deps] editkit not available — using exact-match patch');
-}
+const editkitReady = (async () => {
+    try {
+        const mod = await import('editkit');
+        editkitLib = mod.default || mod;
+        console.log('[deps] editkit loaded — fuzzy patches enabled');
+    } catch (err) {
+        console.warn('[deps] editkit not available — using exact-match patch:', err && err.message);
+    }
+})();
+
+let termuxApiLib = null;
+try { termuxApiLib = require('termux-api'); } catch (_) { /* CLI fallback */ }
 
 /* ─── Constants ─── */
 const app = express();
@@ -69,12 +77,61 @@ const KEYSTORE_DIR = path.join(HOME, '.deepseek-keystores');
 const LICENSE_FILE = path.join(HOME, '.deepseek-license');
 const SECRETS_FILE = path.join(HOME, '.deepseek-secrets.json');
 const ASKPASS_HELPER = path.join(HOME, '.deepseek-git-askpass.sh');
+const LINKS_FILE = path.join(HOME, '.deepseek-links.json');
 const TERMUX_BASH = '/data/data/com.termux/files/usr/bin/bash';
 
 const PRO_LICENSE_PREFIX = 'DS-PRO-';
 const PKG_VERSION = (() => {
-    try { return require('./package.json').version; } catch (_) { return '0.0.0'; }
+    try { return require('./package.json').version; } catch (_) { return '2.3.0'; }
 })();
+
+const CHANGELOG = [
+    {
+        version: '2.3.0', date: '2025-10', type: 'feature',
+        items: [
+            'Compile button now works for 15+ languages',
+            'Pro license gating for signed AAB builds',
+            'One-tap install of missing Android toolchain',
+            'Recent artifacts scanner (AAB/APK)',
+            'Git panel Tags list populates automatically',
+            '15 new Termux:API tools: clipboard, battery, torch, vibrate, volume, TTS, dialog, wifi, location, share, camera, fingerprint, sms, call, storage',
+        ],
+    },
+    {
+        version: '2.2.0', date: '2025-10', type: 'feature',
+        items: [
+            'External folder linking — symlink any folder from your phone',
+            'Folder picker modal with breadcrumb navigation',
+            'Realpath-verified fs operations (no symlink escapes)',
+            'Copy buttons on every copyable surface',
+            'In-chat search with match highlighting',
+            'Updates & Activity log panel',
+        ],
+    },
+    {
+        version: '2.1.0', date: '2025-10', type: 'feature',
+        items: [
+            'Dynamic ESM import for editkit',
+            'Library status badges in Setup',
+            'GPU renderer toggle for terminal (WebGL)',
+            'Terminal search bar (Ctrl+F)',
+        ],
+    },
+    {
+        version: '2.0.0', date: '2025-10', type: 'feature',
+        items: [
+            'simple-git fluent git operations',
+            '@octokit/rest typed GitHub API',
+            'node-pty — real TTY (vim/htop/less work)',
+            'editkit — Aider-style fuzzy SEARCH/REPLACE',
+            'xterm.js 5.5 + WebGL/search/unicode11/serialize',
+        ],
+    },
+    {
+        version: '1.0.0', date: '2025-09', type: 'feature',
+        items: ['Initial release'],
+    },
+];
 
 /* ─── Directory setup ─── */
 for (const dir of [WORKSPACE, KEYSTORE_DIR]) {
@@ -83,13 +140,25 @@ for (const dir of [WORKSPACE, KEYSTORE_DIR]) {
 try {
     fs.writeFileSync(ASKPASS_HELPER,
         '#!/data/data/com.termux/files/usr/bin/sh\n' +
-        '# Ephemeral git askpass helper — prints token from env,\n' +
-        '# so it never appears in argv, .git/config, or ps output.\n' +
         'printf "%s\\n" "${GIT_ASKPASS_TOKEN:-}"\n', { mode: 0o700 });
     fs.chmodSync(ASKPASS_HELPER, 0o700);
 } catch (_) {}
 
-/* ─── Secret store (mode 0600) ─── */
+/* ─── Stores ─── */
+function loadLinks() {
+    try {
+        const p = JSON.parse(fs.readFileSync(LINKS_FILE, 'utf8'));
+        return (p && typeof p === 'object') ? p : {};
+    } catch (_) { return {}; }
+}
+function saveLinks() {
+    try {
+        fs.writeFileSync(LINKS_FILE, JSON.stringify(links, null, 2), { mode: 0o600 });
+        fs.chmodSync(LINKS_FILE, 0o600);
+    } catch (err) { console.error('[links] save failed:', err.message); }
+}
+let links = loadLinks();
+
 function loadSecrets() {
     try {
         const parsed = JSON.parse(fs.readFileSync(SECRETS_FILE, 'utf8'));
@@ -97,7 +166,6 @@ function loadSecrets() {
     } catch (_) { return {}; }
 }
 let secrets = loadSecrets();
-
 function saveSecrets() {
     try {
         fs.writeFileSync(SECRETS_FILE, JSON.stringify(secrets, null, 2), { mode: 0o600 });
@@ -141,28 +209,72 @@ function isCommandBlocked(cmd) {
     for (const p of BLOCKED_PATTERNS) if (p.test(cmd)) return p.source;
     return null;
 }
-
 function withinBase(base, resolved) {
     const b = path.resolve(base);
     const r = path.resolve(resolved);
     return r === b || r.startsWith(b + path.sep);
 }
+function safeRealPath(p) {
+    try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); }
+}
+
+const ALLOWED_EXTERNAL_ROOTS = (() => {
+    const candidates = [HOME, '/storage/emulated/0', '/storage/self/primary', '/sdcard'];
+    const out = new Set();
+    for (const c of candidates) {
+        try { out.add(fs.realpathSync(c)); } catch (_) {}
+    }
+    return [...out];
+})();
+
+function isAllowedExternal(absPath) {
+    if (!absPath) return false;
+    let real;
+    try { real = fs.realpathSync(absPath); } catch (_) { return false; }
+    for (const root of ALLOWED_EXTERNAL_ROOTS) {
+        if (real === root || real.startsWith(root + path.sep)) return true;
+    }
+    return false;
+}
 
 function resolveInWorkspace(rel, base = WORKSPACE) {
     const target = path.resolve(base, rel == null ? '' : String(rel));
-    return withinBase(base, target) ? target : null;
+    if (!withinBase(base, target)) return null;
+    const workspaceReal = safeRealPath(WORKSPACE);
+    const check = (abs) => {
+        const real = safeRealPath(abs);
+        if (withinBase(workspaceReal, real)) return true;
+        if (isAllowedExternal(real)) return true;
+        return false;
+    };
+    if (fs.existsSync(target)) return check(target) ? target : null;
+    let cur = target;
+    const root = path.parse(cur).root;
+    while (cur !== root && !fs.existsSync(cur)) cur = path.dirname(cur);
+    if (cur === root) return target;
+    return check(cur) ? target : null;
 }
 
 /* ─── Express baseline ─── */
 app.disable('x-powered-by');
-app.use(cors({ origin: true }));
+app.use(cors({
+    origin: (origin, cb) => {
+        // No Origin header = same-origin or curl → allow
+        if (!origin) return cb(null, true);
+        // Loopback origins only
+        if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin)) return cb(null, true);
+        return cb(null, false);
+    },
+    credentials: false,
+}));
 app.use(express.json({ limit: '25mb' }));
-app.use((req, _res, next) => {
+app.use((req, res, next) => {
     if (req.body && typeof req.body === 'object') {
         for (const k of ['__proto__', 'constructor', 'prototype']) {
             if (Object.prototype.hasOwnProperty.call(req.body, k)) delete req.body[k];
         }
     }
+    res.setHeader('X-DeepSeek-Version', PKG_VERSION);
     next();
 });
 
@@ -173,6 +285,7 @@ const LONG_RUNNING = new Set([
     '/api/git/clone', '/api/git/push', '/api/git/pull', '/api/git/pull/rebase',
     '/api/git/fetch', '/api/exec', '/api/ai/chat', '/api/ai/tool-call',
     '/api/backup/restore', '/api/deploy/build', '/api/deploy/aab',
+    '/api/deploy/install-tools', '/api/compile',
 ]);
 app.use('/api/', (req, res, next) => {
     const ip = req.ip || 'local';
@@ -190,7 +303,7 @@ setInterval(() => {
     for (const [ip, w] of rateLimitMap) if (now > w.reset) rateLimitMap.delete(ip);
 }, 5 * 60 * 1000).unref();
 
-/* ─── Low-level execFile helper (still used for keytool, sh, etc.) ─── */
+/* ─── Shell helpers ─── */
 function run(bin, argv, opts = {}) {
     return new Promise((resolve) => {
         execFile(bin, argv, {
@@ -208,13 +321,19 @@ function run(bin, argv, opts = {}) {
     });
 }
 
-/* ═══════════════════════════════════════════════════════════════════
-   git: simple-git primary, execFile fallback
-   ═══════════════════════════════════════════════════════════════════ */
+/* ─── Termux:API helper — CLI-first with module fallback ─── */
+function termuxCli(cmd, args = [], timeout = 8000) {
+    return run(cmd, args, { timeout });
+}
+function shellQuote(s) {
+    return "'" + String(s == null ? '' : s).replace(/'/g, "'\\''") + "'";
+}
 
+/* ═══════════════════════════════════════════════════════════════════
+   git
+   ═══════════════════════════════════════════════════════════════════ */
 const ghToken = () => String(secrets.github_token || '').trim();
 
-/** Legacy git runner — used when simple-git isn't installed. */
 async function gitLegacy(workdir, args, opts = {}) {
     const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
     if (opts.token) {
@@ -229,21 +348,12 @@ async function gitLegacy(workdir, args, opts = {}) {
     return res;
 }
 
-/**
- * Build a simple-git instance for a workspace-relative dir.
- * Token is injected via GIT_ASKPASS so it never appears in argv or config.
- */
 function getGit(relDir = '') {
     if (!simpleGitFactory) throw Object.assign(new Error('simple-git not installed'), { status: 500 });
     const workdir = resolveInWorkspace(relDir);
     if (!workdir) throw Object.assign(new Error('Forbidden'), { status: 403 });
     const token = ghToken();
-    const g = simpleGitFactory({
-        baseDir: workdir,
-        binary: 'git',
-        maxConcurrentProcesses: 4,
-        trimmed: true,
-    });
+    const g = simpleGitFactory({ baseDir: workdir, binary: 'git', maxConcurrentProcesses: 4, trimmed: true });
     return g.env({
         GIT_TERMINAL_PROMPT: '0',
         GIT_ASKPASS: token ? ASKPASS_HELPER : 'echo',
@@ -258,37 +368,12 @@ function getOctokit() {
     return new OctokitLib({ auth: token, userAgent: 'DeepSeek-Studio/' + PKG_VERSION });
 }
 
-/** Normalize any git op result into the { code, ok, stdout, stderr } shape. */
-function gitOk(extra = {}) {
-    return Object.assign({ code: 0, ok: true, stdout: '', stderr: '' }, extra);
-}
+function gitOk(extra = {}) { return Object.assign({ code: 0, ok: true, stdout: '', stderr: '' }, extra); }
 function gitErr(err) {
     const msg = redact(err && err.message ? err.message : String(err));
-    return {
-        code: typeof (err && err.code) === 'number' ? err.code : 1,
-        ok: false, stdout: '', stderr: msg, error: msg,
-    };
-}
-/** Run a git op and always reply with the legacy shape. */
-async function gitReply(res, fn) {
-    try {
-        const result = await fn();
-        if (result && typeof result === 'object' && 'code' in result && 'ok' in result) {
-            return res.json(result);
-        }
-        let stdout = '';
-        if (typeof result === 'string') stdout = result;
-        else if (result && typeof result === 'object') {
-            if (result.stdout) stdout = result.stdout;
-            else stdout = JSON.stringify(result);
-        }
-        res.json(gitOk({ stdout: redact(stdout) }));
-    } catch (e) {
-        res.status(e && e.status ? e.status : 500).json(gitErr(e));
-    }
+    return { code: typeof (err && err.code) === 'number' ? err.code : 1, ok: false, stdout: '', stderr: msg, error: msg };
 }
 
-/* ─── fetch with timeout + retry ─── */
 async function fetchWithRetry(url, options = {}, conf = {}) {
     const retries = conf.retries == null ? 2 : conf.retries;
     const timeout = conf.timeout || 120000;
@@ -330,31 +415,34 @@ app.get('/api/version', (_req, res) => {
             '@octokit/rest': !!OctokitLib,
             'node-pty': !!ptyLib,
             'editkit': !!editkitLib,
+            'termux-api': !!termuxApiLib,
         },
     });
+});
+
+app.get('/api/changelog', (_req, res) => {
+    res.json({ current: PKG_VERSION, changelog: CHANGELOG });
 });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
 
 app.get('/api/diagnostics', (_req, res) => {
     res.json({
-        version: PKG_VERSION,
-        node: process.version,
-        platform: process.platform,
-        arch: process.arch,
+        version: PKG_VERSION, node: process.version,
+        platform: process.platform, arch: process.arch,
         uptime: Math.floor(process.uptime()),
         workspace: WORKSPACE,
+        allowedExternalRoots: ALLOWED_EXTERNAL_ROOTS,
+        linkCount: Object.keys(links).length,
         libs: {
-            'simple-git': !!simpleGitFactory,
-            '@octokit/rest': !!OctokitLib,
-            'node-pty': !!ptyLib,
-            'editkit': !!editkitLib,
+            'simple-git': !!simpleGitFactory, '@octokit/rest': !!OctokitLib,
+            'node-pty': !!ptyLib, 'editkit': !!editkitLib, 'termux-api': !!termuxApiLib,
         },
         features: {
-            gitFluent: !!simpleGitFactory,
-            githubOctokit: !!OctokitLib,
-            realPty: !!ptyLib,
-            fuzzyPatch: !!editkitLib,
+            gitFluent: !!simpleGitFactory, githubOctokit: !!OctokitLib,
+            realPty: !!ptyLib, fuzzyPatch: !!editkitLib,
+            externalLinks: true, termuxApiModule: !!termuxApiLib,
+            compile: true, license: true,
         },
         secrets: Object.keys(secrets),
         hasGitHubToken: !!ghToken(),
@@ -362,7 +450,7 @@ app.get('/api/diagnostics', (_req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   Secrets API
+   Secrets
    ═══════════════════════════════════════════════════════════════════ */
 app.get('/api/secrets', (_req, res) => {
     const out = {};
@@ -416,12 +504,26 @@ app.get('/api/fs/list', async (req, res) => {
     const target = resolveInWorkspace(req.query.path);
     if (!target) return res.status(403).json({ error: 'Forbidden' });
     try {
-        const items = (await fsp.readdir(target, { withFileTypes: true }))
-            .filter((d) => d.name !== '.gitkeep' && d.name !== '.git')
-            .map((d) => ({
-                name: d.name, isDir: d.isDirectory(),
-                path: path.relative(WORKSPACE, path.join(target, d.name)).replace(/\\/g, '/'),
-            }));
+        const raw = await fsp.readdir(target, { withFileTypes: true });
+        const items = [];
+        for (const d of raw) {
+            if (d.name === '.gitkeep') continue;
+            const isLinked = !!links[d.name];
+            if (d.name === '.git' && !isLinked) continue;
+            const full = path.join(target, d.name);
+            let isExternal = false;
+            try {
+                const real = fs.realpathSync(full);
+                if (!withinBase(WORKSPACE, real) && isAllowedExternal(real)) isExternal = true;
+            } catch (_) {}
+            items.push({
+                name: d.name,
+                isDir: d.isDirectory() || (d.isSymbolicLink() && fs.existsSync(full) && fs.statSync(full).isDirectory()),
+                isLink: d.isSymbolicLink(),
+                external: isExternal,
+                path: path.relative(WORKSPACE, full).replace(/\\/g, '/'),
+            });
+        }
         items.sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
         res.json(items);
     } catch (err) { res.status(500).json({ error: err.message }); }
@@ -453,6 +555,15 @@ app.delete('/api/fs/delete', async (req, res) => {
     const target = resolveInWorkspace(req.query.path);
     if (!target) return res.status(403).json({ error: 'Forbidden' });
     if (target === WORKSPACE) return res.status(400).json({ error: 'Refusing to delete workspace root' });
+    try {
+        const real = fs.realpathSync(target);
+        if (!withinBase(WORKSPACE, real) && isAllowedExternal(real)) {
+            return res.status(400).json({
+                error: 'Target is outside workspace — use /api/fs/link to remove the link.',
+                requiresUnlink: true,
+            });
+        }
+    } catch (_) {}
     try { await fsp.rm(target, { recursive: true, force: true }); res.json({ ok: true }); }
     catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -467,6 +578,117 @@ app.post('/api/fs/rename', async (req, res) => {
         await fsp.mkdir(path.dirname(dst), { recursive: true });
         await fsp.rename(src, dst);
         res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   External Folder Linking
+   ═══════════════════════════════════════════════════════════════════ */
+function validLinkName(name) {
+    return typeof name === 'string' && name.length > 0 && name.length <= 100 &&
+        !name.includes('/') && !name.includes('\\') &&
+        name !== '.' && name !== '..' && /^[A-Za-z0-9._-]+$/.test(name);
+}
+
+app.get('/api/fs/links', async (_req, res) => {
+    const out = [];
+    for (const [name, meta] of Object.entries(links)) {
+        const linkPath = path.join(WORKSPACE, name);
+        let exists = false, isSymlink = false, targetExists = false, isDir = false, size = null;
+        try {
+            const lst = await fsp.lstat(linkPath);
+            exists = true; isSymlink = lst.isSymbolicLink();
+        } catch (_) {}
+        try {
+            const st = await fsp.stat(linkPath);
+            targetExists = true; isDir = st.isDirectory(); size = st.size;
+        } catch (_) {}
+        out.push({
+            name, target: meta.target, createdAt: meta.createdAt || null,
+            exists, isSymlink, targetExists, isDir, size,
+            broken: exists && !targetExists,
+        });
+    }
+    res.json({ links: out, allowedRoots: ALLOWED_EXTERNAL_ROOTS });
+});
+
+app.post('/api/fs/link', async (req, res) => {
+    const rawTarget = String((req.body || {}).target || '').trim();
+    if (!rawTarget) return res.status(400).json({ error: 'target path required' });
+    if (!path.isAbsolute(rawTarget)) return res.status(400).json({ error: 'target must be absolute' });
+    let stat;
+    try { stat = await fsp.stat(rawTarget); }
+    catch (e) { return res.status(404).json({ error: 'Target not found: ' + rawTarget }); }
+    if (!stat.isDirectory()) return res.status(400).json({ error: 'Target must be a directory' });
+    if (!isAllowedExternal(rawTarget)) {
+        return res.status(403).json({ error: 'Target is outside the allowed roots', allowedRoots: ALLOWED_EXTERNAL_ROOTS });
+    }
+    const realTarget = safeRealPath(rawTarget);
+    if (withinBase(safeRealPath(WORKSPACE), realTarget)) {
+        return res.status(400).json({ error: 'Target is already inside the workspace' });
+    }
+    let name = String((req.body || {}).name || '').trim();
+    if (!name) name = path.basename(realTarget);
+    if (!validLinkName(name)) return res.status(400).json({ error: 'Invalid link name' });
+    const linkPath = path.join(WORKSPACE, name);
+    if (fs.existsSync(linkPath) || links[name]) {
+        return res.status(409).json({ error: 'A link or file already exists at: ' + name });
+    }
+    try {
+        await fsp.symlink(realTarget, linkPath, 'dir');
+        links[name] = { target: realTarget, createdAt: new Date().toISOString() };
+        saveLinks();
+        console.log('[links] created ' + name + ' → ' + realTarget);
+        res.json({ ok: true, link: { name, target: realTarget } });
+    } catch (err) {
+        res.status(500).json({ error: 'Symlink failed: ' + err.message });
+    }
+});
+
+app.delete('/api/fs/link', async (req, res) => {
+    const name = String(req.query.name || '').trim();
+    if (!validLinkName(name)) return res.status(400).json({ error: 'invalid link name' });
+    const linkPath = path.join(WORKSPACE, name);
+    if (!withinBase(WORKSPACE, linkPath)) return res.status(403).json({ error: 'Forbidden' });
+    try {
+        let removed = false;
+        if (fs.existsSync(linkPath) || (() => { try { fs.lstatSync(linkPath); return true; } catch { return false; } })()) {
+            const lst = fs.lstatSync(linkPath);
+            if (lst.isSymbolicLink()) { await fsp.unlink(linkPath); removed = true; }
+            else return res.status(400).json({ error: 'Refusing to delete: entry is not a symlink.' });
+        }
+        if (links[name]) { delete links[name]; saveLinks(); }
+        console.log('[links] removed ' + name);
+        res.json({ ok: true, removed });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/fs/browse', async (req, res) => {
+    const raw = String(req.query.path || '').trim();
+    if (!raw) {
+        const suggestions = [
+            { name: 'Termux home', path: HOME },
+            { name: 'Shared storage', path: '/storage/emulated/0' },
+            { name: 'Downloads', path: path.join(HOME, 'storage', 'downloads') },
+            { name: 'Documents', path: path.join(HOME, 'storage', 'documents') },
+            { name: 'DCIM (photos)', path: path.join(HOME, 'storage', 'dcim') },
+            { name: 'SD card', path: path.join(HOME, 'storage', 'external-1') },
+        ].filter((s) => { try { return fs.existsSync(s.path) && isAllowedExternal(s.path); } catch { return false; } });
+        return res.json({ path: '', parent: null, roots: true, items: suggestions });
+    }
+    if (!path.isAbsolute(raw)) return res.status(400).json({ error: 'path must be absolute' });
+    if (!isAllowedExternal(raw)) return res.status(403).json({ error: 'Outside allowed roots', allowedRoots: ALLOWED_EXTERNAL_ROOTS });
+    try {
+        const rawEntries = await fsp.readdir(raw, { withFileTypes: true });
+        const items = rawEntries
+            .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+            .map((d) => ({ name: d.name, path: path.join(raw, d.name) }))
+            .sort((a, b) => a.name.localeCompare(b.name));
+        const parent = path.dirname(raw);
+        const parentAllowed = parent !== raw && isAllowedExternal(parent);
+        res.json({ path: raw, parent: parentAllowed ? parent : null, roots: false, items });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -490,17 +712,123 @@ app.post('/api/exec', (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
+   Compile — language-aware syntax check
+   ═══════════════════════════════════════════════════════════════════ */
+const COMPILE_RECIPES = {
+    py:   { cmd: 'python3 -c "import py_compile,sys;py_compile.compile(sys.argv[1],doraise=True)" "$1"', lang: 'python' },
+    js:   { cmd: 'node --check "$1"', lang: 'javascript' },
+    mjs:  { cmd: 'node --check "$1"', lang: 'javascript' },
+    cjs:  { cmd: 'node --check "$1"', lang: 'javascript' },
+    ts:   { cmd: 'npx --yes tsc --noEmit --skipLibCheck "$1"', lang: 'typescript' },
+    tsx:  { cmd: 'npx --yes tsc --noEmit --skipLibCheck --jsx react "$1"', lang: 'typescript' },
+    json: { cmd: 'node -e "JSON.parse(require(\'fs\').readFileSync(process.argv[1],\'utf8\'))" "$1"', lang: 'json' },
+    sh:   { cmd: 'bash -n "$1"', lang: 'shell' },
+    bash: { cmd: 'bash -n "$1"', lang: 'shell' },
+    c:    { cmd: 'cc -fsyntax-only "$1"', lang: 'c' },
+    cpp:  { cmd: 'c++ -fsyntax-only "$1"', lang: 'cpp' },
+    cc:   { cmd: 'c++ -fsyntax-only "$1"', lang: 'cpp' },
+    rs:   { cmd: 'rustc --edition=2021 --crate-type=bin --emit=metadata -o /dev/null "$1"', lang: 'rust' },
+    go:   { cmd: 'gofmt -e "$1" >/dev/null', lang: 'go' },
+    java: { cmd: 'javac -d "$(mktemp -d)" "$1"', lang: 'java' },
+    kt:   { cmd: 'kotlinc "$1" -d "$(mktemp -d)" 2>&1 || kotlinc "$1" -include-runtime -d /tmp/ds-kt.jar', lang: 'kotlin' },
+    dart: { cmd: 'dart analyze "$1"', lang: 'dart' },
+    yaml: { cmd: 'python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" "$1"', lang: 'yaml' },
+    yml:  { cmd: 'python3 -c "import yaml,sys;yaml.safe_load(open(sys.argv[1]))" "$1"', lang: 'yaml' },
+    html: { cmd: null, lang: 'html', note: 'HTML has no compile step — open in browser to check' },
+    css:  { cmd: null, lang: 'css',  note: 'CSS has no compile step' },
+    scss: { cmd: null, lang: 'scss', note: 'SCSS requires sass — install with: pkg install nodejs && npm i -g sass' },
+    md:   { cmd: null, lang: 'markdown', note: 'Markdown has no compile step' },
+    xml:  { cmd: 'xmllint --noout "$1" 2>&1 || echo "install: pkg install libxml2-utils"', lang: 'xml' },
+    php:  { cmd: 'php -l "$1"', lang: 'php' },
+    rb:   { cmd: 'ruby -c "$1"', lang: 'ruby' },
+    lua:  { cmd: 'luac -p "$1"', lang: 'lua' },
+    sql:  { cmd: null, lang: 'sql', note: 'SQL has no generic syntax check' },
+    toml: { cmd: 'python3 -c "import sys;try:\\n    import tomllib as t\\nexcept: import tomli as t\\nt.load(open(sys.argv[1],\'rb\'))" "$1"', lang: 'toml' },
+};
+
+app.post('/api/compile', async (req, res) => {
+    const rel = String((req.body || {}).path || '');
+    const target = resolveInWorkspace(rel);
+    if (!target) return res.status(403).json({ error: 'Forbidden' });
+    if (!fs.existsSync(target)) return res.status(404).json({ error: 'File not found' });
+    if (!fs.statSync(target).isFile()) return res.status(400).json({ error: 'Not a file' });
+
+    const ext = path.extname(target).toLowerCase().replace(/^\./, '');
+    const recipe = COMPILE_RECIPES[ext];
+    if (!recipe) {
+        return res.json({ ok: false, lang: ext || 'unknown', cmd: null, code: 1,
+            output: 'No compile rule for .' + ext });
+    }
+    if (!recipe.cmd) {
+        return res.json({ ok: true, lang: recipe.lang, cmd: null, code: 0,
+            output: recipe.note || 'Nothing to compile' });
+    }
+
+    const esc = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
+    const cmd = recipe.cmd.replace(/\$1/g, esc(target));
+    const workdir = path.dirname(target);
+
+    const r = await run('sh', ['-c', cmd], { cwd: workdir, timeout: 120000, maxBuffer: 20 * 1024 * 1024 });
+    const output = redact((r.stdout || '') + (r.stderr ? '\n' + r.stderr : '')) || '(no output)';
+    res.json({
+        ok: !r.failed, lang: recipe.lang, cmd,
+        code: r.failed ? (typeof r.code === 'number' ? r.code : 1) : 0,
+        output,
+    });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   License — gates signed AAB builds
+   ═══════════════════════════════════════════════════════════════════ */
+function readLicense() {
+    try {
+        if (!fs.existsSync(LICENSE_FILE)) return '';
+        return fs.readFileSync(LICENSE_FILE, 'utf8').trim();
+    } catch (_) { return ''; }
+}
+function writeLicense(key) {
+    fs.writeFileSync(LICENSE_FILE, String(key).trim() + '\n', { mode: 0o600 });
+    try { fs.chmodSync(LICENSE_FILE, 0o600); } catch (_) {}
+}
+function validateLicense(key) {
+    if (typeof key !== 'string') return false;
+    const k = key.trim();
+    return k.startsWith(PRO_LICENSE_PREFIX) && /^DS-PRO-[A-Z0-9-]{12,}$/i.test(k);
+}
+
+app.get('/api/license/status', (_req, res) => {
+    const key = readLicense();
+    if (!key) return res.json({ pro: false, key: '' });
+    const pro = validateLicense(key);
+    res.json({ pro, key: pro ? redact(key) : '' });
+});
+
+app.post('/api/license/save', (req, res) => {
+    const key = String((req.body || {}).key || '').trim();
+    if (!validateLicense(key)) {
+        return res.status(400).json({ ok: false, error: 'Invalid license format. Expected DS-PRO-XXXX-XXXX-XXXX.' });
+    }
+    try { writeLicense(key); res.json({ ok: true, key: redact(key) }); }
+    catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+app.delete('/api/license/remove', (_req, res) => {
+    try {
+        if (fs.existsSync(LICENSE_FILE)) fs.unlinkSync(LICENSE_FILE);
+        res.json({ ok: true });
+    } catch (err) { res.status(500).json({ ok: false, error: err.message }); }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
    AI tool calls
    ═══════════════════════════════════════════════════════════════════ */
 function toolResult(res, ok, display, result) {
     return res.json({ ok: !!ok, display: display || '', result: result || {} });
 }
 
-/** Fuzzy patch via editkit, fallback to exact indexOf. */
 function applyPatchSmart(original, search, replace, replaceAll) {
     if (editkitLib) {
         try {
-            // editkit public API: attempt a tolerant search/replace
             const fn = editkitLib.applyEdits || editkitLib.applySearchReplace || editkitLib.patch;
             if (typeof fn === 'function') {
                 const r = fn(original, search, replace, { replaceAll: replaceAll === true });
@@ -510,11 +838,8 @@ function applyPatchSmart(original, search, replace, replaceAll) {
                 }
                 if (typeof r === 'string') return { ok: true, content: r, count: 1, fuzzy: true };
             }
-        } catch (e) {
-            // fall through to exact match
-        }
+        } catch (_) {}
     }
-    // Exact-match fallback
     let idx = 0, count = 0;
     while ((idx = original.indexOf(search, idx)) !== -1) { count++; idx += search.length; }
     if (count === 0) {
@@ -524,9 +849,7 @@ function applyPatchSmart(original, search, replace, replaceAll) {
         }
         return { ok: false, error: 'no match' };
     }
-    if (count > 1 && replaceAll !== true) {
-        return { ok: false, error: 'ambiguous (' + count + ' matches)', count };
-    }
+    if (count > 1 && replaceAll !== true) return { ok: false, error: 'ambiguous (' + count + ' matches)', count };
     const content = replaceAll === true ? original.split(search).join(replace) : original.replace(search, replace);
     return { ok: true, content, count: replaceAll === true ? count : 1, fuzzy: false };
 }
@@ -537,6 +860,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
     const a = args || {};
     try {
         switch (name) {
+        /* ────────── File operations ────────── */
         case 'write_file': {
             const target = resolveInWorkspace(a.path);
             if (!target) return res.status(403).json({ error: 'outside workspace' });
@@ -557,7 +881,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             if (!fs.existsSync(target)) return toolResult(res, false, 'Not found: ' + a.path, { error: 'not found' });
             const items = (await fsp.readdir(target, { withFileTypes: true }))
-                .filter((d) => d.name !== '.gitkeep' && d.name !== '.git')
+                .filter((d) => d.name !== '.gitkeep')
                 .map((d) => (d.isDirectory() ? '[dir] ' : '[file] ') + d.name);
             return toolResult(res, true, 'Listed ' + items.length + ' items', { items });
         }
@@ -572,13 +896,38 @@ app.post('/api/ai/tool-call', async (req, res) => {
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             if (target === WORKSPACE) return res.status(400).json({ error: 'refusing to delete workspace root' });
             if (!fs.existsSync(target)) return toolResult(res, false, 'Not found', { error: 'not found' });
+            try {
+                const real = fs.realpathSync(target);
+                if (!withinBase(WORKSPACE, real) && isAllowedExternal(real)) {
+                    return toolResult(res, false, 'Refusing to delete external link target — unlink instead', { error: 'external-protected' });
+                }
+            } catch (_) {}
             await fsp.rm(target, { recursive: true, force: true });
             return toolResult(res, true, 'Deleted: ' + a.path, { ok: true });
         }
+        case 'move_file': {
+            const src = resolveInWorkspace(a.from);
+            const dst = resolveInWorkspace(a.to);
+            if (!src || !dst) return res.status(403).json({ error: 'outside workspace' });
+            if (!fs.existsSync(src)) return toolResult(res, false, 'Source not found: ' + a.from, { error: 'not found' });
+            await fsp.mkdir(path.dirname(dst), { recursive: true });
+            await fsp.rename(src, dst);
+            return toolResult(res, true, 'Moved ' + a.from + ' → ' + a.to, { ok: true });
+        }
+        case 'copy_file': {
+            const src = resolveInWorkspace(a.from);
+            const dst = resolveInWorkspace(a.to);
+            if (!src || !dst) return res.status(403).json({ error: 'outside workspace' });
+            if (!fs.existsSync(src)) return toolResult(res, false, 'Source not found: ' + a.from, { error: 'not found' });
+            await fsp.mkdir(path.dirname(dst), { recursive: true });
+            await fsp.copyFile(src, dst);
+            return toolResult(res, true, 'Copied ' + a.from + ' → ' + a.to, { ok: true });
+        }
         case 'apply_patch': {
+            await editkitReady;
             const target = resolveInWorkspace(a.path);
             if (!target) return res.status(403).json({ error: 'outside workspace' });
-            if (!fs.existsSync(target)) return toolResult(res, false, 'File not found: ' + a.path + ' — use read_file or write_file first', { error: 'not found' });
+            if (!fs.existsSync(target)) return toolResult(res, false, 'File not found: ' + a.path, { error: 'not found' });
             const search = a.search || '';
             const replace = a.replace == null ? '' : String(a.replace);
             if (!search) return res.status(400).json({ error: 'search string required' });
@@ -597,7 +946,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
             let re;
             try { re = new RegExp(pattern, a.ignoreCase ? 'i' : ''); }
             catch (e) { re = new RegExp(pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), a.ignoreCase ? 'i' : ''); }
-            const skip = new Set(['node_modules', '.git', 'build', 'dist', '.dart_tool', '.next', '.gradle']);
+            const skip = new Set(['node_modules', '.git', 'build', 'dist', '.dart_tool', '.next', '.gradle', 'target']);
             const matches = [];
             const maxHits = 60;
             const walk = (dir, depth) => {
@@ -627,7 +976,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
             if (!base) return res.status(403).json({ error: 'outside workspace' });
             const glob = String(a.pattern || '');
             const rx = new RegExp('^' + glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
-            const skip = new Set(['node_modules', '.git', 'build', 'dist', '.dart_tool', '.next', '.gradle']);
+            const skip = new Set(['node_modules', '.git', 'build', 'dist', '.dart_tool', '.next', '.gradle', 'target']);
             const hits = [];
             const walk = (dir, depth) => {
                 if (hits.length >= 80 || depth > 8) return;
@@ -643,6 +992,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
             walk(base, 0);
             return toolResult(res, hits.length > 0, 'Found ' + hits.length + ' file' + (hits.length === 1 ? '' : 's'), { files: hits });
         }
+        /* ────────── Shell ────────── */
         case 'run_command': {
             const cmd = a.command || '';
             if (!cmd) return res.status(400).json({ error: 'command required' });
@@ -661,14 +1011,232 @@ app.post('/api/ai/tool-call', async (req, res) => {
                 toolResult(res, !err, 'Ran: ' + cmd.slice(0, 60) + (err ? ' (exit ' + (err.code || '?') + ')' : ' ok'), { code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, output: trimmed });
             });
         }
+        /* ────────── Termux:API — original three ────────── */
         case 'notify': {
             const rawTitle = String((a.title || 'DeepSeek Studio')).slice(0, 100);
             const rawMsg = String((a.message || '')).slice(0, 400);
-            const esc = (s) => String(s).replace(/'/g, "'\\''");
-            const cmd = 'termux-notification --title ' + "'" + esc(rawTitle) + "'" + ' --content ' + "'" + esc(rawMsg) + "'" + ' --priority high --vibrate 300 2>&1';
-            return exec(cmd, { timeout: 5000 }, (err) => {
-                toolResult(res, !err, err ? 'Notification failed — is termux-api installed?' : 'Notified: ' + rawTitle, { ok: !err });
-            });
+            if (termuxApiLib && typeof termuxApiLib.notification === 'function') {
+                try {
+                    await new Promise((resolve, reject) => {
+                        const n = termuxApiLib.notification({ title: rawTitle, content: rawMsg });
+                        if (n && typeof n.on === 'function') n.on('error', reject).on('end', resolve);
+                        else resolve();
+                    });
+                    return toolResult(res, true, 'Notified (module): ' + rawTitle, { ok: true, via: 'module' });
+                } catch (_) {}
+            }
+            const r = await termuxCli('termux-notification', ['--title', rawTitle, '--content', rawMsg, '--priority', 'high', '--vibrate', '300']);
+            return toolResult(res, !r.failed,
+                r.failed ? 'Notification failed — is termux-api installed? (pkg install termux-api)' : 'Notified: ' + rawTitle,
+                { ok: !r.failed, via: 'cli' });
+        }
+        case 'termux_toast': {
+            const msg = String((a.message || '')).slice(0, 200);
+            const r = await termuxCli('termux-toast', [msg], 3000);
+            return toolResult(res, !r.failed, r.failed ? 'Toast failed (termux-api?)' : 'Toast shown', { ok: !r.failed });
+        }
+        case 'termux_open_url': {
+            const url = String((a.url || '')).slice(0, 2000);
+            if (!/^https?:\/\//i.test(url)) return toolResult(res, false, 'Invalid URL', { error: 'bad url' });
+            const r = await termuxCli('termux-open-url', [url], 5000);
+            return toolResult(res, !r.failed, r.failed ? 'Open URL failed' : 'Opened: ' + url, { ok: !r.failed });
+        }
+        /* ────────── Termux:API — clipboard ────────── */
+        case 'termux_clipboard_get': {
+            const r = await termuxCli('termux-clipboard-get', [], 5000);
+            if (r.failed) return toolResult(res, false, 'Clipboard read failed', { error: r.stderr || 'no output' });
+            return toolResult(res, true, 'Read ' + r.stdout.length + ' chars from clipboard', { text: r.stdout });
+        }
+        case 'termux_clipboard_set': {
+            const text = String(a.text || '');
+            const r = await termuxCli('termux-clipboard-set', [text], 5000);
+            return toolResult(res, !r.failed, r.failed ? 'Clipboard write failed' : 'Copied ' + text.length + ' chars to clipboard', { ok: !r.failed });
+        }
+        /* ────────── Termux:API — battery ────────── */
+        case 'termux_battery_status': {
+            const r = await termuxCli('termux-battery-status', [], 5000);
+            if (r.failed) return toolResult(res, false, 'Battery status failed', { error: r.stderr });
+            try {
+                const d = JSON.parse(r.stdout);
+                return toolResult(res, true,
+                    'Battery: ' + d.percentage + '% (' + d.status + ', ' + d.temperature + '°C, ' + d.plugged + ')',
+                    d);
+            } catch (_) { return toolResult(res, true, 'Battery status read', { raw: r.stdout }); }
+        }
+        /* ────────── Termux:API — torch ────────── */
+        case 'termux_torch': {
+            const on = a.on === true || a.on === 'on';
+            const r = await termuxCli('termux-torch', [on ? 'on' : 'off'], 5000);
+            return toolResult(res, !r.failed, r.failed ? 'Torch failed' : ('Torch ' + (on ? 'on' : 'off')), { ok: !r.failed, on });
+        }
+        /* ────────── Termux:API — vibrate ────────── */
+        case 'termux_vibrate': {
+            const dur = String(parseInt(a.duration, 10) || 300);
+            const r = await termuxCli('termux-vibrate', ['-d', dur], 5000);
+            return toolResult(res, !r.failed, r.failed ? 'Vibrate failed' : ('Vibrated ' + dur + 'ms'), { ok: !r.failed });
+        }
+        /* ────────── Termux:API — volume ────────── */
+        case 'termux_volume': {
+            const stream = String(a.stream || 'music');
+            const action = String(a.action || 'get');
+            const argv = ['-s', stream];
+            if (action === 'get') argv.push('-g');
+            else if (action === 'set') argv.push('-v', String(a.volume || 0));
+            else if (action === 'up') argv.push('-u');
+            else if (action === 'down') argv.push('-d');
+            const r = await termuxCli('termux-volume', argv, 5000);
+            return toolResult(res, !r.failed, r.failed ? 'Volume failed' : (stream + ' volume: ' + (r.stdout.trim() || 'done')), { ok: !r.failed, raw: r.stdout });
+        }
+        /* ────────── Termux:API — TTS ────────── */
+        case 'termux_tts_speak': {
+            const text = String(a.text || '').slice(0, 1000);
+            if (!text) return toolResult(res, false, 'No text to speak', { error: 'empty' });
+            const r = await termuxCli('termux-tts-speak', [text], 30000);
+            return toolResult(res, !r.failed, r.failed ? 'TTS failed' : ('Spoke ' + text.length + ' chars'), { ok: !r.failed });
+        }
+        /* ────────── Termux:API — dialog ────────── */
+        case 'termux_dialog': {
+            const kind = String(a.kind || 'text');
+            const title = String(a.title || 'DeepSeek Studio');
+            const argv = [];
+            if (kind === 'confirm') {
+                argv.push('--title', title, '--yesno', String(a.message || 'Continue?'));
+            } else if (kind === 'text') {
+                argv.push('--title', title, '--inputbox', String(a.message || 'Enter text'), String(a.default || ''));
+            } else if (kind === 'password') {
+                argv.push('--title', title, '--passwordbox', String(a.message || 'Password'));
+            } else if (kind === 'list') {
+                const items = Array.isArray(a.items) ? a.items.map((x) => String(x)) : [];
+                if (!items.length) return toolResult(res, false, 'list requires items[]', { error: 'items required' });
+                argv.push('--title', title, '--menu', String(a.message || 'Choose'), ...items);
+            } else if (kind === 'radio') {
+                const items = Array.isArray(a.items) ? a.items.map((x) => String(x)) : [];
+                argv.push('--title', title, '--radiolist', String(a.message || 'Pick one'), ...items.flatMap((x) => ['off', x]));
+            } else {
+                return toolResult(res, false, 'Unknown dialog kind: ' + kind, { error: 'bad kind' });
+            }
+            const r = await termuxCli('termux-dialog', argv, 120000);
+            // Dialog exits 1 on cancel — that's not a failure for our purposes
+            return toolResult(res, true, 'Dialog ' + kind + ': ' + (r.stdout.trim() || '(cancelled)'),
+                { ok: !r.failed, cancelled: r.failed, raw: r.stdout });
+        }
+        /* ────────── Termux:API — wifi ────────── */
+        case 'termux_wifi_info': {
+            const r = await termuxCli('termux-wifi-connectioninfo', [], 5000);
+            if (r.failed) return toolResult(res, false, 'WiFi info failed', { error: r.stderr });
+            try { const d = JSON.parse(r.stdout); return toolResult(res, true, 'WiFi: ' + (d.ssid || '?') + ' (' + (d.ip || '?') + ')', d); }
+            catch (_) { return toolResult(res, true, 'WiFi info read', { raw: r.stdout }); }
+        }
+        case 'termux_wifi_scan': {
+            const r = await termuxCli('termux-wifi-scaninfo', [], 15000);
+            if (r.failed) return toolResult(res, false, 'WiFi scan failed', { error: r.stderr });
+            try { const list = JSON.parse(r.stdout); return toolResult(res, true, 'Found ' + list.length + ' networks', { networks: list }); }
+            catch (_) { return toolResult(res, true, 'WiFi scan done', { raw: r.stdout }); }
+        }
+        /* ────────── Termux:API — location ────────── */
+        case 'termux_location': {
+            const provider = String(a.provider || 'gps');
+            const r = await termuxCli('termux-location', ['-p', provider, '-r', 'once'], 60000);
+            if (r.failed) return toolResult(res, false, 'Location failed', { error: r.stderr });
+            try {
+                const d = JSON.parse(r.stdout);
+                return toolResult(res, true, 'Location: ' + d.latitude + ', ' + d.longitude + ' (±' + d.accuracy + 'm)', d);
+            } catch (_) { return toolResult(res, true, 'Location read', { raw: r.stdout }); }
+        }
+        /* ────────── Termux:API — share ────────── */
+        case 'termux_share': {
+            const file = a.file ? resolveInWorkspace(a.file) : null;
+            const text = a.text ? String(a.text) : null;
+            const title = String(a.title || 'Share from DeepSeek Studio');
+            const argv = ['-t', title];
+            if (file && fs.existsSync(file)) argv.push('-f', file);
+            else if (text) argv.push('-c', 'text/plain', text);
+            else return toolResult(res, false, 'Provide either file or text', { error: 'no content' });
+            const r = await termuxCli('termux-share', argv, 8000);
+            return toolResult(res, !r.failed, r.failed ? 'Share failed' : 'Share sheet opened', { ok: !r.failed });
+        }
+        /* ────────── Termux:API — camera photo ────────── */
+        case 'termux_camera_photo': {
+            const target = resolveInWorkspace(a.path || 'photo-' + Date.now() + '.jpg');
+            if (!target) return res.status(403).json({ error: 'outside workspace' });
+            await fsp.mkdir(path.dirname(target), { recursive: true });
+            const r = await termuxCli('termux-camera-photo', ['-c', String(a.camera || 0), target], 60000);
+            return toolResult(res, !r.failed && fs.existsSync(target),
+                r.failed ? 'Camera failed' : 'Photo saved: ' + path.relative(WORKSPACE, target),
+                { ok: !r.failed, path: path.relative(WORKSPACE, target) });
+        }
+        /* ────────── Termux:API — fingerprint ────────── */
+        case 'termux_fingerprint': {
+            const r = await termuxCli('termux-fingerprint', [], 120000);
+            return toolResult(res, true, 'Fingerprint: ' + (r.stdout.trim() || '(cancelled)'),
+                { ok: !r.failed, cancelled: r.failed, raw: r.stdout });
+        }
+        /* ────────── Termux:API — sms ────────── */
+        case 'termux_sms_send': {
+            const number = String(a.number || '').trim();
+            const body = String(a.message || '');
+            if (!number || !body) return toolResult(res, false, 'number and message required', { error: 'missing fields' });
+            const r = await termuxCli('termux-sms-send', ['-n', number, body], 15000);
+            return toolResult(res, !r.failed, r.failed ? 'SMS failed' : ('SMS sent to ' + number), { ok: !r.failed });
+        }
+        /* ────────── Termux:API — call ────────── */
+        case 'termux_call': {
+            const number = String(a.number || '').trim();
+            if (!number) return toolResult(res, false, 'number required', { error: 'missing' });
+            const r = await termuxCli('termux-telephony-call', [number], 8000);
+            return toolResult(res, !r.failed, r.failed ? 'Call failed' : ('Called ' + number), { ok: !r.failed });
+        }
+        /* ────────── Termux:API — storage ────────── */
+        case 'termux_storage_info': {
+            const r = await termuxCli('termux-storage-get', [], 100);
+            // storage-get opens a picker — we want df instead
+            const d = await run('sh', ['-c', 'df -h /data /storage/emulated/0 2>/dev/null | tail -n +2'], { timeout: 5000 });
+            return toolResult(res, !d.failed, 'Storage info read', { raw: d.stdout });
+        }
+        /* ────────── Termux:API — sensors ────────── */
+        case 'termux_sensor': {
+            const sensor = String(a.sensor || '');
+            const argv = sensor ? ['-s', sensor, '-l'] : ['-l'];
+            const r = await termuxCli('termux-sensor', argv, 8000);
+            return toolResult(res, !r.failed, r.failed ? 'Sensor read failed' : 'Sensors: ' + r.stdout.split('\n').length + ' lines', { raw: r.stdout.slice(0, 4000) });
+        }
+        /* ────────── Termux:API — contacts ────────── */
+        case 'termux_contacts': {
+            const r = await termuxCli('termux-contact-list', [], 10000);
+            if (r.failed) return toolResult(res, false, 'Contacts read failed', { error: r.stderr });
+            try {
+                const list = JSON.parse(r.stdout);
+                return toolResult(res, true, 'Found ' + list.length + ' contacts', { count: list.length, preview: list.slice(0, 20) });
+            } catch (_) { return toolResult(res, true, 'Contacts read', { raw: r.stdout.slice(0, 2000) }); }
+        }
+        /* ────────── Termux:API — download ────────── */
+        case 'termux_download': {
+            const url = String(a.url || '');
+            if (!/^https?:\/\//i.test(url)) return toolResult(res, false, 'Invalid URL', { error: 'bad url' });
+            const target = resolveInWorkspace(a.path || 'download-' + Date.now());
+            if (!target) return res.status(403).json({ error: 'outside workspace' });
+            await fsp.mkdir(path.dirname(target), { recursive: true });
+            const r = await termuxCli('termux-download', ['-t', target, url], 300000);
+            return toolResult(res, !r.failed, r.failed ? 'Download failed' : ('Downloaded to ' + path.relative(WORKSPACE, target)),
+                { ok: !r.failed, path: path.relative(WORKSPACE, target) });
+        }
+        /* ────────── Termux:API — brightness ────────── */
+        case 'termux_brightness': {
+            const level = a.level != null ? String(parseInt(a.level, 10)) : null;
+            const argv = level ? [level] : [];
+            const r = await termuxCli('termux-brightness', argv, 5000);
+            return toolResult(res, !r.failed,
+                r.failed ? 'Brightness failed (usually needs root / special permission)'
+                    : (level ? 'Brightness set to ' + level : 'Brightness read'),
+                { ok: !r.failed, raw: r.stdout });
+        }
+        /* ────────── Termux:API — infrared ────────── */
+        case 'termux_ir_transmit': {
+            const freq = String(parseInt(a.frequency, 10) || 38000);
+            const pattern = Array.isArray(a.pattern) ? a.pattern.map((x) => String(parseInt(x, 10))).join(' ') : '';
+            if (!pattern) return toolResult(res, false, 'pattern required (array of ints)', { error: 'missing pattern' });
+            const r = await termuxCli('sh', ['-c', 'termux-infrared-transmit -f ' + freq + ' ' + pattern], 8000);
+            return toolResult(res, !r.failed, r.failed ? 'IR transmit failed (device may not have IR blaster)' : 'IR transmitted', { ok: !r.failed });
         }
         default:
             return res.status(400).json({ error: 'Unknown tool: ' + name });
@@ -703,10 +1271,8 @@ app.get('/api/detect-language', (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   Git endpoints — simple-git primary, legacy execFile fallback
+   Git endpoints
    ═══════════════════════════════════════════════════════════════════ */
-
-/* ── Status ── */
 app.post('/api/git/status', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     const workdir = resolveInWorkspace(rel);
@@ -717,19 +1283,11 @@ app.post('/api/git/status', async (req, res) => {
             const isRepo = await g.checkIsRepo().catch(() => false);
             if (!isRepo) return res.json({ isRepo: false });
             const [status, branch, remotes] = await Promise.all([
-                g.status(),
-                g.branchLocal().catch(() => ({ current: '' })),
-                g.getRemotes(true).catch(() => []),
+                g.status(), g.branchLocal().catch(() => ({ current: '' })), g.getRemotes(true).catch(() => []),
             ]);
             const changes = status.files.map((f) => f.path);
             const remoteLines = remotes.map((r) => r.name + '\t' + (r.refs && (r.refs.fetch || r.refs.push)) || '');
-            return res.json({
-                isRepo: true,
-                branch: branch.current || '',
-                changes,
-                changeCount: changes.length,
-                remote: remoteLines[0] || '',
-            });
+            return res.json({ isRepo: true, branch: branch.current || '', changes, changeCount: changes.length, remote: remoteLines[0] || '' });
         }
         const inside = await gitLegacy(workdir, ['rev-parse', '--is-inside-work-tree']);
         if (inside.failed || !inside.stdout.includes('true')) return res.json({ isRepo: false });
@@ -740,10 +1298,7 @@ app.post('/api/git/status', async (req, res) => {
         ]);
         const changes = status.stdout.split('\n').filter(Boolean);
         const remoteLines = remotes.stdout.split('\n').filter(Boolean);
-        res.json({
-            isRepo: true, branch: (branch.stdout || 'unknown').trim(), changes,
-            changeCount: changes.length, remote: remoteLines[0] || '',
-        });
+        res.json({ isRepo: true, branch: (branch.stdout || 'unknown').trim(), changes, changeCount: changes.length, remote: remoteLines[0] || '' });
     } catch (e) { res.status(500).json({ error: redact(e.message) }); }
 });
 
@@ -753,10 +1308,7 @@ app.post('/api/git/status/detailed', async (req, res) => {
         if (simpleGitFactory) {
             const g = getGit(rel);
             const s = await g.status(['--porcelain=v1', '-uall']);
-            const files = s.files.map((f) => ({
-                status: (f.index || ' ') + (f.working_dir || ' '),
-                path: f.path,
-            }));
+            const files = s.files.map((f) => ({ status: (f.index || ' ') + (f.working_dir || ' '), path: f.path }));
             return res.json({ files });
         }
         const workdir = resolveInWorkspace(rel);
@@ -767,7 +1319,6 @@ app.post('/api/git/status/detailed', async (req, res) => {
     } catch (e) { res.status(500).json({ error: redact(e.message) }); }
 });
 
-/* ── Log ── */
 app.post('/api/git/log', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     const limit = Math.min(Math.max(parseInt((req.body || {}).limit, 10) || 10, 1), 200);
@@ -791,13 +1342,7 @@ app.post('/api/git/log/detailed', async (req, res) => {
         if (simpleGitFactory) {
             const g = getGit(rel);
             const log = await g.log({ maxCount: limit, format: { hash: '%H', author: '%an', email: '%ae', when: '%ar', subject: '%s' } });
-            const commits = log.all.map((c) => ({
-                hash: c.hash, author: c.author, email: c.email,
-                when: c.when, subject: c.subject,
-                // Client may expect 'message' too:
-                message: c.subject,
-                date: c.when,
-            }));
+            const commits = log.all.map((c) => ({ hash: c.hash, author: c.author, email: c.email, when: c.when, subject: c.subject, message: c.subject, date: c.when }));
             return res.json({ commits });
         }
         const workdir = resolveInWorkspace(rel);
@@ -816,11 +1361,7 @@ app.post('/api/git/show', async (req, res) => {
     const hash = String((req.body || {}).hash || '');
     if (!/^[0-9a-f]{4,40}$/i.test(hash)) return res.status(400).json({ error: 'invalid hash' });
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            const out = await g.show([hash, '--stat', '--patch']);
-            return res.json({ output: out });
-        }
+        if (simpleGitFactory) { const g = getGit(rel); return res.json({ output: await g.show([hash, '--stat', '--patch']) }); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['show', '--stat', '--patch', hash]);
@@ -828,7 +1369,6 @@ app.post('/api/git/show', async (req, res) => {
     } catch (e) { res.status(500).json({ error: redact(e.message) }); }
 });
 
-/* ── Init / Clone ── */
 app.post('/api/git/init', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     let branch = String((req.body || {}).branch || 'main');
@@ -856,34 +1396,21 @@ app.post('/api/git/clone', async (req, res) => {
     const target = resolveInWorkspace(name);
     if (!target || target === WORKSPACE) return res.status(403).json({ error: 'Forbidden' });
     if (fs.existsSync(target)) return res.status(400).json({ error: 'Directory exists: ' + name });
-
     const opts = {};
     if (/^https:\/\/(www\.)?github\.com\//i.test(url) && ghToken()) opts.token = ghToken();
     try {
         if (simpleGitFactory) {
             const g = simpleGitFactory({ baseDir: WORKSPACE });
-            if (opts.token) {
-                g.env({
-                    GIT_TERMINAL_PROMPT: '0',
-                    GIT_ASKPASS: ASKPASS_HELPER,
-                    GIT_ASKPASS_TOKEN: opts.token,
-                });
-            } else {
-                g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' });
-            }
+            if (opts.token) g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: ASKPASS_HELPER, GIT_ASKPASS_TOKEN: opts.token });
+            else g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' });
             await g.clone(url, name, ['--progress']);
             return res.json(gitOk({ stdout: 'Cloned into ' + name, dir: name }));
         }
         const r = await gitLegacy(WORKSPACE, ['clone', '--progress', url, name], Object.assign({ timeout: 300000, maxBuffer: 30 * 1024 * 1024 }, opts));
         res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr, dir: name });
-    } catch (e) {
-        const err = gitErr(e);
-        err.dir = name;
-        res.status(500).json(err);
-    }
+    } catch (e) { const err = gitErr(e); err.dir = name; res.status(500).json(err); }
 });
 
-/* ── Commit + push ── */
 app.post('/api/git/push', async (req, res) => {
     const { cwd, message, commitOnly } = req.body || {};
     const rel = cwd || '';
@@ -892,16 +1419,11 @@ app.post('/api/git/push', async (req, res) => {
         if (simpleGitFactory) {
             const g = getGit(rel);
             await g.add(['-A']);
-            let commitOut = '';
-            let commitErr = '';
-            try {
-                const c = await g.commit(msg);
-                commitOut = c.commit || 'committed';
-            } catch (e) {
+            let commitOut = '', commitErr = '';
+            try { const c = await g.commit(msg); commitOut = c.commit || 'committed'; }
+            catch (e) {
                 commitErr = redact(e.message || String(e));
-                if (!/nothing to commit|no changes added|no changes/i.test(commitErr)) {
-                    return res.json({ code: 1, ok: false, stdout: commitOut, stderr: commitErr });
-                }
+                if (!/nothing to commit|no changes added|no changes/i.test(commitErr)) return res.json({ code: 1, ok: false, stdout: commitOut, stderr: commitErr });
             }
             if (commitOnly) return res.json(gitOk({ stdout: commitOut, stderr: commitErr }));
             const push = await g.push();
@@ -913,9 +1435,7 @@ app.post('/api/git/push', async (req, res) => {
         await gitLegacy(workdir, ['add', '-A']);
         const commit = await gitLegacy(workdir, ['commit', '-m', msg], { timeout: 60000 });
         if (commitOnly) return res.json({ code: commit.code, ok: !commit.failed, stdout: commit.stdout, stderr: commit.stderr });
-        if (commit.failed && !/nothing to commit|no changes added/i.test(commit.stdout + commit.stderr)) {
-            return res.json({ code: commit.code, ok: false, stdout: commit.stdout, stderr: commit.stderr });
-        }
+        if (commit.failed && !/nothing to commit|no changes added/i.test(commit.stdout + commit.stderr)) return res.json({ code: commit.code, ok: false, stdout: commit.stdout, stderr: commit.stderr });
         const push = await gitLegacy(workdir, ['push'], { timeout: 180000, token: ghToken() || undefined });
         res.json({ code: push.code, ok: !push.failed, stdout: commit.stdout + push.stdout, stderr: commit.stderr + push.stderr });
     } catch (e) { res.status(500).json(gitErr(e)); }
@@ -926,34 +1446,20 @@ app.post('/api/git/pull', async (req, res) => {
     try {
         if (simpleGitFactory) {
             const g = getGit(rel);
-            try {
-                const r = await g.pull(['--no-edit']);
-                const out = JSON.stringify(r);
-                return res.json(gitOk({ stdout: out, conflicted: /CONFLICT/.test(out) }));
-            } catch (e) {
-                const m = redact(e.message || String(e));
-                return res.json({ code: 1, ok: false, conflicted: /CONFLICT/.test(m), stdout: '', stderr: m });
-            }
+            try { const r = await g.pull(['--no-edit']); const out = JSON.stringify(r); return res.json(gitOk({ stdout: out, conflicted: /CONFLICT/.test(out) })); }
+            catch (e) { const m = redact(e.message || String(e)); return res.json({ code: 1, ok: false, conflicted: /CONFLICT/.test(m), stdout: '', stderr: m }); }
         }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['pull', '--no-edit'], { timeout: 180000, token: ghToken() || undefined });
-        res.json({
-            code: r.code, ok: !r.failed && !/CONFLICT/.test(r.stdout + r.stderr),
-            conflicted: /CONFLICT|Automatic merge failed/.test(r.stdout + r.stderr),
-            stdout: r.stdout, stderr: r.stderr,
-        });
+        res.json({ code: r.code, ok: !r.failed && !/CONFLICT/.test(r.stdout + r.stderr), conflicted: /CONFLICT|Automatic merge failed/.test(r.stdout + r.stderr), stdout: r.stdout, stderr: r.stderr });
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
 app.post('/api/git/pull/rebase', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            const r = await g.pull(['--rebase', '--no-edit']);
-            return res.json(gitOk({ stdout: JSON.stringify(r) }));
-        }
+        if (simpleGitFactory) { const g = getGit(rel); return res.json(gitOk({ stdout: JSON.stringify(await g.pull(['--rebase', '--no-edit'])) })); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['pull', '--rebase', '--no-edit'], { timeout: 180000, token: ghToken() || undefined });
@@ -964,11 +1470,7 @@ app.post('/api/git/pull/rebase', async (req, res) => {
 app.post('/api/git/fetch', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            const r = await g.fetch(['--all', '--prune']);
-            return res.json(gitOk({ stdout: JSON.stringify(r) }));
-        }
+        if (simpleGitFactory) { const g = getGit(rel); return res.json(gitOk({ stdout: JSON.stringify(await g.fetch(['--all', '--prune'])) })); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['fetch', '--all', '--prune'], { timeout: 180000, token: ghToken() || undefined });
@@ -976,18 +1478,12 @@ app.post('/api/git/fetch', async (req, res) => {
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
-/* ── Remotes ── */
 app.post('/api/git/set-remote', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     const url = String((req.body || {}).url || '');
     if (!url || !/^(https?:\/\/|git@|ssh:\/\/)/.test(url)) return res.status(400).json({ error: 'invalid url' });
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            await g.removeRemote('origin').catch(() => {});
-            const r = await g.addRemote('origin', url);
-            return res.json(gitOk({ stdout: r || 'remote set' }));
-        }
+        if (simpleGitFactory) { const g = getGit(rel); await g.removeRemote('origin').catch(() => {}); const r = await g.addRemote('origin', url); return res.json(gitOk({ stdout: r || 'remote set' })); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         await gitLegacy(workdir, ['remote', 'remove', 'origin']);
@@ -1027,31 +1523,18 @@ app.post('/api/git/set-identity', async (req, res) => {
         const r1 = await run('git', ['config', '--global', 'user.name', n], { timeout: 10000 });
         const r2 = await run('git', ['config', '--global', 'user.email', e], { timeout: 10000 });
         const r3 = await run('git', ['config', '--global', 'credential.helper', 'store'], { timeout: 10000 });
-        res.json({
-            code: (r1.failed || r2.failed || r3.failed) ? 1 : 0,
-            stdout: (r1.stdout + r2.stdout + r3.stdout),
-            stderr: redact(r1.stderr + r2.stderr + r3.stderr),
-        });
+        res.json({ code: (r1.failed || r2.failed || r3.failed) ? 1 : 0, stdout: (r1.stdout + r2.stdout + r3.stdout), stderr: redact(r1.stderr + r2.stderr + r3.stderr) });
     } catch (err) { res.status(500).json(gitErr(err)); }
 });
 
-/* ── Branches ── */
 app.post('/api/git/branches', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     try {
         if (simpleGitFactory) {
             const g = getGit(rel);
-            const [local, remote] = await Promise.all([
-                g.branchLocal().catch(() => ({ all: [], current: '' })),
-                g.branch(['-r']).catch(() => ({ all: [] })),
-            ]);
+            const [local, remote] = await Promise.all([g.branchLocal().catch(() => ({ all: [], current: '' })), g.branch(['-r']).catch(() => ({ all: [] }))]);
             const remoteNames = remote.all.filter((b) => !b.includes('->') && b !== 'HEAD');
-            return res.json({
-                branches: [...new Set([...local.all, ...remoteNames])],
-                current: local.current || '',
-                local: local.all,
-                remote: remoteNames,
-            });
+            return res.json({ branches: [...new Set([...local.all, ...remoteNames])], current: local.current || '', local: local.all, remote: remoteNames });
         }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
@@ -1086,11 +1569,7 @@ app.post('/api/git/branch/checkout', async (req, res) => {
     const { cwd, name } = req.body || {};
     if (!validRef(name)) return res.status(400).json({ error: 'invalid branch name' });
     try {
-        if (simpleGitFactory) {
-            const g = getGit(cwd || '');
-            await g.checkout(name);
-            return res.json(gitOk({ stdout: 'Switched to ' + name }));
-        }
+        if (simpleGitFactory) { const g = getGit(cwd || ''); await g.checkout(name); return res.json(gitOk({ stdout: 'Switched to ' + name })); }
         const workdir = resolveInWorkspace(cwd || '');
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['checkout', name]);
@@ -1122,33 +1601,20 @@ app.post('/api/git/branch/merge', async (req, res) => {
     try {
         if (simpleGitFactory) {
             const g = getGit(cwd || '');
-            try {
-                const r = await g.merge([source, '--no-edit']);
-                return res.json(gitOk({ stdout: r || 'merged', conflicted: /CONFLICT/.test(String(r)) }));
-            } catch (e) {
-                const m = redact(e.message || String(e));
-                return res.json({ ok: false, conflicted: /CONFLICT/i.test(m), stdout: '', stderr: m, error: m });
-            }
+            try { const r = await g.merge([source, '--no-edit']); return res.json(gitOk({ stdout: r || 'merged', conflicted: /CONFLICT/.test(String(r)) })); }
+            catch (e) { const m = redact(e.message || String(e)); return res.json({ ok: false, conflicted: /CONFLICT/i.test(m), stdout: '', stderr: m, error: m }); }
         }
         const workdir = resolveInWorkspace(cwd || '');
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['merge', source, '--no-edit']);
         const out = r.stdout + r.stderr;
-        res.json({
-            ok: !r.failed && !/CONFLICT/.test(out),
-            conflicted: /CONFLICT|Automatic merge failed/.test(out),
-            stdout: r.stdout, stderr: r.stderr,
-        });
+        res.json({ ok: !r.failed && !/CONFLICT/.test(out), conflicted: /CONFLICT|Automatic merge failed/.test(out), stdout: r.stdout, stderr: r.stderr });
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
 app.post('/api/git/merge/abort', async (req, res) => {
     try {
-        if (simpleGitFactory) {
-            const g = getGit((req.body || {}).cwd || '');
-            await g.raw(['merge', '--abort']);
-            return res.json(gitOk({ stdout: 'Merge aborted' }));
-        }
+        if (simpleGitFactory) { const g = getGit((req.body || {}).cwd || ''); await g.raw(['merge', '--abort']); return res.json(gitOk({ stdout: 'Merge aborted' })); }
         const workdir = resolveInWorkspace((req.body || {}).cwd || '');
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['merge', '--abort']);
@@ -1159,11 +1625,7 @@ app.post('/api/git/merge/abort', async (req, res) => {
 app.post('/api/git/conflicts', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            const out = await g.raw(['diff', '--name-only', '--diff-filter=U']);
-            return res.json({ files: out.split('\n').filter(Boolean) });
-        }
+        if (simpleGitFactory) { const g = getGit(rel); const out = await g.raw(['diff', '--name-only', '--diff-filter=U']); return res.json({ files: out.split('\n').filter(Boolean) }); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['diff', '--name-only', '--diff-filter=U']);
@@ -1171,7 +1633,6 @@ app.post('/api/git/conflicts', async (req, res) => {
     } catch (e) { res.status(500).json({ error: redact(e.message), files: [] }); }
 });
 
-/* ── Diff / Add / Reset / Stash ── */
 app.post('/api/git/diff', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     const file = (req.body || {}).file;
@@ -1202,20 +1663,15 @@ app.post('/api/git/add', async (req, res) => {
     try {
         if (simpleGitFactory) {
             const g = getGit(cwd || '');
-            if (Array.isArray(paths) && paths.length) {
-                const safe = paths.filter((p) => typeof p === 'string' && !p.startsWith('-'));
-                await g.add(safe);
-            } else {
-                await g.add(['-A']);
-            }
+            if (Array.isArray(paths) && paths.length) { const safe = paths.filter((p) => typeof p === 'string' && !p.startsWith('-')); await g.add(safe); }
+            else { await g.add(['-A']); }
             return res.json(gitOk({ stdout: 'staged' }));
         }
         const workdir = resolveInWorkspace(cwd || '');
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const args = ['add'];
-        if (Array.isArray(paths) && paths.length) {
-            for (const p of paths) { if (typeof p === 'string' && !p.startsWith('-')) args.push('--', p); }
-        } else args.push('-A');
+        if (Array.isArray(paths) && paths.length) { for (const p of paths) { if (typeof p === 'string' && !p.startsWith('-')) args.push('--', p); } }
+        else args.push('-A');
         const r = await gitLegacy(workdir, args, { timeout: 30000 });
         res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr });
     } catch (e) { res.status(500).json(gitErr(e)); }
@@ -1257,8 +1713,7 @@ app.post('/api/git/stash', async (req, res) => {
             case 'drop': out = await g.stash(['drop']); break;
             case 'clear': out = await g.stash(['clear']); break;
             case 'push':
-            default:
-                out = await g.stash(message ? ['push', '-m', String(message).slice(0, 200)] : ['push']);
+            default: out = await g.stash(message ? ['push', '-m', String(message).slice(0, 200)] : ['push']);
             }
             return res.json(gitOk({ stdout: out || '(done)' }));
         }
@@ -1283,11 +1738,7 @@ app.post('/api/git/cherry-pick', async (req, res) => {
     const { cwd, hash } = req.body || {};
     if (!/^[0-9a-f]{4,40}$/i.test(hash)) return res.status(400).json({ error: 'invalid hash' });
     try {
-        if (simpleGitFactory) {
-            const g = getGit(cwd || '');
-            await g.raw(['cherry-pick', hash]);
-            return res.json(gitOk({ stdout: 'cherry-picked' }));
-        }
+        if (simpleGitFactory) { const g = getGit(cwd || ''); await g.raw(['cherry-pick', hash]); return res.json(gitOk({ stdout: 'cherry-picked' })); }
         const workdir = resolveInWorkspace(cwd || '');
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['cherry-pick', hash], { timeout: 60000 });
@@ -1299,11 +1750,7 @@ app.post('/api/git/revert', async (req, res) => {
     const { cwd, hash } = req.body || {};
     if (!/^[0-9a-f]{4,40}$/i.test(hash)) return res.status(400).json({ error: 'invalid hash' });
     try {
-        if (simpleGitFactory) {
-            const g = getGit(cwd || '');
-            await g.raw(['revert', '--no-edit', hash]);
-            return res.json(gitOk({ stdout: 'reverted' }));
-        }
+        if (simpleGitFactory) { const g = getGit(cwd || ''); await g.raw(['revert', '--no-edit', hash]); return res.json(gitOk({ stdout: 'reverted' })); }
         const workdir = resolveInWorkspace(cwd || '');
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['revert', '--no-edit', hash], { timeout: 60000 });
@@ -1311,6 +1758,7 @@ app.post('/api/git/revert', async (req, res) => {
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
+/* ─── Tags — with list endpoint that populates the Git panel ─── */
 app.post('/api/git/tags', async (req, res) => {
     const { cwd, action, name, message } = req.body || {};
     try {
@@ -1325,49 +1773,39 @@ app.post('/api/git/tags', async (req, res) => {
                 await g.addAnnotatedTag(name, String(message || name).slice(0, 200));
                 return res.json(gitOk({ stdout: 'tag ' + name + ' created' }));
             }
-            if (action === 'push') {
-                await g.pushTags();
-                return res.json(gitOk({ stdout: 'tags pushed' }));
-            }
-            if (action === 'delete') {
-                if (!validRef(name)) return res.status(400).json({ error: 'invalid tag name' });
-                await g.tag(['-d', name]);
-                return res.json(gitOk({ stdout: 'tag deleted' }));
-            }
+            if (action === 'push') { await g.pushTags(); return res.json(gitOk({ stdout: 'tags pushed' })); }
+            if (action === 'delete') { if (!validRef(name)) return res.status(400).json({ error: 'invalid tag name' }); await g.tag(['-d', name]); return res.json(gitOk({ stdout: 'tag deleted' })); }
             return res.status(400).json({ error: 'unknown action' });
         }
         const workdir = resolveInWorkspace(cwd || '');
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
-        if (action === 'list' || !action) {
-            const r = await gitLegacy(workdir, ['tag', '--sort=-creatordate']);
-            return res.json({ tags: r.stdout.split('\n').filter(Boolean) });
-        }
+        if (action === 'list' || !action) { const r = await gitLegacy(workdir, ['tag', '--sort=-creatordate']); return res.json({ tags: r.stdout.split('\n').filter(Boolean) }); }
         if (action === 'create') {
             if (!validRef(name)) return res.status(400).json({ error: 'invalid tag name' });
             const r = await gitLegacy(workdir, ['tag', '-a', name, '-m', String(message || name).slice(0, 200)]);
             return res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr });
         }
-        if (action === 'push') {
-            const r = await gitLegacy(workdir, ['push', '--tags'], { timeout: 120000, token: ghToken() || undefined });
-            return res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr });
-        }
-        if (action === 'delete') {
-            if (!validRef(name)) return res.status(400).json({ error: 'invalid tag name' });
-            const r = await gitLegacy(workdir, ['tag', '-d', name]);
-            return res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr });
-        }
+        if (action === 'push') { const r = await gitLegacy(workdir, ['push', '--tags'], { timeout: 120000, token: ghToken() || undefined }); return res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr }); }
+        if (action === 'delete') { if (!validRef(name)) return res.status(400).json({ error: 'invalid tag name' }); const r = await gitLegacy(workdir, ['tag', '-d', name]); return res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr }); }
         res.status(400).json({ error: 'unknown action' });
     } catch (e) { res.status(500).json(gitErr(e)); }
+});
+
+app.post('/api/git/tags/list', async (req, res) => {
+    const rel = (req.body || {}).cwd || '';
+    try {
+        if (simpleGitFactory) { const g = getGit(rel); const t = await g.tags(); return res.json({ tags: t.all }); }
+        const workdir = resolveInWorkspace(rel);
+        if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+        const r = await gitLegacy(workdir, ['tag', '--sort=-creatordate']);
+        res.json({ tags: r.stdout.split('\n').filter(Boolean) });
+    } catch (e) { res.status(500).json({ error: redact(e.message), tags: [] }); }
 });
 
 app.post('/api/git/undo', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            await g.raw(['reset', '--soft', 'HEAD~1']);
-            return res.json(gitOk({ stdout: 'reverted last commit (soft)' }));
-        }
+        if (simpleGitFactory) { const g = getGit(rel); await g.raw(['reset', '--soft', 'HEAD~1']); return res.json(gitOk({ stdout: 'reverted last commit (soft)' })); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
         const r = await gitLegacy(workdir, ['reset', '--soft', 'HEAD~1'], { timeout: 30000 });
@@ -1381,11 +1819,7 @@ app.post('/api/git/auto-init', async (req, res) => {
     if (!workdir) return res.status(403).json({ error: 'Forbidden' });
     if (fs.existsSync(path.join(workdir, '.git'))) return res.json(gitOk({ stdout: 'already a repo' }));
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            await g.init(['-b', 'main']).catch(async () => { await g.init(); });
-            return res.json(gitOk({ stdout: 'initialized' }));
-        }
+        if (simpleGitFactory) { const g = getGit(rel); await g.init(['-b', 'main']).catch(async () => { await g.init(); }); return res.json(gitOk({ stdout: 'initialized' })); }
         let r = await gitLegacy(workdir, ['init', '-b', 'main']);
         if (r.failed) r = await gitLegacy(workdir, ['init']);
         res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr });
@@ -1417,7 +1851,7 @@ app.post('/api/git/auto-commit', async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   GitHub REST API — Octokit primary, fetch fallback
+   GitHub REST API
    ═══════════════════════════════════════════════════════════════════ */
 async function githubApi(pathname, options = {}) {
     const token = ghToken();
@@ -1438,13 +1872,8 @@ async function githubApi(pathname, options = {}) {
 app.get('/api/github/status', async (_req, res) => {
     const gh = getOctokit();
     if (gh) {
-        try {
-            const { data } = await gh.users.getAuthenticated();
-            return res.json({
-                connected: true, login: data.login, name: data.name,
-                avatar: data.avatar_url, publicRepos: data.public_repos,
-            });
-        } catch (e) { return res.json({ connected: false, error: redact(e.message) }); }
+        try { const { data } = await gh.users.getAuthenticated(); return res.json({ connected: true, login: data.login, name: data.name, avatar: data.avatar_url, publicRepos: data.public_repos }); }
+        catch (e) { return res.json({ connected: false, error: redact(e.message) }); }
     }
     if (!ghToken()) return res.json({ connected: false });
     const r = await githubApi('/user');
@@ -1458,20 +1887,12 @@ app.get('/api/github/repos', async (req, res) => {
     if (gh) {
         try {
             const { data } = await gh.repos.listForAuthenticatedUser({ sort: 'updated', per_page: perPage });
-            return res.json({ repos: data.map((repo) => ({
-                name: repo.name, fullName: repo.full_name, private: repo.private,
-                cloneUrl: repo.clone_url, sshUrl: repo.ssh_url, defaultBranch: repo.default_branch,
-                updatedAt: repo.updated_at, description: repo.description,
-            })) });
+            return res.json({ repos: data.map((repo) => ({ name: repo.name, fullName: repo.full_name, private: repo.private, cloneUrl: repo.clone_url, sshUrl: repo.ssh_url, defaultBranch: repo.default_branch, updatedAt: repo.updated_at, description: repo.description })) });
         } catch (e) { return res.status(e.status || 500).json({ error: redact(e.message) }); }
     }
     const r = await githubApi('/user/repos?sort=updated&per_page=' + perPage);
     if (!r.ok) return res.status(r.status).json({ error: (r.data && r.data.message) || 'GitHub request failed' });
-    res.json({ repos: (r.data || []).map((repo) => ({
-        name: repo.name, fullName: repo.full_name, private: repo.private,
-        cloneUrl: repo.clone_url, sshUrl: repo.ssh_url, defaultBranch: repo.default_branch,
-        updatedAt: repo.updated_at, description: repo.description,
-    })) });
+    res.json({ repos: (r.data || []).map((repo) => ({ name: repo.name, fullName: repo.full_name, private: repo.private, cloneUrl: repo.clone_url, sshUrl: repo.ssh_url, defaultBranch: repo.default_branch, updatedAt: repo.updated_at, description: repo.description })) });
 });
 
 app.post('/api/github/create-repo', async (req, res) => {
@@ -1480,16 +1901,11 @@ app.post('/api/github/create-repo', async (req, res) => {
     const gh = getOctokit();
     if (gh) {
         try {
-            const { data } = await gh.repos.createForAuthenticatedUser({
-                name, description: description || '', private: isPrivate !== false, auto_init: autoInit === true,
-            });
+            const { data } = await gh.repos.createForAuthenticatedUser({ name, description: description || '', private: isPrivate !== false, auto_init: autoInit === true });
             return res.json({ ok: true, repo: { fullName: data.full_name, cloneUrl: data.clone_url, sshUrl: data.ssh_url, defaultBranch: data.default_branch } });
         } catch (e) { return res.status(e.status || 500).json({ error: redact(e.message) }); }
     }
-    const r = await githubApi('/user/repos', {
-        method: 'POST',
-        body: JSON.stringify({ name, description: description || '', private: isPrivate !== false, auto_init: autoInit === true }),
-    });
+    const r = await githubApi('/user/repos', { method: 'POST', body: JSON.stringify({ name, description: description || '', private: isPrivate !== false, auto_init: autoInit === true }) });
     if (!r.ok) return res.status(r.status).json({ error: (r.data && r.data.message) || 'create failed' });
     res.json({ ok: true, repo: { fullName: r.data.full_name, cloneUrl: r.data.clone_url, sshUrl: r.data.ssh_url, defaultBranch: r.data.default_branch } });
 });
@@ -1514,15 +1930,10 @@ app.post('/api/github/open-pr', async (req, res) => {
         await g.push(['-u', 'origin', headBranch]).catch(() => {});
         const gh = getOctokit();
         if (gh) {
-            const { data } = await gh.pulls.create({
-                owner, repo, title, body: body || '', base: base || 'main', head: headBranch, draft: draft === true,
-            });
+            const { data } = await gh.pulls.create({ owner, repo, title, body: body || '', base: base || 'main', head: headBranch, draft: draft === true });
             return res.json({ ok: true, number: data.number, url: data.html_url });
         }
-        const r = await githubApi('/repos/' + slug + '/pulls', {
-            method: 'POST',
-            body: JSON.stringify({ title, body: body || '', base: base || 'main', head: headBranch, draft: draft === true }),
-        });
+        const r = await githubApi('/repos/' + slug + '/pulls', { method: 'POST', body: JSON.stringify({ title, body: body || '', base: base || 'main', head: headBranch, draft: draft === true }) });
         if (!r.ok) return res.status(r.status).json({ error: (r.data && r.data.message) || 'PR failed' });
         res.json({ ok: true, number: r.data.number, url: r.data.html_url });
     } catch (e) { res.status(500).json({ error: redact(e.message) }); }
@@ -1579,34 +1990,17 @@ app.post('/api/ai/chat', async (req, res) => {
     const p = resolveProvider(provider);
     if (!p) return res.status(400).json({ error: 'Unknown provider' });
     if (!p.configured) return res.status(400).json({ error: 'No API key configured for ' + p.id });
-
     const payload = {
         model: model || p.cfg.model,
         messages: Array.isArray(messages) ? messages : [],
         temperature: typeof temperature === 'number' ? temperature : 0.3,
         max_tokens: typeof maxTokens === 'number' ? maxTokens : 4096,
     };
-    if (Array.isArray(tools) && tools.length && p.cfg.supportsTools) {
-        payload.tools = tools;
-        payload.tool_choice = toolChoice || 'auto';
-    }
-
+    if (Array.isArray(tools) && tools.length && p.cfg.supportsTools) { payload.tools = tools; payload.tool_choice = toolChoice || 'auto'; }
     let upstream;
-    try {
-        upstream = await fetchWithRetry(p.cfg.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key },
-            body: JSON.stringify(payload),
-        }, { retries: 2, timeout: 180000 });
-    } catch (err) {
-        return res.status(502).json({ error: 'Upstream unreachable: ' + redact(err.message) });
-    }
-
-    if (!upstream.ok) {
-        const text = await upstream.text().catch(() => '');
-        return res.status(upstream.status).json({ error: 'Provider error ' + upstream.status, detail: redact(text).slice(0, 500) });
-    }
-
+    try { upstream = await fetchWithRetry(p.cfg.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key }, body: JSON.stringify(payload) }, { retries: 2, timeout: 180000 }); }
+    catch (err) { return res.status(502).json({ error: 'Upstream unreachable: ' + redact(err.message) }); }
+    if (!upstream.ok) { const text = await upstream.text().catch(() => ''); return res.status(upstream.status).json({ error: 'Provider error ' + upstream.status, detail: redact(text).slice(0, 500) }); }
     if (stream === true && upstream.body) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
@@ -1615,9 +2009,7 @@ app.post('/api/ai/chat', async (req, res) => {
         catch (err) { res.write('data: ' + JSON.stringify({ error: redact(err.message) }) + '\n\n'); }
         return res.end();
     }
-
-    const data = await upstream.json();
-    res.json(data);
+    res.json(await upstream.json());
 });
 
 app.post('/api/ai/stream', async (req, res) => {
@@ -1625,24 +2017,11 @@ app.post('/api/ai/stream', async (req, res) => {
     const { provider, messages, tools, toolChoice, model, temperature, maxTokens } = req.body || {};
     const p = resolveProvider(provider);
     if (!p || !p.configured) return res.status(400).json({ error: 'Provider not configured' });
-    const payload = {
-        model: model || p.cfg.model,
-        messages: Array.isArray(messages) ? messages : [],
-        temperature: typeof temperature === 'number' ? temperature : 0.3,
-        max_tokens: typeof maxTokens === 'number' ? maxTokens : 4096,
-        stream: true,
-    };
-    if (Array.isArray(tools) && tools.length && p.cfg.supportsTools) {
-        payload.tools = tools; payload.tool_choice = toolChoice || 'auto';
-    }
+    const payload = { model: model || p.cfg.model, messages: Array.isArray(messages) ? messages : [], temperature: typeof temperature === 'number' ? temperature : 0.3, max_tokens: typeof maxTokens === 'number' ? maxTokens : 4096, stream: true };
+    if (Array.isArray(tools) && tools.length && p.cfg.supportsTools) { payload.tools = tools; payload.tool_choice = toolChoice || 'auto'; }
     let upstream;
-    try {
-        upstream = await fetchWithRetry(p.cfg.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key },
-            body: JSON.stringify(payload),
-        }, { retries: 1, timeout: 180000 });
-    } catch (err) { return res.status(502).json({ error: redact(err.message) }); }
+    try { upstream = await fetchWithRetry(p.cfg.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key }, body: JSON.stringify(payload) }, { retries: 1, timeout: 180000 }); }
+    catch (err) { return res.status(502).json({ error: redact(err.message) }); }
     if (!upstream.ok) return res.status(upstream.status).json({ error: 'Provider error ' + upstream.status });
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -1657,11 +2036,7 @@ app.post('/api/ai/test-key', async (req, res) => {
     if (!p) return res.status(400).json({ error: 'Unknown provider' });
     if (!p.configured) return res.status(400).json({ error: 'No key configured' });
     try {
-        const r = await fetchWithRetry(p.cfg.url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key },
-            body: JSON.stringify({ model: p.cfg.model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 }),
-        }, { retries: 0, timeout: 30000 });
+        const r = await fetchWithRetry(p.cfg.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key }, body: JSON.stringify({ model: p.cfg.model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 5 }) }, { retries: 0, timeout: 30000 });
         if (!r.ok) return res.json({ ok: false, status: r.status });
         res.json({ ok: true, model: p.cfg.model });
     } catch (err) { res.json({ ok: false, error: redact(err.message) }); }
@@ -1696,17 +2071,11 @@ app.get('/api/backup/list', (_req, res) => {
                     for (const e of entries) {
                         if (e.name === '.gitkeep') continue;
                         const full = path.join(p, e.name);
-                        try {
-                            const st = fs.statSync(full);
-                            if (st.isDirectory()) walk(full);
-                            else { fileCount++; sizeBytes += st.size; }
-                        } catch (_) {}
+                        try { const st = fs.statSync(full); if (st.isDirectory()) walk(full); else { fileCount++; sizeBytes += st.size; } } catch (_) {}
                     }
                 };
                 walk(dir);
-                const sizeStr = sizeBytes < 1024 ? sizeBytes + ' B'
-                    : sizeBytes < 1024 * 1024 ? (sizeBytes / 1024).toFixed(1) + ' KB'
-                    : (sizeBytes / 1024 / 1024).toFixed(1) + ' MB';
+                const sizeStr = sizeBytes < 1024 ? sizeBytes + ' B' : sizeBytes < 1024 * 1024 ? (sizeBytes / 1024).toFixed(1) + ' KB' : (sizeBytes / 1024 / 1024).toFixed(1) + ' MB';
                 return { name: d.name, files: fileCount, size: sizeStr };
             })
             .sort((a, b) => b.name.localeCompare(a.name));
@@ -1743,19 +2112,13 @@ function detectAndroidProject(dir) {
     if (files.includes('pubspec.yaml')) return 'flutter';
     if (files.includes('build.gradle') || files.includes('build.gradle.kts')) return 'android';
     if (files.includes('package.json')) {
-        try {
-            const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
-            if (pkg.dependencies && pkg.dependencies['react-native']) return 'react-native';
-        } catch (_) {}
+        try { const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8')); if (pkg.dependencies && pkg.dependencies['react-native']) return 'react-native'; } catch (_) {}
     }
     return null;
 }
 
 app.get('/api/deploy/check-tools', async (_req, res) => {
-    const probe = async (cmd) => {
-        const r = await run('sh', ['-c', cmd], { timeout: 15000 });
-        return !r.failed && !r.stdout.includes('MISSING');
-    };
+    const probe = async (cmd) => { const r = await run('sh', ['-c', cmd], { timeout: 15000 }); return !r.failed && !r.stdout.includes('MISSING'); };
     const [java, gradle, flutter, keytool] = await Promise.all([
         probe('java -version 2>&1 || echo MISSING'),
         probe('command -v gradle >/dev/null 2>&1 && gradle -v >/dev/null 2>&1 || echo MISSING'),
@@ -1763,6 +2126,59 @@ app.get('/api/deploy/check-tools', async (_req, res) => {
         probe('command -v keytool >/dev/null 2>&1 || echo MISSING'),
     ]);
     res.json({ java, gradle, flutter, keytool, androidSdk: !!(process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT) });
+});
+
+app.post('/api/deploy/install-tools', async (req, res) => {
+    const { tools } = req.body || {};
+    const want = Array.isArray(tools) && tools.length ? tools : ['java', 'gradle', 'keytool'];
+    const installers = {
+        java:    'pkg install -y openjdk-17',
+        keytool: 'pkg install -y openjdk-17',
+        gradle:  'pkg install -y gradle',
+        flutter: null,
+        androidSdk: null,
+    };
+    const results = [];
+    for (const t of want) {
+        const cmd = installers[t];
+        if (!cmd) { results.push({ tool: t, ok: false, skipped: true, reason: t + ' must be installed manually (see docs)' }); continue; }
+        const r = await run('sh', ['-c', cmd], { timeout: 900000, maxBuffer: 30 * 1024 * 1024 });
+        results.push({ tool: t, ok: !r.failed, code: r.failed ? (typeof r.code === 'number' ? r.code : 1) : 0, output: redact((r.stdout || '').slice(-2000) + (r.stderr ? '\n' + r.stderr.slice(-2000) : '')) });
+    }
+    const allOk = results.every((r) => r.ok || r.skipped);
+    res.json({ ok: allOk, results });
+});
+
+app.get('/api/deploy/artifacts', (_req, res) => {
+    const artifacts = [];
+    const since = Date.now() - 30 * 24 * 60 * 60 * 1000;
+    const skip = new Set(['node_modules', '.git', 'dist', '.next', 'target']);
+    const scanDir = (dir, depth) => {
+        if (depth > 8 || artifacts.length >= 50) return;
+        let entries;
+        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return; }
+        for (const e of entries) {
+            if (artifacts.length >= 50) return;
+            if (skip.has(e.name)) continue;
+            const full = path.join(dir, e.name);
+            if (e.isDirectory()) { scanDir(full, depth + 1); continue; }
+            if (!/\.(aab|apk)$/i.test(e.name)) continue;
+            let st; try { st = fs.statSync(full); } catch (_) { continue; }
+            if (st.mtimeMs < since) continue;
+            artifacts.push({
+                name: e.name,
+                path: path.relative(WORKSPACE, full),
+                absPath: full,
+                size: st.size,
+                sizeStr: st.size < 1024 ? st.size + ' B' : st.size < 1024 * 1024 ? (st.size / 1024).toFixed(1) + ' KB' : (st.size / 1024 / 1024).toFixed(2) + ' MB',
+                mtime: new Date(st.mtimeMs).toISOString(),
+                kind: /\.aab$/i.test(e.name) ? 'aab' : 'apk',
+            });
+        }
+    };
+    scanDir(WORKSPACE, 0);
+    artifacts.sort((a, b) => b.mtime.localeCompare(a.mtime));
+    res.json({ artifacts: artifacts.slice(0, 20) });
 });
 
 app.post('/api/deploy/create-keystore', async (req, res) => {
@@ -1774,20 +2190,14 @@ app.post('/api/deploy/create-keystore', async (req, res) => {
     if (fs.existsSync(keystorePath)) return res.status(400).json({ error: 'Keystore exists: ' + safeName });
     const aliasName = String(alias || safeName).replace(/[^a-zA-Z0-9_-]/g, '_');
     const dnameStr = dname || 'CN=DeepSeek Studio, OU=Dev, O=DeepSeek, L=Unknown, ST=Unknown, C=US';
-    const r = await run('keytool', [
-        '-genkeypair', '-v', '-keystore', keystorePath, '-alias', aliasName,
-        '-keyalg', 'RSA', '-keysize', '2048', '-validity', '10000',
-        '-storepass', String(password), '-keypass', String(password), '-dname', dnameStr,
-    ], { timeout: 60000 });
+    const r = await run('keytool', ['-genkeypair', '-v', '-keystore', keystorePath, '-alias', aliasName, '-keyalg', 'RSA', '-keysize', '2048', '-validity', '10000', '-storepass', String(password), '-keypass', String(password), '-dname', dnameStr], { timeout: 60000 });
     if (r.failed) return res.status(500).json({ error: redact(r.stderr || r.stdout) });
     res.json({ ok: true, keystore: safeName });
 });
 
 app.get('/api/deploy/keystores', (_req, res) => {
-    try {
-        const list = fs.readdirSync(KEYSTORE_DIR).filter((f) => f.endsWith('.jks')).map((f) => f.replace(/\.jks$/, ''));
-        res.json({ keystores: list });
-    } catch (_) { res.json({ keystores: [] }); }
+    try { const list = fs.readdirSync(KEYSTORE_DIR).filter((f) => f.endsWith('.jks')).map((f) => f.replace(/\.jks$/, '')); res.json({ keystores: list }); }
+    catch (_) { res.json({ keystores: [] }); }
 });
 
 app.post('/api/deploy/build', async (req, res) => {
@@ -1797,17 +2207,14 @@ app.post('/api/deploy/build', async (req, res) => {
     if (!fs.existsSync(workdir)) return res.status(404).json({ error: 'Project not found' });
     const projectType = detectAndroidProject(workdir);
     if (!projectType) return res.status(400).json({ error: 'Not an Android project' });
-
     const wantAab = output !== 'apk';
     const licenseKey = fs.existsSync(LICENSE_FILE) ? fs.readFileSync(LICENSE_FILE, 'utf8').trim() : '';
     const isPro = licenseKey.startsWith(PRO_LICENSE_PREFIX) && licenseKey.length >= 20;
     if (wantAab && !isPro) return res.status(402).json({ error: 'Pro license required for AAB' });
-
     const keystorePath = keystore ? path.join(KEYSTORE_DIR, String(keystore).replace(/[^a-zA-Z0-9_-]/g, '_') + '.jks') : null;
     if (keystorePath && !withinBase(KEYSTORE_DIR, keystorePath)) return res.status(403).json({ error: 'Forbidden' });
     const aliasName = String(alias || keystore || 'release');
     const pw = password || '';
-
     let cmd, cwdForRun, artifactPath;
     if (projectType === 'flutter') {
         cwdForRun = workdir;
@@ -1840,7 +2247,6 @@ app.post('/api/deploy/build', async (req, res) => {
         cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
         artifactPath = wantAab ? path.join(workdir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(workdir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
     }
-
     const r = await run('sh', ['-c', cmd], { cwd: cwdForRun, timeout: 900000, maxBuffer: 50 * 1024 * 1024 });
     const out = redact(r.stdout + (r.stderr ? '\n' + r.stderr : ''));
     const artifactExists = fs.existsSync(artifactPath);
@@ -1863,16 +2269,11 @@ app.get('/api/deploy/download', (req, res) => {
    ═══════════════════════════════════════════════════════════════════ */
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.static(PUBLIC_DIR, {
-    setHeaders: (res, filePath) => {
-        if (/\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
-    },
+    setHeaders: (res, filePath) => { if (/\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache'); },
 }));
 app.get('/guide', (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'guide.html')));
 app.get(/^\/(?!api\/|ws).*/, (_req, res) => res.sendFile(path.join(PUBLIC_DIR, 'index.html')));
 
-/* ═══════════════════════════════════════════════════════════════════
-   404 / error handlers
-   ═══════════════════════════════════════════════════════════════════ */
 app.use('/api/', (_req, res) => res.status(404).json({ error: 'Unknown endpoint' }));
 app.use((err, _req, res, _next) => {
     const msg = redact(err && err.message ? err.message : String(err));
@@ -1882,12 +2283,11 @@ app.use((err, _req, res, _next) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   HTTP server + PTY WebSocket
+   HTTP + WebSocket PTY
    ═══════════════════════════════════════════════════════════════════ */
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, path: '/pty' });
 
-/** Resolve a usable bash binary — Termux path preferred, /bin/bash fallback. */
 function resolveShell() {
     if (fs.existsSync(TERMUX_BASH)) return TERMUX_BASH;
     for (const candidate of ['/data/data/com.termux/files/usr/bin/bash', '/system/bin/sh', '/bin/bash', '/bin/sh']) {
@@ -1898,105 +2298,53 @@ function resolveShell() {
 
 wss.on('connection', (ws, req) => {
     const ip = (req.socket.remoteAddress || '').replace('::ffff:', '');
-    if (!['127.0.0.1', '::1', 'localhost'].includes(ip)) {
-        try { ws.close(1008, 'Forbidden'); } catch (_) {}
-        return;
-    }
-
+    if (!['127.0.0.1', '::1', 'localhost'].includes(ip)) { try { ws.close(1008, 'Forbidden'); } catch (_) {} return; }
     const shellBin = resolveShell();
     const shellEnv = { ...process.env, TERM: 'xterm-256color', DS_WORKSPACE: WORKSPACE };
-
-    /* ── Preferred path: real PTY via node-pty ── */
     if (ptyLib) {
         let term;
-        try {
-            term = ptyLib.spawn(shellBin, ['-l'], {
-                name: 'xterm-256color',
-                cols: 80,
-                rows: 24,
-                cwd: WORKSPACE,
-                env: shellEnv,
-            });
-        } catch (err) {
-            try { ws.send('\r\n[pty spawn failed: ' + redact(err.message) + ']\r\n'); } catch (_) {}
-            try { ws.close(); } catch (_) {}
-            return;
-        }
-
+        try { term = ptyLib.spawn(shellBin, ['-l'], { name: 'xterm-256color', cols: 80, rows: 24, cwd: WORKSPACE, env: shellEnv }); }
+        catch (err) { try { ws.send('\r\n[pty spawn failed: ' + redact(err.message) + ']\r\n'); } catch (_) {} try { ws.close(); } catch (_) {} return; }
         term.onData((d) => { try { ws.send(d); } catch (_) {} });
-        term.onExit(({ exitCode }) => {
-            try { ws.send('\r\n[process exited with code ' + exitCode + ']\r\n'); } catch (_) {}
-            try { ws.close(); } catch (_) {}
-        });
-
+        term.onExit(({ exitCode }) => { try { ws.send('\r\n[process exited with code ' + exitCode + ']\r\n'); } catch (_) {} try { ws.close(); } catch (_) {} });
         ws.on('message', (raw) => {
             const msg = raw.toString('utf8');
             if (msg.startsWith('{')) {
                 try {
                     const parsed = JSON.parse(msg);
-                    if (parsed && parsed.type === 'resize' && parsed.cols > 0 && parsed.rows > 0) {
-                        term.resize(parsed.cols, parsed.rows);
-                        return;
-                    }
-                    if (parsed && parsed.type === 'input') {
-                        term.write(parsed.data);
-                        return;
-                    }
+                    if (parsed && parsed.type === 'resize' && parsed.cols > 0 && parsed.rows > 0) { term.resize(parsed.cols, parsed.rows); return; }
+                    if (parsed && parsed.type === 'input') { term.write(parsed.data); return; }
                 } catch (_) {}
             }
             term.write(msg);
         });
-
         ws.on('close', () => { try { term.kill(); } catch (_) {} });
         ws.on('error', () => { try { term.kill(); } catch (_) {} });
         return;
     }
-
-    /* ── Fallback: child_process pipe (no TTY) ── */
     let shell;
-    try {
-        shell = require('child_process').spawn(shellBin, ['-l'], {
-            cwd: WORKSPACE,
-            env: shellEnv,
-            stdio: ['pipe', 'pipe', 'pipe'],
-        });
-    } catch (err) {
-        try { ws.send('\r\n[error] failed to start shell: ' + redact(err.message) + '\r\n'); } catch (_) {}
-        try { ws.close(); } catch (_) {}
-        return;
-    }
-
+    try { shell = require('child_process').spawn(shellBin, ['-l'], { cwd: WORKSPACE, env: shellEnv, stdio: ['pipe', 'pipe', 'pipe'] }); }
+    catch (err) { try { ws.send('\r\n[error] failed to start shell: ' + redact(err.message) + '\r\n'); } catch (_) {} try { ws.close(); } catch (_) {} return; }
     shell.stdout.on('data', (d) => { try { ws.send(d.toString('utf8')); } catch (_) {} });
     shell.stderr.on('data', (d) => { try { ws.send(d.toString('utf8')); } catch (_) {} });
-    shell.on('exit', (code) => {
-        try { ws.send('\r\n[process exited with code ' + code + ']\r\n'); } catch (_) {}
-        try { ws.close(); } catch (_) {}
-    });
-
+    shell.on('exit', (code) => { try { ws.send('\r\n[process exited with code ' + code + ']\r\n'); } catch (_) {} try { ws.close(); } catch (_) {} });
     ws.on('message', (raw) => {
         const msg = raw.toString('utf8');
         if (msg.startsWith('{')) {
             try {
                 const parsed = JSON.parse(msg);
-                if (parsed && parsed.type === 'input' && shell.stdin.writable) {
-                    shell.stdin.write(parsed.data);
-                    return;
-                }
-                if (parsed && parsed.type === 'resize') return; // no-op in fallback mode
+                if (parsed && parsed.type === 'input' && shell.stdin.writable) { shell.stdin.write(parsed.data); return; }
+                if (parsed && parsed.type === 'resize') return;
             } catch (_) {}
         }
         if (shell.stdin.writable) shell.stdin.write(msg);
     });
-
-    ws.on('close', () => {
-        try { shell.kill('SIGTERM'); } catch (_) {}
-        setTimeout(() => { try { shell.kill('SIGKILL'); } catch (_) {} }, 2000);
-    });
+    ws.on('close', () => { try { shell.kill('SIGTERM'); } catch (_) {} setTimeout(() => { try { shell.kill('SIGKILL'); } catch (_) {} }, 2000); });
     ws.on('error', () => { try { shell.kill('SIGKILL'); } catch (_) {} });
 });
 
 /* ═══════════════════════════════════════════════════════════════════
-   Graceful shutdown
+   Shutdown + Boot
    ═══════════════════════════════════════════════════════════════════ */
 let shuttingDown = false;
 function shutdown(signal) {
@@ -2004,28 +2352,15 @@ function shutdown(signal) {
     shuttingDown = true;
     console.log('\n[' + signal + '] Shutting down...');
     try { wss.close(); } catch (_) {}
-    try {
-        require('child_process').execSync(
-            'command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock',
-            { timeout: 3000, stdio: 'ignore' });
-        console.log('\uD83D\uDD13 Wake lock released');
-    } catch (_) {}
+    try { require('child_process').execSync('command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock', { timeout: 3000, stdio: 'ignore' }); console.log('\uD83D\uDD13 Wake lock released'); } catch (_) {}
     server.close(() => { console.log('Server closed.'); process.exit(0); });
     setTimeout(() => process.exit(1), 5000).unref();
 }
 process.on('SIGTERM', () => shutdown('SIGTERM'));
 process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('uncaughtException', (err) => {
-    console.error('[uncaughtException]', redact(err && err.message));
-    if (err && err.stack) console.error(redact(err.stack));
-});
-process.on('unhandledRejection', (reason) => {
-    console.error('[unhandledRejection]', redact(reason && reason.message ? reason.message : reason));
-});
+process.on('uncaughtException', (err) => { console.error('[uncaughtException]', redact(err && err.message)); if (err && err.stack) console.error(redact(err.stack)); });
+process.on('unhandledRejection', (reason) => { console.error('[unhandledRejection]', redact(reason && reason.message ? reason.message : reason)); });
 
-/* ═══════════════════════════════════════════════════════════════════
-   Boot
-   ═══════════════════════════════════════════════════════════════════ */
 server.on('error', (err) => {
     if (err && err.code === 'EADDRINUSE') {
         console.error('\n\u2717 Port ' + PORT + ' is already in use.');
@@ -2041,8 +2376,8 @@ server.listen(PORT, HOST, () => {
     const line = '===========================================';
     console.log('');
     console.log(line);
-    console.log('  DeepSeek Studio — Backend');
-    console.log('  v' + PKG_VERSION + ' \u00b7 Node ' + process.version);
+    console.log('  DeepSeek Studio — Backend v' + PKG_VERSION);
+    console.log('  Node ' + process.version + ' · FULL DEVELOPER MODE');
     console.log(line);
     console.log('  URL:       http://' + HOST + ':' + PORT);
     console.log('  Workspace: ' + WORKSPACE);
@@ -2050,12 +2385,21 @@ server.listen(PORT, HOST, () => {
     console.log('  Keystores: ' + KEYSTORE_DIR);
     console.log('  SD Card:   ' + (fs.existsSync(SD_CARD_ROOT) ? 'detected' : 'NOT FOUND'));
     console.log('  GitHub:    ' + (ghToken() ? 'token configured' : 'no token'));
+    console.log('  Links:     ' + Object.keys(links).length + ' external folder(s)');
     console.log(line);
     console.log('  Libraries:');
     console.log('    simple-git    ' + (simpleGitFactory ? '\u2713' : '\u2717 (using execFile)'));
     console.log('    @octokit/rest ' + (OctokitLib       ? '\u2713' : '\u2717 (using fetch)'));
     console.log('    node-pty      ' + (ptyLib          ? '\u2713' : '\u2717 (using pipe)'));
     console.log('    editkit       ' + (editkitLib      ? '\u2713' : '\u2717 (using exact match)'));
+    console.log('    termux-api    ' + (termuxApiLib    ? '\u2713' : '\u2717 (using CLI fallback)'));
+    console.log(line);
+    console.log('  Developer tools:');
+    console.log('    compile       \u2713 (15+ languages)');
+    console.log('    license       \u2713 (AAB gate)');
+    console.log('    install-tools \u2713 (openjdk-17, gradle)');
+    console.log('    artifacts     \u2713 (AAB/APK scanner)');
+    console.log('    termux:api    \u2713 (18 tools)');
     console.log(line);
     console.log('');
 });

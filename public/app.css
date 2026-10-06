@@ -256,7 +256,6 @@ body {
   margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px;
 }
 .chat-msg.assistant pre .insert-code-btn {
-  position:absolute; top:8px; right:8px;
   background:var(--green-2); border:none; color:#fff;
   padding:4px 10px; border-radius:4px;
   font-size:10px; cursor:pointer; font-weight:600;
@@ -985,3 +984,213 @@ body {
   flex-shrink:0;
 }
 .welcome-cta-arrow { opacity:.8; }
+
+/* ═══════════════════════════════════════════════════════════════
+   v2.2 ADDITIONS
+   ───────────────────────────────────────────────────────────────
+   Copy buttons everywhere · chat search · updates/activity log
+   (These live here instead of an inline <style> block so the
+   styling has a single source of truth.)
+   ═══════════════════════════════════════════════════════════════ */
+
+/* ─── Universal copy buttons ─── */
+.copy-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-2);
+  color: var(--fg-3);
+  border-radius: 5px;
+  font-size: 10px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all .15s ease;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  min-height: 22px;
+}
+.copy-btn:hover, .copy-btn:active {
+  background: var(--bg-3);
+  color: var(--fg-1);
+  border-color: var(--border-2);
+}
+.copy-btn.copied {
+  color: var(--green);
+  border-color: var(--green);
+  background: rgba(63,185,80,.12);
+}
+.copy-btn svg { display: block; pointer-events: none; }
+
+/* Tool call bubble — copy button sits on the right */
+.tool-call .tool-head { position: relative; padding-right: 60px; }
+.tool-call .tool-head .tool-copy {
+  position: absolute; top: -2px; right: 0;
+}
+.tool-call .tool-output { position: relative; }
+.tool-call .tool-output .output-copy {
+  position: absolute; top: 6px; right: 6px; z-index: 2;
+}
+
+/* Code block: Copy + Insert side-by-side */
+.chat-msg.assistant pre .pre-actions {
+  position: absolute;
+  top: 8px; right: 8px;
+  display: flex; gap: 6px;
+  z-index: 2;
+}
+.chat-msg.assistant pre .pre-actions .insert-code-btn {
+  position: static;
+}
+.chat-msg.assistant pre .pre-actions .copy-btn {
+  padding: 4px 10px;
+  font-size: 10px;
+  min-height: 22px;
+}
+
+/* ─── Chat header action buttons ─── */
+.chat-header-actions {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+  align-items: center;
+}
+.chat-header-actions .btn.icon-only {
+  min-width: 34px;
+  min-height: 34px;
+  padding: 6px;
+}
+
+/* ─── In-chat search bar ─── */
+.chat-search-bar {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 14px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.chat-search-bar.active { display: flex; }
+.chat-search-bar input {
+  flex: 1;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  color: var(--fg-1);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  outline: none;
+  min-height: 32px;
+}
+.chat-search-bar input:focus { border-color: var(--blue); }
+.chat-search-bar .result-count {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: monospace;
+  white-space: nowrap;
+}
+.chat-search-bar .tsb-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--fg-3);
+  padding: 4px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  min-height: 28px;
+}
+.chat-search-bar .tsb-btn:hover { background: var(--bg-3); color: var(--blue); }
+.chat-msg.search-match {
+  outline: 2px solid var(--yellow);
+  outline-offset: 2px;
+}
+.chat-msg.search-current {
+  outline: 2px solid var(--orange);
+  outline-offset: 2px;
+}
+
+/* ─── Changelog / Updates panel ─── */
+.log-entry {
+  padding: 12px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  margin-bottom: 10px;
+  border-left: 3px solid var(--blue);
+}
+.log-entry.breaking { border-left-color: var(--red); }
+.log-entry.feature  { border-left-color: var(--green); }
+.log-entry.fix      { border-left-color: var(--yellow); }
+.log-entry .log-head {
+  display: flex; align-items: center; gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+.log-entry .log-version {
+  font-family: monospace;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--blue);
+}
+.log-entry .log-date {
+  font-size: 10px;
+  color: var(--fg-4);
+  font-family: monospace;
+}
+.log-entry .log-badge {
+  font-size: 9px;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .5px;
+}
+.log-entry .log-badge.feature  { background: #23863622; color: var(--green); border: 1px solid #23863655; }
+.log-entry .log-badge.fix      { background: #9e6a0322; color: var(--yellow); border: 1px solid #9e6a0355; }
+.log-entry .log-badge.breaking { background: #da363322; color: var(--red);    border: 1px solid #da363355; }
+.log-entry ul {
+  padding-left: 18px;
+  margin: 6px 0 0 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--fg-2);
+}
+.log-entry li { margin-bottom: 4px; }
+.log-entry li code {
+  background: var(--bg-2);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--orange);
+}
+
+/* ─── Live activity stream ─── */
+.activity-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-2);
+  border-radius: 6px;
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+.activity-item .act-time {
+  font-family: monospace;
+  color: var(--fg-4);
+  font-size: 10px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  min-width: 42px;
+}
+.activity-item .act-icon { flex-shrink: 0; width: 14px; text-align: center; }
+.activity-item .act-body { flex: 1; color: var(--fg-2); word-break: break-word; }
+.activity-item.kind-file     .act-icon { color: var(--blue); }
+.activity-item.kind-tool     .act-icon { color: var(--green); }
+.activity-item.kind-error    .act-icon { color: var(--red); }
+.activity-item.kind-save     .act-icon { color: var(--green); }
+.activity-item.kind-git      .act-icon { color: var(--yellow); }
