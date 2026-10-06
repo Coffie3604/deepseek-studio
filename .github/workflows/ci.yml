@@ -1,0 +1,178 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint & syntax
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Syntax check server
+        run: node --check server.js
+      - name: Syntax check frontend
+        run: node --check public/sw.js
+      - name: Validate JSON
+        run: |
+          node -e "JSON.parse(require('fs').readFileSync('package.json','utf8'));console.log('package.json OK')"
+          node -e "JSON.parse(require('fs').readFileSync('public/manifest.json','utf8'));console.log('manifest.json OK')"
+
+  security:
+    name: Security audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - run: npm audit --audit-level=high || true
+      - name: Scan for secrets
+        run: |
+          set +e
+          fails=0
+          scan() {
+            local pattern="$1" label="$2" level="$3"
+            if grep -rEn "$pattern" \
+                --include='*.js' --include='*.html' --include='*.json' \
+                --exclude-dir=node_modules --exclude-dir=.git \
+                --exclude=package-lock.json . ; then
+              echo "::$level::$label"
+              [ "$level" = "error" ] && fails=1
+            fi
+          }
+          scan 'sk-[a-zA-Z0-9]{20,}'    'Possible DeepSeek API key' warning
+          scan 'AIza[a-zA-Z0-9_-]{30,}'  'Possible Google API key'   warning
+          scan 'ghp_[a-zA-Z0-9]{30,}'    'GitHub PAT found'          error
+          if find . -name '*.jks' -not -path './node_modules/*' | grep -q .; then
+            echo '::error::Keystore file (.jks) found'
+            fails=1
+          fi
+          exit $fails
+      - name: Verify .gitignore
+        run: |
+          for pattern in 'node_modules' '*.jks' '*.keystore' '.env' '*.log'; do
+            grep -q "$pattern" .gitignore || { echo "::error::.gitignore missing $pattern"; exit 1; }
+          done
+
+  endpoint-check:
+    name: Endpoint & route check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - name: Verify critical routes exist
+        run: |
+          node -e "
+            const fs = require('fs');
+            const src = fs.readFileSync('server.js', 'utf8');
+            const required = [
+              '/api/fs/list','/api/fs/read','/api/fs/write',
+              '/api/git/clone','/api/git/push','/api/git/pull',
+              '/api/deploy/build','/api/deploy/check-tools',
+              '/api/license/status','/api/backup/list',
+              '/api/ai/tool-call','/api/exec','/api/compile'
+            ];
+            const missing = required.filter((ep) => !src.includes(ep));
+            if (missing.length) { console.error('Missing:', missing); process.exit(1); }
+            console.log('All critical routes present');
+          "
+
+  smoke:
+    name: Server boot smoke test
+    runs-on: ubuntu-latest
+    env:
+      HOME: /home/runner
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: npm ci
+      - name: Boot server & curl endpoints
+        run: |
+          mkdir -p "$HOME/deepseek-projects"
+          node server.js > server.log 2>&1 &
+          PID=$!
+          for i in $(seq 1 20); do
+            sleep 0.5
+            curl -sf http://127.0.0.1:3001/api/health && break
+          done
+          set -e
+          curl -sf http://127.0.0.1:3001/api/version > /dev/null
+          curl -sf http://127.0.0.1:3001/api/fs/list   > /dev/null
+          curl -sf http://127.0.0.1:3001/api/license/status > /dev/null
+          kill $PID
+          echo "Smoke test passed"
+      - name: Show server log on failure
+        if: failure()
+        run: cat server.log
+
+  frontend:
+    name: Frontend sanity check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify assets referenced by index.html exist
+        run: |
+          node -e "
+            const fs = require('fs');
+            const html = fs.readFileSync('public/index.html', 'utf8');
+            const refs = ['/manifest.json', '/icon-v2.svg', '/sw.js', '/app.css'];
+            let fail = false;
+            for (const r of refs) {
+              const p = 'public' + r;
+              if (!fs.existsSync(p)) { console.error('MISSING', p); fail = true; }
+              else console.log('OK', p);
+            }
+            if (fail) process.exit(1);
+          "
+      - name: Check PWA manifest icons
+        run: |
+          node -e "
+            const fs = require('fs');
+            const m = JSON.parse(fs.readFileSync('public/manifest.json', 'utf8'));
+            const required = ['name','short_name','start_url','display','icons'];
+            let fail = false;
+            for (const k of required) if (!m[k]) { console.error('Missing key:', k); fail = true; }
+            (m.icons || []).forEach((i) => {
+              const p = 'public' + i.src;
+              if (!fs.existsSync(p)) { console.error('Icon missing:', p); fail = true; }
+            });
+            if (fail) process.exit(1);
+            console.log('Manifest OK');
+          "
+
+  summary:
+    name: Summary
+    needs: [lint, security, endpoint-check, smoke, frontend]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - run: |
+          echo '═══════════════════════════════════'
+          echo '  DeepSeek Studio — CI Summary'
+          echo '═══════════════════════════════════'
+          echo "  Lint:      ${{ needs.lint.result }}"
+          echo "  Security:  ${{ needs.security.result }}"
+          echo "  Endpoints: ${{ needs['endpoint-check'].result }}"
+          echo "  Smoke:     ${{ needs.smoke.result }}"
+          echo "  Frontend:  ${{ needs.frontend.result }}"
+          echo '═══════════════════════════════════'

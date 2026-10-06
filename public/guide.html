@@ -1,0 +1,861 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0d1117">
+<title>DeepSeek Studio — Getting Started</title>
+<style>
+  :root {
+    --bg-0:#0a0e14; --bg-1:#0d1117; --bg-2:#161b22; --bg-3:#21262d;
+    --fg-0:#f0f6fc; --fg-1:#e6edf3; --fg-2:#c9d1d9; --fg-3:#8b949e; --fg-4:#484f58;
+    --blue:#58a6ff; --blue-2:#1f6feb; --green:#3fb950; --green-2:#238636;
+    --red:#f85149; --red-2:#da3633; --yellow:#d29922; --orange:#f0883e;
+    --border:#30363d; --border-2:#21262d;
+    --r:10px; --r-sm:6px;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html { scroll-behavior:smooth; }
+  body {
+    font-family:-apple-system,'Segoe UI',system-ui,sans-serif;
+    background:var(--bg-1); color:var(--fg-1);
+    line-height:1.65; font-size:15px;
+    padding: 16px 16px 80px;
+    padding-top: calc(16px + env(safe-area-inset-top));
+    padding-bottom: calc(80px + env(safe-area-inset-bottom));
+    max-width: 760px; margin: 0 auto;
+    overflow-x: hidden;
+  }
+
+  /* ── STATUS BAR ── */
+  .status-bar {
+    position: sticky; top: 0; z-index: 10;
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: var(--r);
+    padding: 12px 14px;
+    display: flex; align-items: center; gap: 12px;
+    margin-bottom: 20px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  .status-dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    background: var(--red); flex-shrink: 0;
+    transition: background .3s;
+    box-shadow: 0 0 0 0 var(--red);
+  }
+  .status-dot.checking { background: var(--yellow); animation: pulse-y 1.2s infinite; }
+  .status-dot.online { background: var(--green); animation: pulse-g 2s infinite; }
+  @keyframes pulse-g { 0%{box-shadow:0 0 0 0 rgba(63,185,80,.5)} 70%{box-shadow:0 0 0 10px rgba(63,185,80,0)} 100%{box-shadow:0 0 0 0 rgba(63,185,80,0)} }
+  @keyframes pulse-y { 0%{box-shadow:0 0 0 0 rgba(210,153,34,.5)} 70%{box-shadow:0 0 0 10px rgba(210,153,34,0)} 100%{box-shadow:0 0 0 0 rgba(210,153,34,0)} }
+  .status-text { flex: 1; font-size: 13px; color: var(--fg-2); }
+  .status-text b { color: var(--fg-0); }
+  .status-text small { display: block; color: var(--fg-3); font-size: 11px; margin-top: 2px; }
+
+  /* ── HEADER ── */
+  .hero { text-align: center; margin-bottom: 24px; }
+  .hero-icon {
+    width: 64px; height: 64px; margin: 0 auto 12px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, var(--blue-2), var(--green-2));
+    border-radius: 18px; box-shadow: 0 12px 32px rgba(31,111,235,.25);
+  }
+  .hero-icon svg { width: 36px; height: 36px; color: #fff; }
+  .hero h1 { color: var(--fg-0); font-size: 26px; margin-bottom: 4px; letter-spacing: -.3px; }
+  .hero p { color: var(--fg-3); font-size: 14px; }
+  .hero .version-badge {
+    display: inline-block; margin-top: 8px;
+    padding: 2px 10px; border-radius: 20px;
+    background: rgba(31,111,235,.15); border: 1px solid rgba(31,111,235,.35);
+    color: var(--blue); font-size: 11px; font-weight: 600;
+    font-family: ui-monospace, monospace;
+  }
+
+  /* ── PRIMARY ACTIONS ── */
+  .actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 24px;
+  }
+  @media (max-width: 460px) { .actions { grid-template-columns: 1fr; } }
+  .action-btn {
+    display: flex; align-items: center; gap: 12px;
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: var(--r); padding: 16px;
+    color: var(--fg-1); text-decoration: none;
+    font-size: 15px; font-weight: 600;
+    cursor: pointer; font-family: inherit;
+    transition: all .15s ease;
+    -webkit-tap-highlight-color: transparent;
+    text-align: left;
+    width: 100%;
+  }
+  .action-btn:hover, .action-btn:active {
+    border-color: var(--blue); background: var(--bg-3);
+    transform: translateY(-1px);
+  }
+  .action-btn.primary {
+    background: var(--green-2); border-color: var(--green-2); color: #fff;
+  }
+  .action-btn.primary:hover, .action-btn.primary:active {
+    background: var(--green); border-color: var(--green);
+  }
+  .action-btn.grey { background: var(--bg-3); }
+  .action-btn-icon {
+    width: 32px; height: 32px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(255,255,255,.08); border-radius: 8px;
+  }
+  .action-btn.primary .action-btn-icon { background: rgba(0,0,0,.15); }
+  .action-btn-icon svg { width: 18px; height: 18px; }
+  .action-btn-body { flex: 1; min-width: 0; }
+  .action-btn-body small {
+    display: block; font-weight: 400;
+    color: var(--fg-3); font-size: 11px; margin-top: 2px;
+  }
+  .action-btn.primary .action-btn-body small { color: rgba(255,255,255,.75); }
+
+  /* ── SECTIONS ── */
+  details {
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-radius: var(--r); margin-bottom: 10px;
+    overflow: hidden;
+  }
+  details[open] { border-color: var(--border-2); }
+  summary {
+    padding: 14px 16px; cursor: pointer;
+    font-size: 15px; font-weight: 600; color: var(--fg-0);
+    display: flex; align-items: center; gap: 12px;
+    user-select: none;
+    list-style: none;
+    min-height: 52px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::before {
+    content: '';
+    width: 8px; height: 8px;
+    border-right: 2px solid var(--fg-3);
+    border-bottom: 2px solid var(--fg-3);
+    transform: rotate(-45deg);
+    transition: transform .2s;
+    flex-shrink: 0;
+  }
+  details[open] summary::before { transform: rotate(45deg); }
+  .summary-icon {
+    width: 32px; height: 32px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-3); border-radius: 8px;
+  }
+  .summary-icon svg { width: 18px; height: 18px; color: var(--blue); }
+  .summary-text { flex: 1; }
+  .summary-text small { display: block; color: var(--fg-3); font-size: 12px; font-weight: 400; margin-top: 2px; }
+  details[open] .summary-icon { background: rgba(31,111,235,.15); }
+  .section-body { padding: 4px 16px 18px; }
+
+  /* ── TYPOGRAPHY ── */
+  h3 { color: var(--fg-0); font-size: 14px; margin: 14px 0 8px; }
+  h3:first-child { margin-top: 0; }
+  p { color: var(--fg-2); margin-bottom: 10px; font-size: 14px; }
+  p:last-child { margin-bottom: 0; }
+  ul, ol { color: var(--fg-2); padding-left: 22px; margin-bottom: 10px; font-size: 14px; }
+  li { margin-bottom: 6px; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  strong { color: var(--fg-0); font-weight: 600; }
+  em { color: var(--fg-3); font-style: normal; }
+
+  /* ── CODE BLOCKS ── */
+  .code-wrap {
+    position: relative; background: var(--bg-0);
+    border: 1px solid var(--border-2); border-radius: var(--r-sm);
+    margin: 10px 0; overflow: hidden;
+  }
+  .code-wrap pre {
+    padding: 14px 48px 14px 14px;
+    font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+    font-size: 12px; line-height: 1.6; color: var(--fg-2);
+    overflow-x: auto; white-space: pre; margin: 0;
+    -webkit-overflow-scrolling: touch;
+  }
+  .code-wrap .copy-code {
+    position: absolute; top: 8px; right: 8px;
+    width: 30px; height: 30px;
+    display: flex; align-items: center; justify-content: center;
+    background: var(--bg-3); border: 1px solid var(--border);
+    border-radius: 6px; cursor: pointer; color: var(--fg-3);
+    transition: all .15s;
+  }
+  .code-wrap .copy-code:hover { color: var(--fg-1); border-color: var(--blue); }
+  .code-wrap .copy-code.copied { color: var(--green); border-color: var(--green); background: rgba(63,185,80,.1); }
+  .code-wrap .copy-code svg { width: 14px; height: 14px; }
+  code:not(pre code) {
+    background: var(--bg-3); padding: 2px 6px; border-radius: 4px;
+    font-family: ui-monospace, monospace; font-size: 12.5px;
+    color: var(--orange);
+  }
+
+  /* ── TABLE ── */
+  table { width: 100%; border-collapse: collapse; margin: 10px 0; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid var(--border-2); vertical-align: top; }
+  th { color: var(--fg-3); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+  .tag {
+    display: inline-block; padding: 2px 8px; border-radius: 4px;
+    font-size: 11px; font-weight: 600; white-space: nowrap;
+  }
+  .tag.g { background: var(--green-2); color: #fff; }
+  .tag.r { background: var(--red-2); color: #fff; }
+  .tag.b { background: var(--blue-2); color: #fff; }
+  .tag.y { background: #9e6a03; color: #fff; }
+
+  /* ── CALLOUT ── */
+  .callout {
+    display: flex; gap: 10px; align-items: flex-start;
+    padding: 12px 14px;
+    background: rgba(31,111,235,.08);
+    border: 1px solid rgba(31,111,235,.25);
+    border-radius: var(--r-sm);
+    margin: 12px 0;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .callout.green {
+    background: rgba(63,185,80,.08);
+    border-color: rgba(63,185,80,.3);
+  }
+  .callout.yellow {
+    background: rgba(210,153,34,.08);
+    border-color: rgba(210,153,34,.3);
+  }
+  .callout-icon { flex-shrink: 0; font-size: 16px; line-height: 1.2; }
+  .callout-body { flex: 1; color: var(--fg-2); }
+  .callout-body strong { color: var(--fg-0); }
+
+  /* ── FOOTER ── */
+  .footer {
+    margin-top: 32px; padding-top: 20px;
+    border-top: 1px solid var(--border-2);
+    text-align: center; color: var(--fg-4); font-size: 11px;
+  }
+  .footer a { color: var(--fg-3); }
+
+  /* ── TOAST ── */
+  .toast {
+    position: fixed; bottom: calc(24px + env(safe-area-inset-bottom));
+    left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--bg-2); border: 1px solid var(--border);
+    border-left: 4px solid var(--green);
+    border-radius: var(--r); padding: 12px 18px;
+    font-size: 13px; color: var(--fg-1);
+    box-shadow: 0 12px 40px rgba(0,0,0,.6);
+    z-index: 100; opacity: 0; pointer-events: none;
+    transition: opacity .25s, transform .25s;
+    max-width: calc(100vw - 40px);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  /* ── HIDDEN / DETECT ── */
+  .ctx-termux-only, .ctx-apk-only, .ctx-pwa-only { display: none; }
+  body.is-termux .ctx-termux-only { display: block; }
+  body.is-apk .ctx-apk-only { display: block; }
+  body.is-pwa .ctx-pwa-only { display: block; }
+  body.is-termux .ctx-pwa-only,
+  body.is-termux .ctx-apk-only,
+  body.is-apk .ctx-termux-only,
+  body.is-apk .ctx-pwa-only,
+  body.is-pwa .ctx-termux-only,
+  body.is-pwa .ctx-apk-only { display: none; }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.001ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.001ms !important;
+    }
+  }
+</style>
+</head>
+<body>
+
+<!-- ── LIVE STATUS ── -->
+<div class="status-bar">
+  <div class="status-dot checking" id="statusDot"></div>
+  <div class="status-text">
+    <b id="statusTitle">Checking backend…</b>
+    <small id="statusSub">Looking for DeepSeek Studio on 127.0.0.1:3001</small>
+  </div>
+</div>
+
+<!-- ── HERO ── -->
+<div class="hero">
+  <div class="hero-icon">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M12 2a3 3 0 0 0-3 3v1a3 3 0 0 0-3 3v1a3 3 0 0 0-3 3v4a5 5 0 0 0 5 5h2a7 7 0 0 0 7-7v-5a3 3 0 0 0-3-3V5a3 3 0 0 0-3-3z"/>
+      <path d="M9 9h.01M15 9h.01M9 15c1 1 5 1 6 0"/>
+    </svg>
+  </div>
+  <h1>DeepSeek Studio</h1>
+  <p>AI-powered code editor that runs entirely on your phone</p>
+  <span class="version-badge">v2 · Real PTY · WebGL · Fuzzy patches</span>
+</div>
+
+<!-- ── PRIMARY ACTIONS ── -->
+<div class="actions">
+  <a class="action-btn primary" href="/">
+    <div class="action-btn-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M5 12h14M12 5l7 7-7 7"/>
+      </svg>
+    </div>
+    <div class="action-btn-body">
+      Open the app
+      <small>Try loading the editor now</small>
+    </div>
+  </a>
+  <button class="action-btn grey" id="openTermuxBtn" type="button">
+    <div class="action-btn-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="4 17 10 11 4 5"/>
+        <line x1="12" y1="19" x2="20" y2="19"/>
+      </svg>
+    </div>
+    <div class="action-btn-body">
+      Open Termux
+      <small>Start the backend</small>
+    </div>
+  </button>
+</div>
+
+<!-- ── QUICK START (open by default) ── -->
+<details open>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      Quick Start
+      <small>Get the backend running in 4 steps</small>
+    </div>
+  </summary>
+  <div class="section-body">
+
+    <div class="ctx-apk-only">
+      <p><strong>You're in the DeepSeek Studio app.</strong> The app is a native shell — it needs the Termux backend running on <code>127.0.0.1:3001</code> to work.</p>
+      <p><strong>Do this:</strong></p>
+      <ol>
+        <li>Open the <strong>Termux</strong> app</li>
+        <li>Run the installer once (if you haven't already):
+          <div class="code-wrap">
+            <pre id="code-install-apk">curl -fsSL https://raw.githubusercontent.com/Coffie3604/deepseek-studio/main/install.sh | bash</pre>
+            <button class="copy-code" data-target="code-install-apk" title="Copy">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </li>
+        <li>Every session, start the backend (one tap after first run):
+          <div class="code-wrap">
+            <pre id="code-launch-apk">ds-launch</pre>
+            <button class="copy-code" data-target="code-launch-apk" title="Copy">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </li>
+        <li>Come back to this app — it'll load automatically</li>
+      </ol>
+    </div>
+
+    <div class="ctx-pwa-only">
+      <p><strong>You're viewing the web app.</strong> The backend isn't running right now.</p>
+      <p><strong>Do this:</strong></p>
+      <ol>
+        <li>Open the <strong>Termux</strong> app on your phone</li>
+        <li>Start the backend:
+          <div class="code-wrap">
+            <pre id="code-launch-pwa">ds-launch</pre>
+            <button class="copy-code" data-target="code-launch-pwa" title="Copy">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+            </button>
+          </div>
+        </li>
+        <li>Come back to this page — it'll auto-reload when the server responds</li>
+      </ol>
+      <div class="callout">
+        <span class="callout-icon">💡</span>
+        <span class="callout-body">Install the <strong>Termux:Widget</strong> app to launch with one tap from your home screen. The installer creates a <strong>🚀 DeepSeek</strong> widget automatically.</span>
+      </div>
+    </div>
+
+    <div class="ctx-termux-only">
+      <p>Running from Termux? Start the backend now:</p>
+      <div class="code-wrap">
+        <pre id="code-launch-termux">ds-launch</pre>
+        <button class="copy-code" data-target="code-launch-termux" title="Copy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        </button>
+      </div>
+    </div>
+
+  </div>
+</details>
+
+<!-- ── FIRST-TIME INSTALL ── -->
+<details>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      First-time setup
+      <small>Install Termux + the companion apps</small>
+    </div>
+  </summary>
+  <div class="section-body">
+    <p>You need three things installed from <strong>F-Droid</strong>. Don't use Play Store versions — signatures won't match.</p>
+
+    <h3>1. Termux</h3>
+    <p>The terminal environment that runs the backend.</p>
+    <a class="action-btn" href="https://f-droid.org/packages/com.termux/" target="_blank" rel="noopener">
+      <div class="action-btn-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </div>
+      <div class="action-btn-body">
+        Get Termux from F-Droid
+        <small>~130 MB, required</small>
+      </div>
+    </a>
+
+    <h3>2. Termux:API</h3>
+    <p>Enables wake-lock (prevents Android killing the server) and notifications.</p>
+    <a class="action-btn" href="https://f-droid.org/packages/com.termux.api/" target="_blank" rel="noopener">
+      <div class="action-btn-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </div>
+      <div class="action-btn-body">
+        Get Termux:API from F-Droid
+        <small>~180 KB, strongly recommended</small>
+      </div>
+    </a>
+
+    <h3>3. Termux:Widget</h3>
+    <p>Adds home-screen shortcuts for one-tap launch.</p>
+    <a class="action-btn" href="https://f-droid.org/packages/com.termux.widget/" target="_blank" rel="noopener">
+      <div class="action-btn-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+      </div>
+      <div class="action-btn-body">
+        Get Termux:Widget from F-Droid
+        <small>~100 KB, optional but great</small>
+      </div>
+    </a>
+
+    <h3>Install the backend</h3>
+    <p>Once Termux is open, paste this:</p>
+    <div class="code-wrap">
+      <pre id="code-install-full">curl -fsSL https://raw.githubusercontent.com/Coffie3604/deepseek-studio/main/install.sh | bash</pre>
+      <button class="copy-code" data-target="code-install-full" title="Copy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+    </div>
+    <p style="color: var(--fg-3); font-size: 12px; margin-top: 8px;">
+      Takes 3–5 minutes. It clones the repo, installs Node.js, native libraries (<code>node-pty</code>, <code>simple-git</code>, <code>@octokit/rest</code>, <code>editkit</code>), and creates the <code>ds-*</code> commands. If any optional library fails, the installer continues and reports which fallbacks activated.
+    </p>
+
+    <div class="callout green">
+      <span class="callout-icon">✅</span>
+      <span class="callout-body">After install, run <code>ds-doctor</code> to see a full diagnostics report — dependencies, Termux tools, SD card, and which v2 libraries loaded successfully.</span>
+    </div>
+  </div>
+</details>
+
+<!-- ── DAILY USE ── -->
+<details>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <polyline points="12 6 12 12 16 14"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      Daily commands
+      <small>The <code>ds-*</code> shortcuts</small>
+    </div>
+  </summary>
+  <div class="section-body">
+    <table>
+      <tr>
+        <th>Command</th>
+        <th>What it does</th>
+      </tr>
+      <tr><td><code>ds-launch</code></td><td><strong>One-tap</strong>: start if needed, then open the browser. Best everyday command.</td></tr>
+      <tr><td><code>ds-start</code></td><td>Boot the backend only (doesn't open browser)</td></tr>
+      <tr><td><code>ds-stop</code></td><td>Kill the server, save battery</td></tr>
+      <tr><td><code>ds-restart</code></td><td>Full restart (use when things act weird)</td></tr>
+      <tr><td><code>ds-status</code></td><td>Show version, uptime, PID</td></tr>
+      <tr><td><code>ds-log</code></td><td>Tail the live server log (Ctrl+C to exit)</td></tr>
+      <tr><td><code>ds-doctor</code></td><td><strong>Full self-diagnostic</strong> — deps, tools, SD card, loaded libraries, server health</td></tr>
+      <tr><td><code>ds-update</code></td><td>Pull latest code + reinstall dependencies</td></tr>
+    </table>
+
+    <h3>Home screen widgets</h3>
+    <p>With <strong>Termux:Widget</strong> installed, the installer auto-creates these shortcuts in <code>~/.shortcuts/</code>:</p>
+    <ol>
+      <li>Long-press your home screen</li>
+      <li>Widgets → Termux:Widget → drag to home</li>
+      <li>Pick one of the installed shortcuts:
+        <br><span class="tag g">🚀 DeepSeek</span> <span class="tag b">🐳 Start</span> <span class="tag r">🛑 Stop</span> <span class="tag y">🔄 Restart</span> <span class="tag b">ℹ️ Status</span> <span class="tag g">🩺 Doctor</span>
+      </li>
+    </ol>
+  </div>
+</details>
+
+<!-- ── WHAT'S NEW IN V2 ── -->
+<details>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      What's new in v2
+      <small>Real PTY · WebGL · Fuzzy patches · Octokit</small>
+    </div>
+  </summary>
+  <div class="section-body">
+    <p>v2 upgrades four core systems. Every library is loaded <strong>defensively</strong> — if one is missing, the feature falls back and the app keeps working.</p>
+
+    <h3>🖥️ Terminal — real TTY</h3>
+    <ul>
+      <li>Powered by <code>node-pty</code> instead of plain pipes. <strong>vim, htop, less, nano, ssh</strong> — all interactive TUIs now work properly.</li>
+      <li>True resize events — the terminal reflows correctly when you rotate or resize.</li>
+      <li><strong>Ctrl+F to find</strong> in terminal scrollback (case-sensitive + regex toggles).</li>
+      <li><strong>GPU-accelerated rendering</strong> via WebGL addon — noticeably smoother on long outputs. Auto-falls back to DOM renderer if the GPU rejects it.</li>
+      <li>Clickable URLs in terminal output.</li>
+      <li>Emoji + wide-character (CJK) rendering fixed via Unicode 11 addon.</li>
+    </ul>
+
+    <h3>🔀 Git — fluent + safer</h3>
+    <ul>
+      <li>Powered by <code>simple-git</code> — better error messages, structured results, correct handling of edge cases.</li>
+      <li>Git status now shows precise index vs working-tree state (<code>M </code> = staged, <code> M</code> = modified, <code>??</code> = untracked, <code>UU</code> = conflict).</li>
+      <li>Token still passes via ephemeral <code>GIT_ASKPASS</code> — never lands in <code>.git/config</code>, argv, or <code>ps</code> output.</li>
+    </ul>
+
+    <h3>🐙 GitHub — Octokit</h3>
+    <ul>
+      <li>Powered by <code>@octokit/rest</code> — typed API, automatic pagination, better rate-limit handling.</li>
+      <li>Token now stored <strong>server-side</strong> in <code>~/.deepseek-secrets.json</code> (mode <code>0600</code>) — never in the browser.</li>
+    </ul>
+
+    <h3>🧠 AI edits — fuzzy patches</h3>
+    <ul>
+      <li>Powered by <code>editkit</code> — Aider-style SEARCH/REPLACE matching that tolerates near-miss whitespace.</li>
+      <li>The #1 failure mode of LLM edits (indentation drift) is now handled automatically. Patches that would have failed exact-match now succeed with <em>(fuzzy)</em> label.</li>
+    </ul>
+
+    <div class="callout">
+      <span class="callout-icon">🔍</span>
+      <span class="callout-body">Open the app → <strong>Setup</strong> → <strong>Backend</strong>. You'll see a badge for each library: <strong>active</strong> (green) or <strong>fallback</strong> (grey). If any show "fallback", run <code>ds-update</code> to retry the install.</span>
+    </div>
+  </div>
+</details>
+
+<!-- ── THE APP ── -->
+<details>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+        <line x1="8" y1="21" x2="16" y2="21"/>
+        <line x1="12" y1="17" x2="12" y2="21"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      What's in the app
+      <small>Chat, editor, terminal, sidebars</small>
+    </div>
+  </summary>
+  <div class="section-body">
+    <h3>Three main tabs</h3>
+    <ul>
+      <li><strong>Chat</strong> — describe what you want built. Type <code>/</code> for prompt templates.</li>
+      <li><strong>Editor</strong> — Monaco (the VS Code engine) with tabs, find/replace, formatting.</li>
+      <li><strong>Terminal</strong> — full Termux shell with real PTY. Press <strong>Ctrl+F</strong> to search the scrollback. AI commands appear in real-time.</li>
+    </ul>
+
+    <h3>Sidebar panels</h3>
+    <table>
+      <tr><th>Panel</th><th>Purpose</th></tr>
+      <tr><td><strong>AI</strong></td><td>Quick prompts: Explain, Find bugs, Add docs, Write tests</td></tr>
+      <tr><td><strong>Tpl</strong></td><td>7 starter projects (Flutter, Python, Rust, Go, Node, HTML, Kotlin)</td></tr>
+      <tr><td><strong>Gen</strong></td><td>Describe an app → AI scaffolds it</td></tr>
+      <tr><td><strong>Term</strong></td><td>Quick commands, package managers, env vars, process list, <strong>Find in terminal</strong></td></tr>
+      <tr><td><strong>Git</strong></td><td>Clone, branches, commits, stash, tags — powered by simple-git + Octokit</td></tr>
+      <tr><td><strong>Build</strong></td><td>Android APK/AAB builder with keystore signing</td></tr>
+      <tr><td><strong>Backup</strong></td><td>SD-card snapshots (keeps last 5)</td></tr>
+      <tr><td><strong>Setup</strong></td><td>API keys, editor settings, license, <strong>library status</strong></td></tr>
+    </table>
+
+    <h3>Keyboard shortcuts</h3>
+    <table>
+      <tr><th>Shortcut</th><th>Action</th></tr>
+      <tr><td><code>Ctrl+S</code></td><td>Save current file</td></tr>
+      <tr><td><code>Ctrl+Shift+S</code></td><td>Save As…</td></tr>
+      <tr><td><code>Ctrl+R</code></td><td>Reload from disk (Editor tab)</td></tr>
+      <tr><td><code>Ctrl+W</code></td><td>Close current tab</td></tr>
+      <tr><td><code>Ctrl+K</code></td><td>Clear terminal</td></tr>
+      <tr><td><code>Ctrl+F</code></td><td>Find in terminal (Terminal tab)</td></tr>
+      <tr><td><code>Enter</code> / <code>Shift+Enter</code></td><td>Send chat / newline in chat</td></tr>
+      <tr><td><code>F5</code></td><td>Force backend status check</td></tr>
+    </table>
+  </div>
+</details>
+
+<!-- ── TROUBLESHOOTING ── -->
+<details>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="12"/>
+        <line x1="12" y1="16" x2="12.01" y2="16"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      Troubleshooting
+      <small>Common problems and fixes</small>
+    </div>
+  </summary>
+  <div class="section-body">
+    <table>
+      <tr><th>Symptom</th><th>Fix</th></tr>
+      <tr>
+        <td>This page keeps appearing</td>
+        <td>Open Termux and run <code>ds-launch</code></td>
+      </tr>
+      <tr>
+        <td>Backend not reachable / "Cannot GET /api/…"</td>
+        <td>Run <code>ds-update && ds-restart</code></td>
+      </tr>
+      <tr>
+        <td>Server hangs on startup</td>
+        <td>Run <code>ds-log</code> in Termux, look for errors</td>
+      </tr>
+      <tr>
+        <td>Terminal commands show no cursor / no colors</td>
+        <td>Run <code>ds-doctor</code> — if <strong>node-pty</strong> shows ✗, run <code>ds-update</code>. Installer will retry.</td>
+      </tr>
+      <tr>
+        <td>vim / htop render as garbage</td>
+        <td>This means the pipe fallback is active. Same fix as above (<code>ds-update</code>).</td>
+      </tr>
+      <tr>
+        <td>Terminal feels laggy on big output</td>
+        <td>Setup → Terminal → toggle <strong>Use GPU renderer</strong> off then on. Some GPUs prefer DOM renderer.</td>
+      </tr>
+      <tr>
+        <td>Setup → Backend shows a library as "fallback"</td>
+        <td>Run <code>ds-update</code>. If it still falls back, the library may be incompatible with your Termux build — the app still works, just without that feature.</td>
+      </tr>
+      <tr>
+        <td>Wake-lock missing in log</td>
+        <td>Install <strong>Termux:API</strong> app, open it once</td>
+      </tr>
+      <tr>
+        <td>Notifications don't fire</td>
+        <td>Same as above — needs Termux:API app installed</td>
+      </tr>
+      <tr>
+        <td>Widget does nothing</td>
+        <td>Open Termux once manually, then retry the widget</td>
+      </tr>
+      <tr>
+        <td>AI says "add key"</td>
+        <td>In app: <strong>Setup</strong> → paste API key</td>
+      </tr>
+      <tr>
+        <td>AI patch fails with "no match"</td>
+        <td>Server falls back to exact-match if <code>editkit</code> isn't loaded. Check Setup → Backend. Run <code>ds-update</code>.</td>
+      </tr>
+      <tr>
+        <td>Chat is slow / frozen</td>
+        <td>Check <code>ds-log</code>. Look for repeated API errors.</td>
+      </tr>
+      <tr>
+        <td>Port 3001 already in use</td>
+        <td>Run <code>pkill -f "node server.js"</code> then <code>ds-start</code></td>
+      </tr>
+    </table>
+  </div>
+</details>
+
+<!-- ── FILE LOCATIONS ── -->
+<details>
+  <summary>
+    <div class="summary-icon">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+      </svg>
+    </div>
+    <div class="summary-text">
+      Where files live
+      <small>Logs, projects, secrets, backups</small>
+    </div>
+  </summary>
+  <div class="section-body">
+    <div class="code-wrap">
+      <pre id="paths">~/.ds-studio.log                       Server log (tail with: ds-log)
+~/.deepseek-secrets.json               API keys + GitHub token (mode 0600)
+~/.deepseek-git-askpass.sh             Ephemeral git helper (token via env)
+~/.deepseek-keystores/                 Android signing keystores
+~/.deepseek-license                    Pro license file
+~/.shortcuts/                          Home-screen widget scripts
+~/deepseek-projects/                   Your project files
+~/storage/external-1/DeepSeekBackups/  SD-card backup snapshots
+~/deepseek-projects/deepseek-editor/   The app itself (server + public/)</pre>
+      <button class="copy-code" data-target="paths" title="Copy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+      </button>
+    </div>
+    <div class="callout yellow">
+      <span class="callout-icon">🔐</span>
+      <span class="callout-body"><strong>Secrets:</strong> your API keys and GitHub token live in <code>~/.deepseek-secrets.json</code>. Never commit this file. It's <code>chmod 0600</code> — readable only by your Termux user.</span>
+    </div>
+  </div>
+</details>
+
+<!-- ── FOOTER ── -->
+<div class="footer">
+  <p><a href="https://github.com/Coffie3604/deepseek-studio" target="_blank" rel="noopener">github.com/Coffie3604/deepseek-studio</a></p>
+  <p style="margin-top: 6px;">DeepSeek Studio v2 · AI-powered code editor for Android</p>
+</div>
+
+<!-- ── TOAST ── -->
+<div class="toast" id="toast"></div>
+
+<script>
+(function() {
+  'use strict';
+
+  /* ── CONTEXT DETECTION ── */
+  var isFile = location.protocol === 'file:';
+  var isLocal = location.protocol === 'http:' && (location.hostname === '127.0.0.1' || location.hostname === 'localhost');
+  if (isFile) document.body.classList.add('is-apk');
+  else if (isLocal) document.body.classList.add('is-pwa');
+  else document.body.classList.add('is-termux');
+
+  /* ── TOAST ── */
+  var toastEl = document.getElementById('toast');
+  var toastTimer = null;
+  function showToast(msg) {
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(function() { toastEl.classList.remove('show'); }, 1800);
+  }
+
+  /* ── COPY BUTTONS ── */
+  document.querySelectorAll('.copy-code').forEach(function(btn) {
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      var targetId = btn.getAttribute('data-target');
+      var pre = targetId ? document.getElementById(targetId) : btn.parentElement.querySelector('pre');
+      if (!pre) return;
+      var text = pre.textContent;
+      var done = function() {
+        btn.classList.add('copied');
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+        showToast('Copied to clipboard');
+        setTimeout(function() {
+          btn.classList.remove('copied');
+          btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+        }, 1400);
+      };
+      var fallback = function() {
+        try {
+          var ta = document.createElement('textarea');
+          ta.value = text; ta.style.position = 'fixed'; ta.style.top = '-9999px';
+          document.body.appendChild(ta); ta.select();
+          var ok = document.execCommand('copy');
+          document.body.removeChild(ta);
+          return ok;
+        } catch (err) { return false; }
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(function() {
+          fallback() ? done() : showToast('Copy failed');
+        });
+      } else {
+        fallback() ? done() : showToast('Copy failed');
+      }
+    });
+  });
+
+  /* ── OPEN TERMUX ── */
+  var termuxBtn = document.getElementById('openTermuxBtn');
+  if (termuxBtn) {
+    termuxBtn.addEventListener('click', function() {
+      var launchUrl = 'intent://com.termux/com.termux.app.TermuxActivity#Intent;package=com.termux;end';
+      var iframe = document.createElement('iframe');
+      iframe.style.display = 'none';
+      iframe.src = launchUrl;
+      document.body.appendChild(iframe);
+      setTimeout(function() { try { document.body.removeChild(iframe); } catch (e) {} }, 500);
+      showToast('Opening Termux…');
+      setTimeout(function() { showToast('If Termux didn\'t open, launch it manually'); }, 2000);
+    });
+  }
+
+  /* ── LIVE BACKEND POLL ── */
+  var dot = document.getElementById('statusDot');
+  var title = document.getElementById('statusTitle');
+  var sub = document.getElementById('statusSub');
+  var pollCount = 0;
+  var hasRedirected = false;
+
+  function setStatus(state, t, s) {
+    dot.className = 'status-dot ' + state;
+    title.textContent = t;
+    sub.textContent = s;
+  }
+
+  function poll() {
+    pollCount++;
+    fetch('/api/health', { cache: 'no-store' })
+      .then(function(r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function() {
+        setStatus('online', 'Backend is online!', 'Redirecting in 1s…');
+        if (!hasRedirected) {
+          hasRedirected = true;
+          setTimeout(function() { location.href = '/'; }, 1000);
+        }
+      })
+      .catch(function() {
+        setStatus('checking', 'Backend not running',
+          pollCount === 1
+            ? 'Looking for server on 127.0.0.1:3001'
+            : 'Retrying… (' + pollCount + ') — run ds-launch in Termux');
+      });
+  }
+
+  poll();
+  setInterval(poll, 2500);
+
+  /* ── KEYBOARD SHORTCUTS ── */
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'r' && !e.ctrlKey && !e.metaKey && !e.target.closest('input, textarea')) {
+      location.href = '/';
+    }
+  });
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,27 @@
+{
+  "name": "deepseek-editor",
+  "version": "2.3.0",
+  "description": "Local-first AI coding studio for Termux (Android)",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js",
+    "verify": "node -e \"const p=['express','cors','ws','simple-git','@octokit/rest']; const ok=p.every(m=>{try{require.resolve(m);return true}catch{return false}}); console.log(ok?'✓ required deps present':'✗ missing required deps'); process.exit(ok?0:1)\""
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@octokit/rest": "^21.1.0",
+    "cors": "^2.8.6",
+    "editkit": "^0.2.0",
+    "express": "^5.2.1",
+    "node-pty": "^1.1.0",
+    "simple-git": "^3.27.0",
+    "ws": "^8.22.0"
+  },
+  "optionalDependencies": {
+    "termux-api": "^1.0.0"
+  }
+}
