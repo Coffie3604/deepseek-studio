@@ -3407,7 +3407,7 @@ function setupContextMenu() {
     if (!ctxItem) return;
     var item = ctxItem; hideContextMenu();
     var dir = item.isDir ? item.path : item.path.split('/').slice(0, -1).join('/');
-    sendToTerminal('cd ~/deepseek-projects/' + (dir ? dir : ''));
+    sendToTerminal('cd ~/projects/' + (dir ? dir : ''));
   };
 
   document.getElementById('ctxUnlink').onclick = function() {
