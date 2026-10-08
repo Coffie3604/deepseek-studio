@@ -70,7 +70,7 @@ const PORT = parseInt(process.env.PORT, 10) || 3001;
 const HOST = process.env.HOST || '127.0.0.1';
 const HOME = process.env.HOME || os.homedir();
 
-const WORKSPACE = path.resolve(process.env.DS_WORKSPACE || path.join(HOME, 'deepseek-projects'));
+const WORKSPACE = path.resolve(process.env.DS_WORKSPACE || path.join(HOME, 'projects'));
 const SD_CARD_ROOT = path.join(HOME, 'storage', 'external-1');
 const SD_BACKUP = path.join(SD_CARD_ROOT, 'DeepSeekBackups');
 const KEYSTORE_DIR = path.join(HOME, '.deepseek-keystores');

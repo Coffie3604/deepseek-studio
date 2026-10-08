@@ -11,7 +11,7 @@ set -euo pipefail
 
 REPO="https://github.com/Coffie3604/deepseek-studio.git"
 REF="${DS_REF:-main}"
-INSTALL_DIR="${DS_INSTALL_DIR:-$HOME/deepseek-projects/deepseek-editor}"
+INSTALL_DIR="${DS_INSTALL_DIR:-$HOME/projects/deepseek-editor}"
 BIN_DIR="${PREFIX:-/data/data/com.termux/files/usr}/bin"
 UPDATE_ONLY=0
 
@@ -30,7 +30,7 @@ usage() {
 DeepSeek Studio installer
   --ref <ref>       Git ref to install (default: main)
   --update          Update existing install only
-  --dir <path>      Install directory (default: ~/deepseek-projects/deepseek-editor)
+  --dir <path>      Install directory (default: ~/projects/deepseek-editor)
   -h, --help        This help
 EOF
   exit 0
