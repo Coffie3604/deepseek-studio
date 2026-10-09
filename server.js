@@ -1792,6 +1792,23 @@ app.post('/api/git/revert', async (req, res) => {
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
+app.post('/api/git/rebase', async (req, res) => {
+    const { cwd, onto } = req.body || {};
+    if (!validRef(onto)) return res.status(400).json({ error: 'invalid ref' });
+    try {
+        if (simpleGitFactory) {
+            const g = getGit(cwd || '');
+            try { return res.json(gitOk({ stdout: JSON.stringify(await g.rebase([onto])) })); }
+            catch (e) { const m = redact(e.message || String(e)); return res.json({ code: 1, ok: false, conflicted: /CONFLICT/i.test(m), stdout: '', stderr: m }); }
+        }
+        const workdir = resolveInWorkspace(cwd || '');
+        if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+        const r = await gitLegacy(workdir, ['rebase', onto], { timeout: 120000 });
+        const out = r.stdout + r.stderr;
+        res.json({ code: r.code, ok: !r.failed, conflicted: /CONFLICT|Automatic merge failed/.test(out), stdout: r.stdout, stderr: r.stderr });
+    } catch (e) { res.status(500).json(gitErr(e)); }
+});
+
 /* ─── Tags — with list endpoint that populates the Git panel ─── */
 app.post('/api/git/tags', async (req, res) => {
     const { cwd, action, name, message } = req.body || {};
