@@ -21,3 +21,6 @@ dist/
 *.bak.*
 *.pre-fix
 .ds-*
+*.bak-*
+*.ds-bak
+*.orig
