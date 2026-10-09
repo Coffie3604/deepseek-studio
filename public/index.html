@@ -3739,6 +3739,13 @@ function toggleReveal(inputEl) {
 /* ═══════════════════════════════════════════════════════════════════
    BIND HEADER BUTTONS
    ═══════════════════════════════════════════════════════════════════ */
+function inEditableField(e) {
+    var t = e.target;
+    if (!t) return false;
+    var tag = t.tagName;
+    return tag === 'INPUT' || tag === 'TEXTAREA' || t.isContentEditable === true;
+}
+
 function bindHeaderButtons() {
   var mL = document.getElementById('menuLeftBtn');
   var mR = document.getElementById('menuRightBtn');
@@ -4000,7 +4007,9 @@ function bindHeaderButtons() {
   if (rBtn) rBtn.onclick = refreshArtifacts;
 
   window.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && e.key === 's' && !e.shiftKey) { e.preventDefault(); saveFile(); }
+    var isSave = (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's';
+    if (inEditableField(e) && !isSave) return;
+    if (isSave && !e.shiftKey) { e.preventDefault(); saveFile(); }
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'S') { e.preventDefault(); saveAsFile(); }
     if ((e.ctrlKey || e.metaKey) && e.key === 'r' && activeTabPanel === 'editor') { e.preventDefault(); reloadFile(); }
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); sendToTerminal('clear'); }
