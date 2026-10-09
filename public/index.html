@@ -1999,67 +1999,11 @@ function setupGenerator() {
 /* ═══════════════════════════════════════════════════════════════════
    AI_TOOLS — v2.3: 30 tools incl. 18 Termux:API integrations
    ═══════════════════════════════════════════════════════════════════ */
-var AI_TOOLS = [
-  /* ─────── File operations ─────── */
-  { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file. Paths relative to project root.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
-  { type: 'function', function: { name: 'read_file', description: 'Read file contents', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'list_files', description: 'List files in a directory', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
-  { type: 'function', function: { name: 'create_folder', description: 'Create a new folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'delete_file', description: 'Delete a file or folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
-  { type: 'function', function: { name: 'move_file', description: 'Move or rename a file', parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] } } },
-  { type: 'function', function: { name: 'copy_file', description: 'Copy a file', parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] } } },
-  { type: 'function', function: { name: 'apply_patch', description: 'Edit an existing file by finding a unique search string and replacing it. Include 3-5 lines of context.', parameters: { type: 'object', properties: { path: { type: 'string' }, search: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'search', 'replace'] } } },
-  { type: 'function', function: { name: 'grep_search', description: 'Search for a regex pattern in files', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, ignoreCase: { type: 'boolean' } }, required: ['pattern'] } } },
-  { type: 'function', function: { name: 'find_files', description: 'Find files matching a glob pattern', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' } }, required: ['pattern'] } } },
-
-  /* ─────── Shell ─────── */
-  { type: 'function', function: { name: 'run_command', description: 'Run any shell command in Termux (full pkg, pip, npm, git, gradle, etc.). Set background=true for servers/watchers.', parameters: { type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string' }, background: { type: 'boolean' } }, required: ['command'] } } },
-
-  /* ─────── Termux:API — notifications & browser ─────── */
-  { type: 'function', function: { name: 'notify', description: 'Send an Android notification (for tasks >60s).', parameters: { type: 'object', properties: { title: { type: 'string' }, message: { type: 'string' } }, required: ['message'] } } },
-  { type: 'function', function: { name: 'termux_toast', description: 'Show a quick Android toast popup (<200 chars).', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } } },
-  { type: 'function', function: { name: 'termux_open_url', description: 'Open a URL in the Android default browser.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
-
-  /* ─────── Termux:API — clipboard ─────── */
-  { type: 'function', function: { name: 'termux_clipboard_get', description: 'Read the Android system clipboard.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'termux_clipboard_set', description: 'Write text to the Android system clipboard.', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
-
-  /* ─────── Termux:API — device ─────── */
-  { type: 'function', function: { name: 'termux_battery_status', description: 'Get battery percentage, temperature, charging status.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'termux_torch', description: 'Turn the camera flash on or off.', parameters: { type: 'object', properties: { on: { type: 'boolean' } }, required: ['on'] } } },
-  { type: 'function', function: { name: 'termux_vibrate', description: 'Vibrate the phone for N milliseconds.', parameters: { type: 'object', properties: { duration: { type: 'number' } } } } },
-  { type: 'function', function: { name: 'termux_volume', description: 'Get or set device volume. Streams: music, ring, alarm, notification, call.', parameters: { type: 'object', properties: { stream: { type: 'string' }, action: { type: 'string', description: 'get|set|up|down' }, volume: { type: 'number' } } } } },
-  { type: 'function', function: { name: 'termux_brightness', description: 'Get or set screen brightness (0-255). May need special permission.', parameters: { type: 'object', properties: { level: { type: 'number' } } } } },
-  { type: 'function', function: { name: 'termux_sensor', description: 'List or read device sensors (accelerometer, gyroscope, etc.).', parameters: { type: 'object', properties: { sensor: { type: 'string' } } } } },
-
-  /* ─────── Termux:API — speech ─────── */
-  { type: 'function', function: { name: 'termux_tts_speak', description: 'Speak text out loud using Android TTS.', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
-
-  /* ─────── Termux:API — native dialogs ─────── */
-  { type: 'function', function: { name: 'termux_dialog', description: 'Native Android dialog. Kinds: text, password, confirm, list, radio.', parameters: { type: 'object', properties: { kind: { type: 'string' }, title: { type: 'string' }, message: { type: 'string' }, default: { type: 'string' }, items: { type: 'array', items: { type: 'string' } } } } } },
-
-  /* ─────── Termux:API — network ─────── */
-  { type: 'function', function: { name: 'termux_wifi_info', description: 'Get current WiFi SSID, IP, BSSID.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'termux_wifi_scan', description: 'Scan nearby WiFi networks.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'termux_location', description: 'Get GPS/network location (lat, lon, accuracy).', parameters: { type: 'object', properties: { provider: { type: 'string', description: 'gps|network|passive' } } } } },
-
-  /* ─────── Termux:API — media ─────── */
-  { type: 'function', function: { name: 'termux_camera_photo', description: 'Take a photo with the specified camera (0=back, 1=front).', parameters: { type: 'object', properties: { path: { type: 'string' }, camera: { type: 'number' } } } } },
-  { type: 'function', function: { name: 'termux_share', description: 'Open the Android share sheet with a file or text.', parameters: { type: 'object', properties: { file: { type: 'string' }, text: { type: 'string' }, title: { type: 'string' } } } } },
-  { type: 'function', function: { name: 'termux_download', description: 'Download a URL using Android DownloadManager (background-friendly).', parameters: { type: 'object', properties: { url: { type: 'string' }, path: { type: 'string' } }, required: ['url'] } } },
-
-  /* ─────── Termux:API — connectivity ─────── */
-  { type: 'function', function: { name: 'termux_sms_send', description: 'Send an SMS. Requires SEND_SMS permission.', parameters: { type: 'object', properties: { number: { type: 'string' }, message: { type: 'string' } }, required: ['number', 'message'] } } },
-  { type: 'function', function: { name: 'termux_call', description: 'Place a phone call. Requires CALL_PHONE permission.', parameters: { type: 'object', properties: { number: { type: 'string' } }, required: ['number'] } } },
-  { type: 'function', function: { name: 'termux_contacts', description: 'Read contacts from the device.', parameters: { type: 'object', properties: {} } } },
-
-  /* ─────── Termux:API — security ─────── */
-  { type: 'function', function: { name: 'termux_fingerprint', description: 'Prompt for fingerprint authentication.', parameters: { type: 'object', properties: {} } } },
-
-  /* ─────── Termux:API — misc ─────── */
-  { type: 'function', function: { name: 'termux_storage_info', description: 'Get disk space info for /data and /storage/emulated/0.', parameters: { type: 'object', properties: {} } } },
-  { type: 'function', function: { name: 'termux_ir_transmit', description: 'Transmit an IR pattern (requires IR blaster hardware).', parameters: { type: 'object', properties: { frequency: { type: 'number' }, pattern: { type: 'array', items: { type: 'number' } } }, required: ['pattern'] } } }
-];
+var AI_TOOLS = [];
+fetch(API + '/api/ai/tools')
+  .then(function(r) { return r.json(); })
+  .then(function(d) { AI_TOOLS = d.tools || []; console.log('[DS] loaded', AI_TOOLS.length, 'AI tools'); })
+  .catch(function(e) { console.warn('[DS] failed to load AI tools', e); });
 
 function callTool(name, args) {
   return fetch(API + '/api/ai/tool-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, args: args }) })
@@ -2307,6 +2251,7 @@ function showFileWrittenToast(path) {
 async function sendChat() {
   var input = document.getElementById('aiInput');
   var msg = (input.value || '').trim();
+  if (!AI_TOOLS.length) { toast('Loading AI tools… try again in a second', 'info'); return; }
   if (!msg) return;
   if (!currentProject) { toast('Select a project first', 'error'); return; }
   var ai = getAIEndpoint();

@@ -133,6 +133,45 @@ const CHANGELOG = [
     },
 ];
 
+const AI_TOOLS = [
+    { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file. Paths relative to project root.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+    { type: 'function', function: { name: 'read_file', description: 'Read file contents', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+    { type: 'function', function: { name: 'list_files', description: 'List files in a directory', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'create_folder', description: 'Create a new folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+    { type: 'function', function: { name: 'delete_file', description: 'Delete a file or folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+    { type: 'function', function: { name: 'move_file', description: 'Move or rename a file', parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] } } },
+    { type: 'function', function: { name: 'copy_file', description: 'Copy a file', parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] } } },
+    { type: 'function', function: { name: 'apply_patch', description: 'Edit an existing file by finding a unique search string and replacing it. Include 3-5 lines of context.', parameters: { type: 'object', properties: { path: { type: 'string' }, search: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'search', 'replace'] } } },
+    { type: 'function', function: { name: 'grep_search', description: 'Search for a regex pattern in files', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, ignoreCase: { type: 'boolean' } }, required: ['pattern'] } } },
+    { type: 'function', function: { name: 'find_files', description: 'Find files matching a glob pattern', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' } }, required: ['pattern'] } } },
+    { type: 'function', function: { name: 'run_command', description: 'Run any shell command in Termux. Set background=true for servers/watchers.', parameters: { type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string' }, background: { type: 'boolean' } }, required: ['command'] } } },
+    { type: 'function', function: { name: 'notify', description: 'Send an Android notification.', parameters: { type: 'object', properties: { title: { type: 'string' }, message: { type: 'string' } }, required: ['message'] } } },
+    { type: 'function', function: { name: 'termux_toast', description: 'Show a quick Android toast popup (<200 chars).', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } } },
+    { type: 'function', function: { name: 'termux_open_url', description: 'Open a URL in the Android default browser.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
+    { type: 'function', function: { name: 'termux_clipboard_get', description: 'Read the Android system clipboard.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_clipboard_set', description: 'Write text to the Android system clipboard.', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+    { type: 'function', function: { name: 'termux_battery_status', description: 'Get battery percentage, temperature, charging status.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_torch', description: 'Turn the camera flash on or off.', parameters: { type: 'object', properties: { on: { type: 'boolean' } }, required: ['on'] } } },
+    { type: 'function', function: { name: 'termux_vibrate', description: 'Vibrate the phone.', parameters: { type: 'object', properties: { duration: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_volume', description: 'Get or set device volume.', parameters: { type: 'object', properties: { stream: { type: 'string' }, action: { type: 'string' }, volume: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_brightness', description: 'Get or set screen brightness.', parameters: { type: 'object', properties: { level: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_sensor', description: 'List or read device sensors.', parameters: { type: 'object', properties: { sensor: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'termux_tts_speak', description: 'Speak text out loud using Android TTS.', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+    { type: 'function', function: { name: 'termux_dialog', description: 'Native Android dialog.', parameters: { type: 'object', properties: { kind: { type: 'string' }, title: { type: 'string' }, message: { type: 'string' }, default: { type: 'string' }, items: { type: 'array', items: { type: 'string' } } } } } },
+    { type: 'function', function: { name: 'termux_wifi_info', description: 'Get current WiFi SSID, IP, BSSID.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_wifi_scan', description: 'Scan nearby WiFi networks.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_location', description: 'Get GPS/network location.', parameters: { type: 'object', properties: { provider: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'termux_camera_photo', description: 'Take a photo.', parameters: { type: 'object', properties: { path: { type: 'string' }, camera: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_share', description: 'Open the Android share sheet.', parameters: { type: 'object', properties: { file: { type: 'string' }, text: { type: 'string' }, title: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'termux_download', description: 'Download a URL using Android DownloadManager.', parameters: { type: 'object', properties: { url: { type: 'string' }, path: { type: 'string' } }, required: ['url'] } } },
+    { type: 'function', function: { name: 'termux_sms_send', description: 'Send an SMS.', parameters: { type: 'object', properties: { number: { type: 'string' }, message: { type: 'string' } }, required: ['number', 'message'] } } },
+    { type: 'function', function: { name: 'termux_call', description: 'Place a phone call.', parameters: { type: 'object', properties: { number: { type: 'string' } }, required: ['number'] } } },
+    { type: 'function', function: { name: 'termux_contacts', description: 'Read contacts from the device.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_fingerprint', description: 'Prompt for fingerprint authentication.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_storage_info', description: 'Get disk space info.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_ir_transmit', description: 'Transmit an IR pattern.', parameters: { type: 'object', properties: { frequency: { type: 'number' }, pattern: { type: 'array', items: { type: 'number' } } }, required: ['pattern'] } } }
+];
+
 /* ─── Directory setup ─── */
 for (const dir of [WORKSPACE, KEYSTORE_DIR]) {
     try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
@@ -1985,6 +2024,8 @@ app.get('/api/ai/providers', (_req, res) => {
         configured: !!String(secrets[cfg.keyName] || '').trim(),
     })));
 });
+
+app.get('/api/ai/tools', (_req, res) => res.json({ tools: AI_TOOLS }));
 
 app.post('/api/ai/chat', async (req, res) => {
     const { provider, messages, tools, toolChoice, model, temperature, maxTokens, stream } = req.body || {};
