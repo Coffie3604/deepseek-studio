@@ -1,7 +1,10 @@
 /* DeepSeek Studio Service Worker */
-const CACHE_NAME = 'deepseek-studio-v3';
+const CACHE_NAME = 'deepseek-studio-v4';
 const PRECACHE_URLS = [
   '/',
+  '/index.html',
+  '/app.css',
+  '/guide.html',
   '/manifest.json',
   '/icon-v2.svg'
 ];
@@ -42,20 +45,17 @@ self.addEventListener('fetch', function(event) {
     );
     return;
   }
-  // Cache-first for everything else
+  // Stale-while-revalidate for everything else
   event.respondWith(
     caches.match(event.request).then(function(cached) {
-      return cached || fetch(event.request).then(function(response) {
+      var network = fetch(event.request).then(function(response) {
         if (response.ok && event.request.method === 'GET') {
           var clone = response.clone();
-          caches.open(CACHE_NAME).then(function(cache) {
-            cache.put(event.request, clone);
-          });
+          caches.open(CACHE_NAME).then(function(c) { c.put(event.request, clone); });
         }
         return response;
-      }).catch(function() {
-        return cached;
-      });
+      }).catch(function() { return cached; });
+      return cached || network;
     })
   );
 });
