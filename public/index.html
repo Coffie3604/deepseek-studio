@@ -2364,12 +2364,61 @@ async function sendChat() {
   var maxIterations = 40;
   for (var iter = 0; iter < maxIterations; iter++) {
     try {
-      var res = await fetch(ai.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + ai.key }, body: JSON.stringify({ model: 'deepseek-chat', messages: messages, tools: AI_TOOLS, tool_choice: 'auto', max_tokens: 4096 }) });
-      if (!res.ok) throw new Error('API ' + res.status);
-      var data = await res.json();
-      var assistantMsg = data.choices[0].message;
-      messages.push(assistantMsg);
-      if (assistantMsg.content) { hideTypingIndicator(); appendMessage('assistant', assistantMsg.content); }
+      var streamUrl = streamEnabled ? (API + '/api/ai/stream') : (API + '/api/ai/chat');
+      var payload = { provider: 'deepseek', messages: messages, tools: AI_TOOLS, toolChoice: 'auto', maxTokens: 4096 };
+      var res = await fetch(streamUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+      if (streamEnabled && res.ok && res.body) {
+        var reader = res.body.getReader();
+        var decoder = new TextDecoder();
+        var buf = '', fullText = '', toolCalls = [];
+        var liveMsg = null;
+        while (true) {
+          var chunk = await reader.read();
+          if (chunk.done) break;
+          buf += decoder.decode(chunk.value, { stream: true });
+          var lines = buf.split('\n');
+          buf = lines.pop();
+          for (var li = 0; li < lines.length; li++) {
+            var line = lines[li].trim();
+            if (!line.startsWith('data:')) continue;
+            var json = line.slice(5).trim();
+            if (json === '[DONE]') continue;
+            try {
+              var delta = JSON.parse(json);
+              var choice = delta.choices && delta.choices[0];
+              if (!choice) continue;
+              var d = choice.delta || {};
+              if (d.content) {
+                fullText += d.content;
+                if (!liveMsg) liveMsg = appendMessage('assistant', '');
+                liveMsg.innerHTML = renderChatContent(fullText);
+              }
+              if (d.tool_calls) {
+                for (var tci = 0; tci < d.tool_calls.length; tci++) {
+                  var tc = d.tool_calls[tci];
+                  var idx = tc.index != null ? tc.index : tci;
+                  if (!toolCalls[idx]) toolCalls[idx] = { id: '', function: { name: '', arguments: '' } };
+                  if (tc.id) toolCalls[idx].id = tc.id;
+                  if (tc.function && tc.function.name) toolCalls[idx].function.name = tc.function.name;
+                  if (tc.function && tc.function.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+                }
+              }
+            } catch (_) {}
+          }
+        }
+        hideTypingIndicator();
+        var assistantMsg = { role: 'assistant', content: fullText || null };
+        if (toolCalls.length) assistantMsg.tool_calls = toolCalls.filter(Boolean);
+        messages.push(assistantMsg);
+        // continue to the tool-call processing that already follows in the loop
+      } else {
+        // existing non-streaming path — keep as-is
+        if (!res.ok) throw new Error('API ' + res.status);
+        var data = await res.json();
+        var assistantMsg = data.choices[0].message;
+        messages.push(assistantMsg);
+        if (assistantMsg.content) { hideTypingIndicator(); appendMessage('assistant', assistantMsg.content); }
+      }
       if (!assistantMsg.tool_calls || !assistantMsg.tool_calls.length) {
         hideTypingIndicator();
         if (!assistantMsg.content) appendMessage('assistant', '(no response)');
