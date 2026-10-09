@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 #
-# DeepSeek Studio — One-time installer (v2.2)
+# DeepSeek Studio — One-time installer (v2.3)
 # ─────────────────────────────────────────────────────────────────
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/Coffie3604/deepseek-studio/main/install.sh | bash
@@ -23,7 +23,6 @@ say()  { printf "${BLUE}→${NC} %s\n" "$*"; }
 ok()   { printf "${GREEN}✓${NC} %s\n" "$*"; }
 warn() { printf "${YELLOW}⚠${NC}  %s\n" "$*"; }
 fail() { printf "${RED}✗${NC} %s\n" "$*"; }
-hr()   { printf "${BLUE}─────────────────────────────────────────────${NC}\n"; }
 
 usage() {
   cat <<EOF
@@ -55,7 +54,7 @@ fi
 
 echo ""
 printf "${BLUE}╔═══════════════════════════════════════════╗${NC}\n"
-printf "${BLUE}║${NC}   ${BOLD}DeepSeek Studio — Installer v2.2${NC}        ${BLUE}║${NC}\n"
+printf "${BLUE}║${NC}   ${BOLD}DeepSeek Studio — Installer v2.3${NC}        ${BLUE}║${NC}\n"
 printf "${BLUE}╚═══════════════════════════════════════════╝${NC}\n"
 echo ""
 
@@ -306,15 +305,31 @@ fi
 echo ""
 EOF
 
-# ds-update — pull latest + reinstall deps + restart
 write_script ds-update <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
 DIR="\${DS_INSTALL_DIR:-$INSTALL_DIR}"
 [ -d "\$DIR/.git" ] || { echo "❌ Not installed at \$DIR"; exit 1; }
 cd "\$DIR" || exit 1
 
-echo "→ Pulling latest..."
-git pull --ff-only --quiet
+echo "→ Fetching latest..."
+git fetch --quiet origin
+
+echo "→ Checking for local commits..."
+LOCAL=\$(git rev-list --count origin/HEAD..HEAD 2>/dev/null || echo 0)
+if [ "\$LOCAL" -gt 0 ]; then
+  echo "⚠️  You have \$LOCAL local commit(s) not on origin."
+  echo "    Options:"
+  echo "      1. git stash && git pull --rebase && git stash pop"
+  echo "      2. git fetch && git reset --hard origin/HEAD    (DISCARDS local work)"
+  echo "    Aborting update. Run one of the above, then retry: ds-update"
+  exit 1
+fi
+
+echo "→ Pulling (fast-forward only)..."
+if ! git pull --ff-only --quiet; then
+  echo "❌ Pull failed. Resolve manually and retry."
+  exit 1
+fi
 
 echo "→ Updating dependencies..."
 if [ -f package-lock.json ]; then
@@ -322,8 +337,12 @@ if [ -f package-lock.json ]; then
     || npm install --no-audit --no-fund --silent 2>/dev/null \
     || {
       echo "⚠️  Install failed, retrying without node-pty..."
+      cp package.json package.json.ds-bak
+      cp package-lock.json package-lock.json.ds-bak 2>/dev/null || true
       node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json","utf8"));delete p.dependencies["node-pty"];fs.writeFileSync("package.json",JSON.stringify(p,null,2)+"\n")' 2>/dev/null
       npm install --no-audit --no-fund --silent
+      mv package.json.ds-bak package.json
+      mv package-lock.json.ds-bak package-lock.json 2>/dev/null || true
     }
 else
   npm install --no-audit --no-fund --silent
