@@ -1,6 +1,6 @@
 {
   "name": "deepseek-editor",
-  "version": "2.4.0",
+  "version": "2.3.0",
   "description": "Local-first AI coding studio for Termux (Android)",
   "type": "commonjs",
   "main": "server.js",
