@@ -956,12 +956,12 @@
 </div>
 
 <script>
-console.log('[DS] boot v2.4.0');
+console.log('[DS] boot v2.3.0');
 
 /* ═══════════════════════════════════════════════════════════════════
    GLOBAL STATE
    ═══════════════════════════════════════════════════════════════════ */
-var API = window.location.origin;
+var API = 'http://127.0.0.1:3001';
 var editor = null;
 var monacoLoaded = false;
 var openFile = null;
@@ -2580,7 +2580,7 @@ function initTerminal() {
 
     setTimeout(function() { try { termAddons.fit && termAddons.fit.fit(); } catch (e) {} }, 300);
 
-    var wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/pty';
+    var wsUrl = 'ws://' + location.hostname + ':3001/pty';
     try { ws = new WebSocket(wsUrl); }
     catch (e) { ws = new WebSocket('ws://127.0.0.1:3001/pty'); }
 
@@ -4040,7 +4040,7 @@ async function compileCurrent() {
    START
    ═══════════════════════════════════════════════════════════════════ */
 function start() {
-  console.log('[DS] starting app v2.4.0');
+  console.log('[DS] starting app v2.3.0');
   isMobile = window.innerWidth <= 900;
 
   try { bindHeaderButtons(); } catch (e) { console.log('bindHeaderButtons fail', e); }
