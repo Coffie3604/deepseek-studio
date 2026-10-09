@@ -82,10 +82,23 @@ const TERMUX_BASH = '/data/data/com.termux/files/usr/bin/bash';
 
 const PRO_LICENSE_PREFIX = 'DS-PRO-';
 const PKG_VERSION = (() => {
-    try { return require('./package.json').version; } catch (_) { return '2.3.0'; }
+    try { return require('./package.json').version; } catch (_) { return '2.4.0'; }
 })();
 
 const CHANGELOG = [
+    {
+        version: '2.4.0', date: '2025-10', type: 'feature',
+        items: [
+            '🔒 Security: HOME removed from allowed external roots (blocks secret exfiltration via symlink)',
+            '🌊 Streaming responses now actually stream when the toggle is ON',
+            '⌨️  Keyboard shortcuts no longer fire while typing in inputs',
+            '🧰 Single source of truth for AI_TOOLS (server-side)',
+            '🔀 New rebase endpoint (POST git-rebase API)',
+            '🩺 ds-update refuses to run with local commits instead of silently corrupting',
+            '🐛 Fixed TOML compile recipe',
+            '✨ Stale-while-revalidate service worker',
+        ],
+    },
     {
         version: '2.3.0', date: '2025-10', type: 'feature',
         items: [
