@@ -1,13 +1,18 @@
 {
   "name": "deepseek-editor",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Local-first AI coding studio for Termux (Android)",
+  "repository": { "type": "git", "url": "https://github.com/Coffie3604/deepseek-studio.git" },
+  "homepage": "https://github.com/Coffie3604/deepseek-studio",
+  "license": "MIT",
+  "author": "Coffie",
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
     "dev": "node --watch server.js",
-    "verify": "node -e \"const p=['express','cors','ws','simple-git','@octokit/rest']; const ok=p.every(m=>{try{require.resolve(m);return true}catch{return false}}); console.log(ok?'✓ required deps present':'✗ missing required deps'); process.exit(ok?0:1)\""
+    "verify": "node -e \"const p=['express','cors','ws','simple-git','@octokit/rest']; const ok=p.every(m=>{try{require.resolve(m);return true}catch{return false}}); console.log(ok?'✓ required deps present':'✗ missing required deps'); process.exit(ok?0:1)\"",
+    "smoke": "node -e \"require('http').get('http://127.0.0.1:3001/api/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{const j=JSON.parse(d);console.log(j.ok?'✓ backend healthy':'✗ unhealthy',j);process.exit(j.ok?0:1)}catch(e){console.log('✗ bad response',d);process.exit(1)}})}).on('error',e=>{console.log('✗ backend not reachable:',e.message);process.exit(1)})\""
   },
   "engines": {
     "node": ">=18.0.0"
