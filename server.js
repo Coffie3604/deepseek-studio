@@ -219,7 +219,8 @@ function safeRealPath(p) {
 }
 
 const ALLOWED_EXTERNAL_ROOTS = (() => {
-    const candidates = [HOME, '/storage/emulated/0', '/storage/self/primary', '/sdcard'];
+    // Only phone storage — never Termux home, which contains secrets
+    const candidates = ['/storage/emulated/0', '/storage/self/primary', '/sdcard'];
     const out = new Set();
     for (const c of candidates) {
         try { out.add(fs.realpathSync(c)); } catch (_) {}
