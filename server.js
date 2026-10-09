@@ -365,9 +365,6 @@ function run(bin, argv, opts = {}) {
 function termuxCli(cmd, args = [], timeout = 8000) {
     return run(cmd, args, { timeout });
 }
-function shellQuote(s) {
-    return "'" + String(s == null ? '' : s).replace(/'/g, "'\\''") + "'";
-}
 
 /* ═══════════════════════════════════════════════════════════════════
    git
@@ -783,7 +780,7 @@ const COMPILE_RECIPES = {
     rb:   { cmd: 'ruby -c "$1"', lang: 'ruby' },
     lua:  { cmd: 'luac -p "$1"', lang: 'lua' },
     sql:  { cmd: null, lang: 'sql', note: 'SQL has no generic syntax check' },
-    toml: { cmd: 'python3 -c "import sys;try:\\n    import tomllib as t\\nexcept: import tomli as t\\nt.load(open(sys.argv[1],\'rb\'))" "$1"', lang: 'toml' },
+    toml: { cmd: 'python3 -c "import sys; m=__import__(\\"tomllib\\" if sys.version_info>=(3,11) else \\"tomli\\"); m.load(open(sys.argv[1],\\"rb\\"))" "$1"', lang: 'toml' },
 };
 
 app.post('/api/compile', async (req, res) => {
@@ -1228,8 +1225,6 @@ app.post('/api/ai/tool-call', async (req, res) => {
         }
         /* ────────── Termux:API — storage ────────── */
         case 'termux_storage_info': {
-            const r = await termuxCli('termux-storage-get', [], 100);
-            // storage-get opens a picker — we want df instead
             const d = await run('sh', ['-c', 'df -h /data /storage/emulated/0 2>/dev/null | tail -n +2'], { timeout: 5000 });
             return toolResult(res, !d.failed, 'Storage info read', { raw: d.stdout });
         }
