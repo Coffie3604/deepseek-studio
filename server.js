@@ -481,7 +481,6 @@ app.get('/api/diagnostics', (_req, res) => {
             externalLinks: true, termuxApiModule: !!termuxApiLib,
             compile: true, license: true,
         },
-        secrets: Object.keys(secrets),
         hasGitHubToken: !!ghToken(),
     });
 });
