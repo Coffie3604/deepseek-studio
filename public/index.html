@@ -263,6 +263,7 @@
       <div id="terminal-container">
         <div class="terminal-toolbar">
           <button class="tbtn" id="termClearBtn" title="Clear screen"><i class="fas fa-eraser"></i> Clear</button>
+          <button class="tbtn" id="termRunBtn" title="Run a one-shot command (no PTY)"><i class="fas fa-bolt"></i> Run</button>
           <button class="tbtn" id="termCopyBtn" title="Copy all"><i class="fas fa-copy"></i></button>
           <button class="tbtn" id="termPasteBtn" title="Paste"><i class="fas fa-paste"></i></button>
           <div class="sep"></div>
@@ -444,6 +445,38 @@
 
       <!-- GITHUB PANEL -->
       <div class="panel" id="panel-github">
+        <div class="settings-section" id="ghAccountSection">
+          <h3><i class="fab fa-github"></i> GitHub Account</h3>
+          <div id="ghAccountStatus" style="font-size:12px;color:var(--fg-3);margin-bottom:10px">Checking…</div>
+          <div id="ghSignedOutUI">
+            <button class="btn primary" id="ghSignInBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:8px">
+              <i class="fab fa-github"></i> Sign in / Sign up with GitHub
+            </button>
+            <p style="font-size:11px;color:var(--fg-3);line-height:1.5">
+              <i class="fas fa-shield-halved" style="color:var(--green)"></i>
+              Uses GitHub OAuth Device Flow — no password is ever typed here.
+              New accounts are created on GitHub during the same flow.
+            </p>
+          </div>
+          <div id="ghDeviceUI" style="display:none">
+            <p style="font-size:12px;color:var(--fg-2);margin-bottom:6px">1. Open GitHub and enter this code:</p>
+            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+              <code id="ghDeviceCode" style="font-size:20px;letter-spacing:3px;font-weight:700;color:var(--yellow);background:var(--bg-2);padding:8px 12px;border-radius:8px;flex:1;text-align:center">--------</code>
+              <button class="btn" id="ghCopyCodeBtn" style="padding:8px"><i class="fas fa-copy"></i></button>
+            </div>
+            <button class="btn primary" id="ghOpenDeviceBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:8px">
+              <i class="fas fa-external-link-alt"></i> Open github.com/login/device
+            </button>
+            <div id="ghDeviceHint" style="font-size:11px;color:var(--fg-3)">Waiting for authorization…</div>
+            <button class="btn danger" id="ghCancelDeviceBtn" style="width:100%;justify-content:center;padding:8px;margin-top:8px">Cancel</button>
+          </div>
+          <div id="ghSignedInUI" style="display:none">
+            <div id="ghUserBadge" style="display:flex;gap:10px;align-items:center;margin-bottom:10px"></div>
+            <button class="btn" id="ghSignOutBtn" style="width:100%;justify-content:center;padding:10px">
+              <i class="fas fa-right-from-bracket"></i> Sign out
+            </button>
+          </div>
+        </div>
         <div class="settings-section">
           <h3><i class="fab fa-github"></i> Git Identity</h3>
           <input type="text" id="ghName" placeholder="Your Name" style="margin-bottom:8px" />
@@ -466,6 +499,11 @@
         </div>
         <div class="settings-section">
           <h3><i class="fas fa-cloud-download-alt"></i> Clone</h3>
+          <div id="ghRepoPickerWrap" style="display:none;margin-bottom:8px">
+            <select id="ghRepoPicker" style="width:100%;padding:10px;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px">
+              <option value="">— pick one of your repositories —</option>
+            </select>
+          </div>
           <input type="text" id="ghCloneUrl" placeholder="https://github.com/user/repo.git" style="margin-bottom:10px" />
           <button class="btn primary" id="ghCloneBtn" style="width:100%;justify-content:center;padding:10px">Clone Repository</button>
         </div>
@@ -522,6 +560,11 @@
           <button class="btn" id="ghLogBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
             <i class="fas fa-sync"></i> Refresh Log
           </button>
+          <button class="btn" id="ghRawLogBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
+            <i class="fas fa-list"></i> Raw Log
+          </button>
+          <input type="text" id="ghShowCommitRef" placeholder="commit ref (hash / HEAD~1)" style="margin-top:8px;margin-bottom:8px" />
+          <button class="btn" id="ghShowCommitBtn" style="width:100%;justify-content:center;padding:10px">Show Commit</button>
         </div>
         <div class="settings-section">
           <h3><i class="fas fa-tag"></i> Tags</h3>
@@ -531,6 +574,48 @@
             <button class="btn" id="ghTagCreateBtn" style="justify-content:center;padding:10px">Create Tag</button>
             <button class="btn" id="ghTagPushBtn" style="justify-content:center;padding:10px">Push Tags</button>
           </div>
+        </div>
+        <div class="settings-section">
+          <h3><i class="fas fa-plus-circle"></i> New GitHub Repository</h3>
+          <input type="text" id="ghNewRepoName" placeholder="repo-name" style="margin-bottom:8px" />
+          <input type="text" id="ghNewRepoDesc" placeholder="Description (optional)" style="margin-bottom:8px" />
+          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-3);margin-bottom:10px"><input type="checkbox" id="ghNewRepoPrivate" checked /> Private repository</label>
+          <button class="btn primary" id="ghCreateRepoBtn" style="width:100%;justify-content:center;padding:10px"><i class="fas fa-cloud"></i> Create and Set Origin</button>
+          <h3 style="margin-top:18px"><i class="fas fa-code-branch"></i> Pull Requests</h3>
+          <input type="text" id="ghPrTitle" placeholder="PR title" style="margin-bottom:8px" />
+          <input type="text" id="ghPrBase" placeholder="base branch (default: main)" style="margin-bottom:8px" />
+          <textarea id="ghPrBody" placeholder="Description (optional)" style="width:100%;min-height:56px;margin-bottom:10px;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px;padding:8px;font-family:inherit;font-size:12px"></textarea>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <button class="btn primary" id="ghOpenPrBtn" style="justify-content:center;padding:10px">Open PR</button>
+            <button class="btn" id="ghListPrsBtn" style="justify-content:center;padding:10px">List PRs</button>
+          </div>
+          <div id="ghPrList" style="font-size:11px;margin-top:10px;max-height:200px;overflow-y:auto"></div>
+          <h3 style="margin-top:18px"><i class="fas fa-tag"></i> Create Release</h3>
+          <input type="text" id="ghReleaseTag" placeholder="v1.0.0" style="margin-bottom:8px" />
+          <input type="text" id="ghReleaseName" placeholder="Release title (optional)" style="margin-bottom:8px" />
+          <textarea id="ghReleaseNotes" placeholder="Release notes (optional)" style="width:100%;min-height:56px;margin-bottom:10px;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px;padding:8px;font-family:inherit;font-size:12px"></textarea>
+          <button class="btn primary" id="ghCreateReleaseBtn" style="width:100%;justify-content:center;padding:10px">Publish GitHub Release</button>
+        </div>
+        <div class="settings-section">
+          <h3><i class="fas fa-code-branch"></i> Advanced Git</h3>
+          <button class="btn" id="ghInitBtn" style="width:100%;justify-content:center;padding:10px">Init Repo Here</button>
+          <button class="btn primary" id="ghAutoRepoBtn" style="width:100%;justify-content:center;padding:10px;margin-top:6px" title="Init + .gitignore + identity + first commit in one tap">⚡ Auto-Setup Repo</button>
+          <button class="btn" id="ghRemotesBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">Show Remotes</button>
+          <button class="btn" id="ghDiffBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">View Diff</button>
+          <button class="btn warn" id="ghConflictsBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">Show Conflicts</button>
+          <input type="text" id="ghRebaseOnto" placeholder="rebase onto (e.g. origin/main)" style="margin-top:8px;margin-bottom:8px" />
+          <button class="btn warn" id="ghRebaseBtn" style="width:100%;justify-content:center;padding:10px">Rebase Onto</button>
+          <input type="text" id="ghRemoteUrl" placeholder="new origin url (https://...)" style="margin-top:8px;margin-bottom:8px" />
+          <button class="btn" id="ghSetRemoteBtn" style="width:100%;justify-content:center;padding:10px">Set Origin Remote</button>
+        </div>
+        <div class="settings-section">
+          <h3><i class="fas fa-code-branch"></i> Rewrite History</h3>
+          <input type="text" id="ghBranchDeleteName" placeholder="branch to delete" style="margin-bottom:8px" />
+          <button class="btn danger" id="ghBranchDeleteBtn" style="width:100%;justify-content:center;padding:10px">Delete Branch</button>
+          <input type="text" id="ghCherryPickRef" placeholder="commit ref to cherry-pick" style="margin-top:8px;margin-bottom:8px" />
+          <button class="btn" id="ghCherryPickBtn" style="width:100%;justify-content:center;padding:10px">Cherry-Pick</button>
+          <input type="text" id="ghRevertRef" placeholder="commit ref to revert (default: HEAD)" style="margin-top:8px;margin-bottom:8px" />
+          <button class="btn warn" id="ghRevertBtn" style="width:100%;justify-content:center;padding:10px">Revert Commit</button>
         </div>
         <div class="settings-section">
           <h3><i class="fas fa-undo"></i> Recovery</h3>
@@ -647,6 +732,13 @@
         <div class="settings-section">
           <h3><i class="fas fa-stream"></i> Changelog</h3>
           <div id="changelogList"></div>
+        </div>
+        <div class="settings-section">
+          <h3><i class="fas fa-heart-pulse"></i> System Health</h3>
+          <p id="sysHealthStatus" style="font-family:monospace;color:var(--fg-3);font-size:12px;margin-bottom:8px">unknown</p>
+          <button class="btn" id="sysPingBtn" style="width:100%;justify-content:center;padding:10px">Ping /health</button>
+          <pre id="sysDiagnostics" style="background:var(--bg-0);border:1px solid var(--border-2);border-radius:var(--radius-sm);padding:12px;font-size:10px;max-height:220px;overflow:auto;color:var(--fg-2);white-space:pre-wrap;margin-top:8px;display:none"></pre>
+          <button class="btn" id="sysDiagnosticsBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">Run Diagnostics</button>
         </div>
       </div>
 
@@ -1189,7 +1281,17 @@ function renderChangelog() {
   var el = document.getElementById('changelogList');
   if (!el) return;
   el.innerHTML = '';
-  CHANGELOG.forEach(function(entry) {
+  /* Prefer server-canonical changelog; fall back to the embedded copy on failure. */
+  fetch(API + '/api/changelog').then(function(r) { return r.json(); }).then(function(d) {
+    if (d && Array.isArray(d.changelog) && d.changelog.length) renderChangelogList(d.changelog);
+  }).catch(function() {});
+  renderChangelogList(CHANGELOG);
+}
+function renderChangelogList(entries) {
+  var el = document.getElementById('changelogList');
+  if (!el) return;
+  el.innerHTML = '';
+  entries.forEach(function(entry) {
     var div = document.createElement('div');
     div.className = 'log-entry ' + (entry.type || 'feature');
     var badgeText = entry.type === 'fix' ? 'Fix' : entry.type === 'breaking' ? 'Breaking' : 'New';
@@ -1204,6 +1306,45 @@ function renderChangelog() {
     div.innerHTML = html;
     el.appendChild(div);
   });
+}
+
+function renderSystemHealth() {
+  var el = document.getElementById('sysHealthStatus');
+  if (!el) return;
+  fetch(API + '/api/health').then(function(r) { return r.json(); }).then(function(d) {
+    if (d && d.ok) {
+      el.textContent = '✅ healthy · last check ' + new Date(d.ts || Date.now()).toLocaleTimeString();
+      el.style.color = 'var(--green)';
+    } else {
+      el.textContent = '⚠️ unhealthy'; el.style.color = 'var(--yellow)';
+    }
+  }).catch(function() { el.textContent = '✗ unreachable'; el.style.color = 'var(--red)'; });
+}
+
+function renderDiagnostics() {
+  var el = document.getElementById('sysDiagnostics');
+  if (!el) return;
+  el.style.display = 'block';
+  el.textContent = 'Loading diagnostics…';
+  fetch(API + '/api/diagnostics').then(function(r) { return r.json(); }).then(function(d) {
+    var libs = d.libs || {}, feats = d.features || {};
+    var on = Object.keys(libs).filter(function(k) { return libs[k]; });
+    var off = Object.keys(libs).filter(function(k) { return !libs[k]; });
+    var lines = [
+      'version   : ' + (d.version || '?'),
+      'node      : ' + (d.node || '?'),
+      'platform  : ' + (d.platform || '?') + ' / ' + (d.arch || '?'),
+      'uptime    : ' + (d.uptime || 0) + 's',
+      'workspace : ' + (d.workspace || '?'),
+      'linkCount : ' + (d.linkCount || 0),
+      'ghToken   : ' + (d.hasGitHubToken ? 'yes' : 'no'),
+      '',
+      'libs on   : ' + (on.join(', ') || '(none)'),
+      'libs off  : ' + (off.join(', ') || '(none)'),
+      'features  : ' + Object.keys(feats).filter(function(k) { return feats[k]; }).join(', ')
+    ];
+    el.textContent = lines.join('\n');
+  }).catch(function(err) { el.textContent = 'Diagnostics failed: ' + err; });
 }
 
 function renderCurrentVersion() {
@@ -1260,6 +1401,43 @@ function getAIEndpoint() {
 /* ═══════════════════════════════════════════════════════════════════
    TOAST
    ═══════════════════════════════════════════════════════════════════ */
+function promptDialog(title, placeholder, defVal) {
+  return new Promise(function(resolve) {
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
+    var box = document.createElement('div');
+    box.style.cssText = 'background:var(--bg-1);border:1px solid var(--border-1);border-radius:12px;padding:16px;width:100%;max-width:420px';
+    var h = document.createElement('div');
+    h.textContent = title || 'Input';
+    h.style.cssText = 'font-weight:600;color:var(--fg-1);margin-bottom:10px;font-size:14px';
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.placeholder = placeholder || '';
+    inp.value = defVal || '';
+    inp.style.cssText = 'width:100%;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px;padding:10px;font-family:monospace;font-size:13px;margin-bottom:12px';
+    var row = document.createElement('div');
+    row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
+    var cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    cancel.className = 'btn';
+    cancel.style.cssText = 'padding:8px 14px';
+    var ok = document.createElement('button');
+    ok.textContent = 'OK';
+    ok.className = 'btn primary';
+    ok.style.cssText = 'padding:8px 14px';
+    var done = function(val) { if (ov.parentNode) ov.parentNode.removeChild(ov); resolve(val); };
+    cancel.onclick = function() { done(null); };
+    ok.onclick = function() { done(inp.value); };
+    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } if (e.key === 'Escape') done(null); });
+    ov.onclick = function(e) { if (e.target === ov) done(null); };
+    row.appendChild(cancel); row.appendChild(ok);
+    box.appendChild(h); box.appendChild(inp); box.appendChild(row);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    setTimeout(function() { inp.focus(); }, 30);
+  });
+}
+
 function toast(msg, type) {
   type = type || 'info';
   var t = document.createElement('div');
@@ -1268,6 +1446,66 @@ function toast(msg, type) {
   document.body.appendChild(t);
   setTimeout(function() { t.style.opacity = '0'; t.style.transition = 'opacity .3s'; }, 2800);
   setTimeout(function() { t.remove(); }, 3200);
+}
+
+/* promptDialog — promise-based text prompt with nicer UX than window.prompt().
+   Resolves with the entered string, or null if cancelled/dismissed. */
+function promptDialog(opts) {
+  opts = opts || {};
+  return new Promise(function(resolve) {
+    var title = opts.title || 'Input';
+    var message = opts.message || '';
+    var def = opts.default != null ? String(opts.default) : '';
+    var okLabel = opts.okLabel || 'OK';
+    var cancelLabel = opts.cancelLabel || 'Cancel';
+    var placeholder = opts.placeholder || '';
+
+    var ov = document.createElement('div');
+    ov.className = 'pd-overlay';
+    var box = document.createElement('div');
+    box.className = 'pd-box';
+    var h = document.createElement('div');
+    h.className = 'pd-title';
+    h.textContent = title;
+    box.appendChild(h);
+    if (message) {
+      var m = document.createElement('div');
+      m.className = 'pd-message';
+      m.textContent = message;
+      box.appendChild(m);
+    }
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'pd-input';
+    inp.value = def;
+    inp.placeholder = placeholder;
+    inp.autocomplete = 'off';
+    inp.spellcheck = false;
+    box.appendChild(inp);
+    var row = document.createElement('div');
+    row.className = 'pd-row';
+    var cancel = document.createElement('button');
+    cancel.className = 'btn';
+    cancel.style.cssText = 'padding:8px 14px';
+    cancel.textContent = cancelLabel;
+    var ok = document.createElement('button');
+    ok.className = 'btn primary';
+    ok.style.cssText = 'padding:8px 14px';
+    ok.textContent = okLabel;
+    var done = function(val) { if (ov.parentNode) ov.parentNode.removeChild(ov); resolve(val); };
+    cancel.onclick = function() { done(null); };
+    ok.onclick = function() { done(inp.value); };
+    inp.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); done(inp.value); }
+      if (e.key === 'Escape') done(null);
+    });
+    ov.onclick = function(e) { if (e.target === ov) done(null); };
+    row.appendChild(cancel); row.appendChild(ok);
+    box.appendChild(row);
+    ov.appendChild(box);
+    document.body.appendChild(ov);
+    setTimeout(function() { inp.focus(); inp.select(); }, 30);
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1943,7 +2181,7 @@ function setupTemplates() {
           if (done === files.length) {
             toast('Created ' + name, 'success');
             logActivity('file', 'Created template: ' + name);
-            fetch(API + '/api/git/auto-init', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd: name }) }).catch(function() {});
+            fetch(API + '/api/git/auto-repo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd: name }) }).catch(function() {});
             refreshTree(); loadWorkspaceSelector(); setCurrentProject(name);
             if (isMobile) closeDrawers();
           }
@@ -1998,7 +2236,7 @@ function setupGenerator() {
       progress.innerHTML += '<br><b>Done!</b>';
       toast('Generated ' + names.length + ' files', 'success');
       logActivity('file', 'Generated project: ' + projectName + ' (' + names.length + ' files)');
-      fetch(API + '/api/git/auto-init', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd: projectName }) }).catch(function() {});
+      fetch(API + '/api/git/auto-repo', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cwd: projectName }) }).catch(function() {});
       refreshTree(); loadWorkspaceSelector(); setCurrentProject(projectName);
       setTimeout(function() { progressBar.style.display = 'none'; }, 2000);
     } catch (e) {
@@ -2582,7 +2820,7 @@ function initTerminal() {
 
     var wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/pty';
     try { ws = new WebSocket(wsUrl); }
-    catch (e) { ws = new WebSocket('ws://127.0.0.1:3001/pty'); }
+    catch (e) { ws = new WebSocket('ws://127.0.0.1:3002/pty'); }
 
     ws.onopen = function() {
       term.writeln('\x1b[32m● Connected to Termux\x1b[0m');
@@ -2743,10 +2981,13 @@ function setupSideTabs() {
       if (panel) panel.classList.add('active');
       if (t === 'backup') refreshBackupList();
       if (t === 'deploy') { checkToolchain(); loadKeystores(); loadProjectsForDeploy(); refreshArtifacts(); }
-      if (t === 'github' && window.refreshAllGitState) window.refreshAllGitState();
+      if (t === 'github') {
+        if (window.refreshAllGitState) window.refreshAllGitState();
+        if (window.renderGhAccount) window.renderGhAccount();
+      }
       if (t === 'settings') { refreshLicenseStatus(); loadLinksList(); }
       if (t === 'term') { renderQuickCommands(); renderEnvVars(); renderCmdHistory(); }
-      if (t === 'log') { renderChangelog(); renderActivity(); renderGitRecords(); renderCurrentVersion(); }
+      if (t === 'log') { renderChangelog(); renderActivity(); renderGitRecords(); renderCurrentVersion(); renderSystemHealth(); }
     };
   });
 }
@@ -2857,6 +3098,239 @@ function setupGithub() {
   document.getElementById('ghName').value = localStorage.getItem('gh_name') || '';
   document.getElementById('ghEmail').value = localStorage.getItem('gh_email') || '';
 
+  /* ─── GitHub Account (OAuth Device Flow) ─── */
+  var devicePollTimer = null;
+  function ghStatusEl() { return document.getElementById('ghAccountStatus'); }
+  function ghSetUI(state) {
+    document.getElementById('ghSignedOutUI').style.display = state === 'out' ? '' : 'none';
+    document.getElementById('ghDeviceUI').style.display = state === 'device' ? '' : 'none';
+    document.getElementById('ghSignedInUI').style.display = state === 'in' ? '' : 'none';
+  }
+  function renderGhAccount() {
+    fetch(API + '/api/github/status').then(function(r) { return r.json(); }).then(function(d) {
+      if (d.connected) {
+        ghSetUI('in');
+        ghStatusEl().innerHTML = '<span style="color:var(--green)">● Connected</span>';
+        var badge = document.getElementById('ghUserBadge');
+        var avatar = d.avatar ? '<img src="' + d.avatar + '" style="width:38px;height:38px;border-radius:50%">' : '';
+        badge.innerHTML = avatar +
+          '<div style="line-height:1.3"><div style="color:var(--fg-1);font-weight:600">' + (d.login || 'github user') + '</div>' +
+          '<div style="font-size:11px;color:var(--fg-3)">' + (d.name || '') + (d.publicRepos != null ? ' · ' + d.publicRepos + ' public repos' : '') + '</div></div>';
+        if (d.name && !document.getElementById('ghName').value) document.getElementById('ghName').value = d.name;
+      } else {
+        ghSetUI('out');
+        ghStatusEl().innerHTML = '<span style="color:var(--fg-3)">○ Not signed in</span>';
+      }
+    }).catch(function() { ghStatusEl().textContent = 'Unable to reach backend'; });
+  }
+  window.renderGhAccount = renderGhAccount;
+  renderGhAccount();
+
+  function stopDevicePoll() { if (devicePollTimer) { clearTimeout(devicePollTimer); devicePollTimer = null; } }
+  document.getElementById('ghSignInBtn').onclick = function() {
+    ghStatusEl().textContent = 'Requesting device code…';
+    fetch(API + '/api/github/device/start', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.error) { toast(d.error, 'error'); ghStatusEl().innerHTML = '<span style="color:var(--red)">' + d.error + '</span>'; return; }
+        ghSetUI('device');
+        document.getElementById('ghDeviceCode').textContent = d.userCode;
+        document.getElementById('ghDeviceHint').textContent = 'Waiting for authorization…';
+        window._ghVerificationUri = d.verificationUriComplete || d.verificationUri;
+        pollDevice(d.deviceCode, d.interval || 5);
+      })
+      .catch(function() { toast('Failed to start GitHub sign-in', 'error'); });
+  };
+  document.getElementById('ghCopyCodeBtn').onclick = function() {
+    var code = document.getElementById('ghDeviceCode').textContent;
+    if (navigator.clipboard) navigator.clipboard.writeText(code);
+    toast('Code copied', 'success');
+  };
+  document.getElementById('ghOpenDeviceBtn').onclick = function() {
+    window.open(window._ghVerificationUri || 'https://github.com/login/device', '_blank');
+  };
+  document.getElementById('ghCancelDeviceBtn').onclick = function() {
+    stopDevicePoll(); ghSetUI('out'); renderGhAccount();
+  };
+  document.getElementById('ghSignOutBtn').onclick = function() {
+    if (!confirm('Sign out of GitHub? The stored token will be deleted.')) return;
+    fetch(API + '/api/github/signout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function() { localStorage.removeItem('gh_token'); tIn.value = ''; toast('Signed out', 'info'); logGitRecord('auth', 'GitHub signed out'); renderGhAccount(); })
+      .catch(function() { toast('Sign-out failed', 'error'); });
+  };
+  function pollDevice(deviceCode, interval) {
+    stopDevicePoll();
+    devicePollTimer = setTimeout(function() {
+      fetch(API + '/api/github/device/poll', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ deviceCode: deviceCode }) })
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          if (d.status === 'pending') { document.getElementById('ghDeviceHint').textContent = 'Waiting for authorization…'; return pollDevice(deviceCode, d.interval || interval); }
+          if (d.status === 'authorized') {
+            toast('Signed in as ' + ((d.user && d.user.login) || 'GitHub user'), 'success');
+            logActivity('git', 'GitHub signed in');
+            logGitRecord('auth', 'GitHub signed in' + (d.user ? ' as ' + d.user.login : ''));
+            ghSetUI('in'); renderGhAccount();
+            if (window.loadWorkspaceSelector) loadWorkspaceSelector();
+            if (window.loadGhRepoPicker) loadGhRepoPicker();
+            return;
+          }
+          if (d.status === 'expired') { document.getElementById('ghDeviceHint').innerHTML = '<span style="color:var(--red)">Code expired — try again</span>'; ghSetUI('out'); return; }
+          if (d.status === 'denied') { document.getElementById('ghDeviceHint').innerHTML = '<span style="color:var(--red)">Authorization denied</span>'; ghSetUI('out'); return; }
+          toast(d.error || 'Sign-in failed', 'error'); ghSetUI('out');
+        })
+        .catch(function() { pollDevice(deviceCode, interval); });
+    }, Math.max(5, interval) * 1000);
+  }
+
+  /* ─── Create repo · PRs · Releases · Advanced git ─── */
+  var $id = function(id) { return document.getElementById(id); };
+  if ($id('ghCreateRepoBtn')) $id('ghCreateRepoBtn').onclick = async function() {
+    if (!currentProject) { toast('Select a project first', 'error'); return; }
+    var name = $id('ghNewRepoName').value.trim();
+    if (!name) { toast('Repo name required', 'error'); return; }
+    var desc = $id('ghNewRepoDesc').value.trim();
+    var isPrivate = $id('ghNewRepoPrivate').checked;
+    var r = await ghCall('/api/github/create-repo', { name: name, description: desc, isPrivate: isPrivate });
+    if (r.error) { showGhOutput(r.error, true); toast('Create failed', 'error'); return; }
+    var cloneUrl = r.repo && (r.repo.cloneUrl || r.repo.sshUrl);
+    showGhOutput('Created ' + (r.repo ? r.repo.fullName : name), false);
+    if (cloneUrl) {
+      await ghCall('/api/git/set-remote', { cwd: currentProject, url: cloneUrl });
+      toast('Repo created & origin set', 'success');
+    } else { toast('Repo created', 'success'); }
+    logActivity('git', 'Created GitHub repo: ' + name);
+    logGitRecord('branch', 'Created repo ' + name, cloneUrl || '');
+    if (window.loadGhRepoPicker) loadGhRepoPicker();
+    refreshAllGitState();
+  };
+  if ($id('ghOpenPrBtn')) $id('ghOpenPrBtn').onclick = async function() {
+    if (!currentProject) { toast('Select a project first', 'error'); return; }
+    var title = $id('ghPrTitle').value.trim();
+    if (!title) { toast('PR title required', 'error'); return; }
+    var r = await ghCall('/api/github/open-pr', { cwd: currentProject, title: title, body: $id('ghPrBody').value, base: $id('ghPrBase').value.trim() || undefined });
+    if (r.error) { showGhOutput(r.error, true); toast('PR failed', 'error'); return; }
+    showGhOutput('Opened PR #' + r.number + '\n' + r.url, false);
+    toast('PR #' + r.number + ' opened', 'success');
+    logGitRecord('branch', 'Opened PR #' + r.number, r.url || '');
+  };
+  if ($id('ghListPrsBtn')) $id('ghListPrsBtn').onclick = async function() {
+    if (!currentProject) { toast('Select a project first', 'error'); return; }
+    var r = await ghCall('/api/github/list-prs', { cwd: currentProject, state: 'open' });
+    var el = $id('ghPrList');
+    if (r.error) { el.innerHTML = '<span style="color:var(--red)">' + r.error + '</span>'; return; }
+    if (!r.prs || !r.prs.length) { el.innerHTML = '<span style="color:var(--fg-3)">No open pull requests</span>'; return; }
+    el.innerHTML = r.prs.map(function(pr) {
+      return '<div style="padding:6px 0;border-bottom:1px solid var(--border-2)"><a href="' + pr.url + '" target="_blank" style="color:var(--blue);text-decoration:none">#' + pr.number + ' ' + pr.title + '</a><div style="color:var(--fg-3);font-size:10px">' + pr.head + ' → ' + pr.base + ' · ' + (pr.user || '') + '</div></div>';
+    }).join('');
+  };
+  if ($id('ghCreateReleaseBtn')) $id('ghCreateReleaseBtn').onclick = async function() {
+    if (!currentProject) { toast('Select a project first', 'error'); return; }
+    var tag = $id('ghReleaseTag').value.trim();
+    if (!tag) { toast('Tag required', 'error'); return; }
+    var r = await ghCall('/api/github/create-release', { cwd: currentProject, tag: tag, name: $id('ghReleaseName').value.trim() || tag, body: $id('ghReleaseNotes').value });
+    if (r.error) { showGhOutput(r.error, true); toast('Release failed', 'error'); return; }
+    showGhOutput('Published release ' + tag + (r.url ? '\n' + r.url : ''), false);
+    toast('Release published', 'success');
+    logGitRecord('push', 'Published release ' + tag, r.url || '');
+  };
+  if ($id('ghDiffBtn')) $id('ghDiffBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/diff', { cwd: currentProject });
+    showGhOutput('=== UNSTAGED ===\n' + (r.unstaged || '(none)') + '\n\n=== STAGED ===\n' + (r.staged || '(none)'), !!r.error);
+  };
+  if ($id('ghConflictsBtn')) $id('ghConflictsBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/conflicts', { cwd: currentProject });
+    showGhOutput((r.files && r.files.length) ? 'Conflicted files:\n' + r.files.join('\n') : 'No conflicts ✓', !!r.error);
+  };
+  if ($id('ghRebaseBtn')) $id('ghRebaseBtn').onclick = async function() {
+    if (!currentProject) return;
+    var onto = $id('ghRebaseOnto').value.trim();
+    if (!onto) { toast('Ref required', 'error'); return; }
+    var r = await ghCall('/api/git/rebase', { cwd: currentProject, onto: onto });
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
+    toast(r.ok ? 'Rebased' : (r.conflicted ? 'Conflicts' : 'Rebase failed'), r.ok ? 'success' : 'error');
+    logGitRecord('merge', r.ok ? 'Rebased onto ' + onto : 'Rebase failed');
+    refreshAllGitState();
+  };
+  if ($id('ghSetRemoteBtn')) $id('ghSetRemoteBtn').onclick = async function() {
+    if (!currentProject) return;
+    var url = $id('ghRemoteUrl').value.trim();
+    if (!url) { toast('URL required', 'error'); return; }
+    var r = await ghCall('/api/git/set-remote', { cwd: currentProject, url: url });
+    showGhOutput((r.stdout || '') + (r.stderr || ''), !r.ok);
+    toast(r.ok ? 'Origin set' : 'Failed', r.ok ? 'success' : 'error');
+    refreshAllGitState();
+  };
+  if ($id('ghInitBtn')) $id('ghInitBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/init', { cwd: currentProject });
+    showGhOutput((r.stdout || '') + (r.stderr || '') + (r.message || ''), !r.ok);
+    toast(r.ok ? 'Repo initialised' : 'Init failed', r.ok ? 'success' : 'error');
+    logGitRecord('init', 'Initialised git repo');
+    refreshAllGitState();
+  };
+  if ($id('ghAutoRepoBtn')) $id('ghAutoRepoBtn').onclick = async function() {
+    if (!currentProject) { toast('Select a project first', 'error'); return; }
+    toast('Setting up git repo…', 'info');
+    var r = await ghCall('/api/git/auto-repo', { cwd: currentProject, createGitHub: false });
+    var lines = (r.steps || []).map(function(s) { return '• ' + s.step + ': ' + s.status + ' — ' + (s.detail || ''); }).join('\n');
+    showGhOutput((lines || r.error || '') + (r.stderr || ''), !r.ok);
+    toast(r.ok ? 'Repo ready ✓' : 'Auto-setup failed', r.ok ? 'success' : 'error');
+    logGitRecord('init', 'Auto-setup repo' + (r.remoteUrl ? ' → ' + r.remoteUrl : ''));
+    refreshAllGitState();
+  };
+  if ($id('ghRemotesBtn')) $id('ghRemotesBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/remotes', { cwd: currentProject });
+    if (r.error) { showGhOutput(r.error, true); return; }
+    var list = (r.remotes || []).map(function(x) { return (x.name || '?') + '\t' + (x.url || ''); }).join('\n');
+    showGhOutput(list || 'No remotes configured', false);
+  };
+  if ($id('ghBranchDeleteBtn')) $id('ghBranchDeleteBtn').onclick = async function() {
+    if (!currentProject) return;
+    var name = $id('ghBranchDeleteName').value.trim();
+    if (!name) { toast('Branch name required', 'error'); return; }
+    var r = await ghCall('/api/git/branch/delete', { cwd: currentProject, name: name });
+    showGhOutput((r.stdout || '') + (r.stderr || ''), r.code !== 0);
+    toast(r.code === 0 ? 'Branch deleted' : 'Delete failed', r.code === 0 ? 'success' : 'error');
+    if (r.code === 0) logGitRecord('branch', 'Deleted branch ' + name);
+    refreshAllGitState();
+  };
+  if ($id('ghCherryPickBtn')) $id('ghCherryPickBtn').onclick = async function() {
+    if (!currentProject) return;
+    var ref = $id('ghCherryPickRef').value.trim();
+    if (!ref) { toast('Commit ref required', 'error'); return; }
+    var r = await ghCall('/api/git/cherry-pick', { cwd: currentProject, ref: ref });
+    showGhOutput((r.stdout || '') + (r.stderr || ''), r.code !== 0);
+    toast(r.code === 0 ? 'Cherry-picked' : 'Cherry-pick failed', r.code === 0 ? 'success' : 'error');
+    if (r.code === 0) logGitRecord('commit', 'Cherry-picked ' + ref);
+    refreshAllGitState();
+  };
+  if ($id('ghRevertBtn')) $id('ghRevertBtn').onclick = async function() {
+    if (!currentProject) return;
+    var ref = $id('ghRevertRef').value.trim() || 'HEAD';
+    var r = await ghCall('/api/git/revert', { cwd: currentProject, ref: ref });
+    showGhOutput((r.stdout || '') + (r.stderr || ''), r.code !== 0);
+    toast(r.code === 0 ? 'Reverted ' + ref : 'Revert failed', r.code === 0 ? 'success' : 'error');
+    if (r.code === 0) logGitRecord('commit', 'Reverted ' + ref);
+    refreshAllGitState();
+  };
+  if ($id('ghShowCommitBtn')) $id('ghShowCommitBtn').onclick = async function() {
+    if (!currentProject) return;
+    var ref = $id('ghShowCommitRef').value.trim();
+    if (!ref) { toast('Commit ref required', 'error'); return; }
+    var r = await ghCall('/api/git/show', { cwd: currentProject, ref: ref });
+    showGhOutput(r.show || r.stdout || r.stderr || r.error || '(no output)', !r.ok && !r.show);
+  };
+  if ($id('ghRawLogBtn')) $id('ghRawLogBtn').onclick = async function() {
+    if (!currentProject) return;
+    var r = await ghCall('/api/git/log', { cwd: currentProject, limit: 20 });
+    var lines = (r.commits || []).map(function(c) {
+      return String(c.hash || '').slice(0, 7) + ' ' + (c.message || c.subject || '');
+    }).join('\n');
+    showGhOutput(lines || r.stdout || 'No commits', false);
+  };
   function showGhOutput(text, error) {
     var el = document.getElementById('ghOutput');
     el.style.display = 'block';
@@ -2888,11 +3362,19 @@ function setupGithub() {
       list.innerHTML = r.commits.map(function(c) {
         var date = c.date || c.when || '';
         var msg = c.message || c.subject || '';
-        return '<div style="padding:8px 0;border-bottom:1px solid var(--border-2)">' +
+        return '<div class="git-log-row" data-hash="' + String(c.hash || '') + '" style="padding:8px 0;border-bottom:1px solid var(--border-2);cursor:pointer">' +
           '<div style="color:var(--blue);font-family:monospace;font-size:10px">' + String(c.hash || '').slice(0, 7) + ' · ' + date + '</div>' +
           '<div style="color:var(--fg-1);font-size:12px;margin:3px 0">' + msg + '</div>' +
           '<div style="color:var(--fg-3);font-size:10px">by ' + (c.author || '?') + '</div></div>';
       }).join('');
+      Array.prototype.forEach.call(list.querySelectorAll('.git-log-row'), function(row) {
+        row.onclick = async function() {
+          var ref = row.getAttribute('data-hash');
+          if (!ref) return;
+          var rr = await ghCall('/api/git/show', { cwd: currentProject, ref: ref });
+          showGhOutput(rr.show || rr.stdout || rr.stderr || rr.error || '(no output)', !rr.ok && !rr.show);
+        };
+      });
     }).catch(function() {});
     ghCall('/api/git/status', { cwd: currentProject }).then(function(r) {
       var el = document.getElementById('ghRepoInfo');
@@ -2951,6 +3433,26 @@ function setupGithub() {
       logGitRecord('error', 'Clone failed', (r.stderr || '').slice(0, 300));
     }
   };
+  /* Populate the "pick one of your repositories" dropdown */
+  function loadGhRepoPicker() {
+    fetch(API + '/api/github/repos?per_page=100').then(function(r) { return r.json(); }).then(function(d) {
+      var wrap = document.getElementById('ghRepoPickerWrap');
+      var sel = document.getElementById('ghRepoPicker');
+      if (!wrap || !sel) return;
+      if (!d.repos || !d.repos.length) { wrap.style.display = 'none'; return; }
+      wrap.style.display = '';
+      sel.innerHTML = '<option value="">— pick one of your repositories —</option>' +
+        d.repos.map(function(repo) {
+          return '<option value="' + repo.cloneUrl + '">' + repo.fullName + (repo.private ? ' 🔒' : '') + '</option>';
+        }).join('');
+    }).catch(function() {});
+  }
+  window.loadGhRepoPicker = loadGhRepoPicker;
+  document.getElementById('ghRepoPicker').onchange = function() {
+    var v = this.value;
+    if (v) document.getElementById('ghCloneUrl').value = v;
+  };
+  loadGhRepoPicker();
   document.getElementById('ghCreateBranchBtn').onclick = async function() {
     if (!currentProject) { toast('Select a project first', 'error'); return; }
     var name = document.getElementById('ghNewBranchName').value.trim();
@@ -3221,7 +3723,15 @@ async function refreshArtifacts() {
     var r = await fetch(API + '/api/deploy/artifacts');
     var data = await r.json();
     if (!data.artifacts || !data.artifacts.length) { list.innerHTML = '<span style="color:var(--fg-4)">No builds yet.</span>'; return; }
-    list.innerHTML = data.artifacts.map(function(a) { return '<div class="backup-item"><div class="bk-name">' + a.name + '</div><div class="bk-meta">' + (a.sizeStr || '') + ' · ' + a.path + '</div></div>'; }).join('');
+    list.innerHTML = data.artifacts.map(function(a) {
+      var href = API + '/api/deploy/download?path=' + encodeURIComponent(a.path || '');
+      return '<div class="backup-item"><div class="bk-name">' + a.name + '</div>' +
+        '<div class="bk-meta">' + (a.sizeStr || '') + ' · ' + a.path + '</div>' +
+        '<div style="margin-top:6px;display:flex;gap:6px">' +
+        '<a class="btn icon-only" style="min-width:34px;min-height:34px;padding:6px" title="Download ' + (a.kind || '').toUpperCase() + '" href="' + href + '" download="' + a.name + '"><i class="fas fa-download"></i></a>' +
+        '<button class="btn icon-only" style="min-width:34px;min-height:34px;padding:6px" title="Open in browser" onclick="window.open(\'' + href + '\', \'_blank\')"><i class="fas fa-up-right-from-square"></i></button>' +
+        '</div></div>';
+    }).join('');
   } catch (e) { list.innerHTML = '<span style="color:var(--red)">Backend offline</span>'; }
 }
 async function refreshLicenseStatus() {
@@ -3881,6 +4391,21 @@ function bindHeaderButtons() {
   var tBottom = document.getElementById('termBottomBtn');
   var tKill = document.getElementById('termKillBtn');
   if (tClear) tClear.onclick = function() { if (term) term.clear(); };
+  var tRun = document.getElementById('termRunBtn');
+  if (tRun) tRun.onclick = async function() {
+    var cmd = await promptDialog('Run command', 'Command to execute (one-shot, in project dir):');
+    if (!cmd) return;
+    if (term) term.writeln('\r\n\x1b[90m$ ' + cmd + '\x1b[0m');
+    try {
+      var r = await fetch(API + '/api/exec', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ cmd: cmd, cwd: currentProject || '' }) });
+      var d = await r.json();
+      if (term) {
+        if (d.stdout) term.writeln(d.stdout.replace(/\n/g, '\r\n'));
+        if (d.stderr) term.writeln('\x1b[31m' + d.stderr.replace(/\n/g, '\r\n') + '\x1b[0m');
+        term.writeln('\x1b[90m[exit ' + (d.code != null ? d.code : '?') + ']\x1b[0m');
+      }
+    } catch (e) { toast('Exec failed', 'error'); }
+  };
   if (tCopy) tCopy.onclick = function() { if (term) { term.selectAll(); copyText(term.getSelection()); term.clearSelection(); } };
   if (tPaste) tPaste.onclick = async function() { try { var t = await navigator.clipboard.readText(); if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: t })); } catch (e) { toast('Clipboard denied', 'error'); } };
   if (tCtrlC) tCtrlC.onclick = function() { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'input', data: '\x03' })); };
@@ -4065,7 +4590,11 @@ function start() {
   try { updateChatWarn(); } catch (e) {}
   try { updateCtxIndicator(); } catch (e) {}
   try { loadLinksList(); } catch (e) {}
-  try { renderChangelog(); renderActivity(); renderGitRecords(); renderCurrentVersion(); } catch (e) {}
+  try { renderChangelog(); renderActivity(); renderGitRecords(); renderCurrentVersion(); renderSystemHealth(); } catch (e) {}
+  var _pingBtn = document.getElementById('sysPingBtn');
+  if (_pingBtn) _pingBtn.onclick = renderSystemHealth;
+  var _diagBtn = document.getElementById('sysDiagnosticsBtn');
+  if (_diagBtn) _diagBtn.onclick = renderDiagnostics;
   if (currentProject) setCurrentProject(currentProject);
   logActivity('file', 'App started' + (currentProject ? ' (project: ' + currentProject + ')' : ''));
 

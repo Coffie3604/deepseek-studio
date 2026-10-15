@@ -282,7 +282,7 @@
   <div class="status-dot checking" id="statusDot"></div>
   <div class="status-text">
     <b id="statusTitle">Checking backend…</b>
-    <small id="statusSub">Looking for DeepSeek Studio on 127.0.0.1:3001</small>
+    <small id="statusSub">Looking for DeepSeek Studio on 127.0.0.1:3002</small>
   </div>
 </div>
 
@@ -342,7 +342,7 @@
   <div class="section-body">
 
     <div class="ctx-apk-only">
-      <p><strong>You're in the DeepSeek Studio app.</strong> The app is a native shell — it needs the Termux backend running on <code>127.0.0.1:3001</code> to work.</p>
+      <p><strong>You're in the DeepSeek Studio app.</strong> The app is a native shell — it needs the Termux backend running on <code>127.0.0.1:3002</code> to work.</p>
       <p><strong>Do this:</strong></p>
       <ol>
         <li>Open the <strong>Termux</strong> app</li>
@@ -689,7 +689,7 @@
         <td>Check <code>ds-log</code>. Look for repeated API errors.</td>
       </tr>
       <tr>
-        <td>Port 3001 already in use</td>
+        <td>Port 3002 already in use</td>
         <td>Run <code>pkill -f "node server.js"</code> then <code>ds-start</code></td>
       </tr>
     </table>
@@ -841,7 +841,7 @@
       .catch(function() {
         setStatus('checking', 'Backend not running',
           pollCount === 1
-            ? 'Looking for server on 127.0.0.1:3001'
+            ? 'Looking for server on 127.0.0.1:3002'
             : 'Retrying… (' + pollCount + ') — run ds-launch in Termux');
       });
   }

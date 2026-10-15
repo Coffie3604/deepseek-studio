@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
- * DeepSeek Studio — Backend v2.3
+ * DeepSeek Studio — Backend v2.6
  * ─────────────────────────────────────────────────────────────────────
  * Local-first coding backend for Termux (Android).
+ *
+ * v2.6 — AUTOMATIC GIT REPOS
+ *   ⚡ /api/git/auto-repo  — one call: init + .gitignore + identity + first commit (+ optional GitHub remote)
+ *   🤖 Auto-init is wired into project creation (templates & AI generator)
  *
  * v2.3 — FULL DEVELOPER FREEDOM
  *   ⚡ /api/compile        — language-aware syntax check for the ⚡ button
@@ -66,7 +70,8 @@ try { termuxApiLib = require('termux-api'); } catch (_) { /* CLI fallback */ }
 
 /* ─── Constants ─── */
 const app = express();
-const PORT = parseInt(process.env.PORT, 10) || 3001;
+// Sandbox default port is 3002 so it can run alongside deepseek-editor (3001)
+const PORT = parseInt(process.env.PORT, 10) || 3002;
 const HOST = process.env.HOST || '127.0.0.1';
 const HOME = process.env.HOME || os.homedir();
 
@@ -86,6 +91,24 @@ const PKG_VERSION = (() => {
 })();
 
 const CHANGELOG = [
+    {
+        version: '2.6.0', date: '2025-10', type: 'feature',
+        items: [
+            '⚡ /api/git/auto-repo — one-tap repo setup: git init + .gitignore + identity + first commit',
+            '🤖 Repos are auto-initialized automatically when you create a project (template or AI-generated)',
+            '🔗 Optional GitHub repo creation + origin wiring inside the same call',
+        ],
+    },
+    {
+        version: '2.5.0', date: '2025-10', type: 'feature',
+        items: [
+            '🐙 GitHub sign in / sign up via OAuth Device Flow (no PAT copy-paste needed)',
+            '🔗 One-tap clone of any GitHub repo (public or private) once signed in',
+            '⬆️  Stage → Commit → Push directly to the selected GitHub repo',
+            '🔄 Sync local ↔ GitHub with Fetch / Pull / Push in one place',
+            '🚪 Sign out clears the stored token',
+        ],
+    },
     {
         version: '2.4.0', date: '2025-10', type: 'feature',
         items: [
@@ -337,8 +360,8 @@ const RATE_LIMIT_PER_MIN = parseInt(process.env.DS_RATE_LIMIT, 10) || 600;
 const LONG_RUNNING = new Set([
     '/api/git/clone', '/api/git/push', '/api/git/pull', '/api/git/pull/rebase',
     '/api/git/fetch', '/api/exec', '/api/ai/chat', '/api/ai/tool-call',
-    '/api/backup/restore', '/api/deploy/build', '/api/deploy/aab',
-    '/api/deploy/install-tools', '/api/compile',
+    '/api/backup/restore', '/api/deploy/build', '/api/deploy/download',
+    '/api/deploy/upload-to-play', '/api/deploy/install-tools', '/api/compile',
 ]);
 app.use('/api/', (req, res, next) => {
     const ip = req.ip || 'local';
@@ -516,7 +539,28 @@ app.post('/api/secrets', (req, res) => {
         delete secrets[name]; saveSecrets();
         return res.json({ ok: true, removed: true });
     }
-    if (typeof value !== 'string' || value.length > 4000) return res.status(400).json({ error: 'invalid value' });
+    if (typeof value !== 'string') return res.status(400).json({ error: 'invalid value' });
+    const cap = name === 'google_play_service_account' ? 20000 : 4000;
+    if (value.length > cap) return res.status(400).json({ error: 'invalid value' });
+    // Validate GitHub token format (classic or fine-grained PAT)
+    if (name === 'github_token') {
+        const trimmed = value.trim();
+        if (!/^(ghp_|gho_|ghu_|ghs_|ghr_|github_pat_)/.test(trimmed)) {
+            return res.status(400).json({ error: 'Invalid GitHub token format. Expected ghp_… (classic) or github_pat_… (fine-grained).' });
+        }
+        if (trimmed.length < 20) return res.status(400).json({ error: 'GitHub token too short' });
+    }
+    // Validate Google Play service account JSON structure
+    if (name === 'google_play_service_account') {
+        try {
+            const parsed = JSON.parse(value);
+            if (!parsed.client_email || !parsed.private_key) {
+                return res.status(400).json({ error: 'Service account JSON must contain client_email and private_key' });
+            }
+        } catch (e) {
+            return res.status(400).json({ error: 'Invalid JSON: ' + e.message });
+        }
+    }
     secrets[name] = value.trim();
     saveSecrets();
     res.json({ ok: true });
@@ -1467,12 +1511,15 @@ app.post('/api/git/push', async (req, res) => {
             const g = getGit(rel);
             await g.add(['-A']);
             let commitOut = '', commitErr = '';
-            try { const c = await g.commit(msg); commitOut = c.commit || 'committed'; }
+            let committed = false;
+            try { const c = await g.commit(msg); commitOut = c.commit || 'committed'; committed = true; }
             catch (e) {
                 commitErr = redact(e.message || String(e));
                 if (!/nothing to commit|no changes added|no changes/i.test(commitErr)) return res.json({ code: 1, ok: false, stdout: commitOut, stderr: commitErr });
             }
             if (commitOnly) return res.json(gitOk({ stdout: commitOut, stderr: commitErr }));
+            // Working tree was already clean — don't push unrelated pre-existing commits
+            if (!committed) return res.json(gitOk({ stdout: commitOut || 'Nothing to commit', stderr: commitErr }));
             const push = await g.push();
             const pushOut = JSON.stringify(push && push.pushed ? push.pushed : push || {});
             return res.json(gitOk({ stdout: commitOut + '\n' + pushOut, stderr: commitErr }));
@@ -1914,6 +1961,105 @@ app.post('/api/git/auto-commit', async (req, res) => {
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
+/**
+ * POST /api/git/auto-repo
+ * Fully automated repo setup in one call:
+ *   1. git init (branch main) if missing
+ *   2. ensure user.name / user.email are set
+ *   3. write a default .gitignore if none exists
+ *   4. stage everything and make a baseline commit (skipped if no changes)
+ *   5. optionally create a GitHub repo and set it as `origin`
+ * Body: { cwd, remoteUrl?, createGitHub?, repoName?, isPrivate?, initialMessage? }
+ */
+app.post('/api/git/auto-repo', async (req, res) => {
+    const body = req.body || {};
+    const rel = body.cwd || '';
+    const workdir = resolveInWorkspace(rel);
+    if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+
+    const steps = [];
+    const useFluent = !!simpleGitFactory;
+    const git = (...args) => (useFluent ? getGit(rel).raw(args) : gitLegacy(workdir, args, { timeout: 60000 }));
+
+    try {
+        /* 1. init */
+        const gitDir = path.join(workdir, '.git');
+        if (fs.existsSync(gitDir)) {
+            steps.push({ step: 'init', status: 'skipped', detail: 'already a repo' });
+        } else {
+            try { await git('init', '-b', 'main'); } catch (_) { await git('init'); }
+            steps.push({ step: 'init', status: 'ok', detail: 'initialized on main' });
+        }
+
+        /* 2. identity */
+        const idName = (body.name || process.env.GIT_AUTHOR_NAME || 'DeepSeek Studio').toString();
+        const idEmail = (body.email || process.env.GIT_AUTHOR_EMAIL || 'deepseek@localhost').toString();
+        try {
+            const curName = (await git('config', '--get', 'user.name').catch(() => '')).trim();
+            const curEmail = (await git('config', '--get', 'user.email').catch(() => '')).trim();
+            if (!curName) await git('config', 'user.name', idName);
+            if (!curEmail) await git('config', 'user.email', idEmail);
+            steps.push({ step: 'identity', status: 'ok', detail: idName + ' <' + idEmail + '>' });
+        } catch (e) {
+            steps.push({ step: 'identity', status: 'warn', detail: redact(e.message) });
+        }
+
+        /* 3. .gitignore */
+        const gitignorePath = path.join(workdir, '.gitignore');
+        if (!fs.existsSync(gitignorePath)) {
+            const ignore = [
+                'node_modules/', 'dist/', 'build/', '.next/', '.dart_tool/',
+                '*.log', '.env', '.env.*', '!.env.example',
+                '.DS_Store', 'Thumbs.db', '.idea/', '.vscode/', 'coverage/',
+                '*.keystore', '*.jks', '*.apk', '*.aab',
+                '',
+            ].join('\n');
+            fs.writeFileSync(gitignorePath, ignore);
+            steps.push({ step: 'gitignore', status: 'ok', detail: 'written' });
+        } else {
+            steps.push({ step: 'gitignore', status: 'skipped', detail: 'exists' });
+        }
+
+        /* 4. stage + baseline commit */
+        await git('add', '-A');
+        const status = await git('status', '--porcelain').catch(() => '');
+        if (String(status).trim()) {
+            const message = body.initialMessage || ('chore: initial commit — ' + new Date().toISOString().slice(0, 10));
+            await git('commit', '-m', message);
+            steps.push({ step: 'commit', status: 'ok', detail: message });
+        } else {
+            steps.push({ step: 'commit', status: 'skipped', detail: 'nothing to commit' });
+        }
+
+        /* 5. optional GitHub remote */
+        let remoteUrl = body.remoteUrl || '';
+        if (!remoteUrl && body.createGitHub && ghToken()) {
+            const repoName = (body.repoName || path.basename(workdir) || 'project').replace(/[^a-zA-Z0-9._-]/g, '-');
+            const created = await githubApi('/user/repos', {
+                method: 'POST',
+                body: JSON.stringify({ name: repoName, description: body.description || '', private: body.isPrivate !== false, auto_init: false }),
+            });
+            if (created.ok && created.data && created.data.clone_url) {
+                remoteUrl = created.data.clone_url;
+                steps.push({ step: 'create-github', status: 'ok', detail: created.data.full_name || repoName });
+            } else {
+                steps.push({ step: 'create-github', status: 'warn', detail: (created.data && created.data.message) || 'create failed' });
+            }
+        }
+        if (remoteUrl) {
+            await git('remote', 'remove', 'origin').catch(() => {});
+            await git('remote', 'add', 'origin', remoteUrl);
+            steps.push({ step: 'remote', status: 'ok', detail: redact(remoteUrl) });
+        } else {
+            steps.push({ step: 'remote', status: 'skipped', detail: 'no remote configured' });
+        }
+
+        res.json(gitOk({ ok: true, steps, remoteUrl: remoteUrl ? redact(remoteUrl) : '' }));
+    } catch (e) {
+        res.status(500).json(Object.assign(gitErr(e), { steps }));
+    }
+});
+
 /* ═══════════════════════════════════════════════════════════════════
    GitHub REST API
    ═══════════════════════════════════════════════════════════════════ */
@@ -1927,10 +2073,22 @@ async function githubApi(pathname, options = {}) {
         'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION,
     }, options.headers || {});
     const res = await fetchWithRetry('https://api.github.com' + pathname, Object.assign({}, options, { headers }), { retries: 1, timeout: 30000 });
+
+    // Rate-limit awareness: brief back-off to GitHub's reset window, then retry once
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    const resetAt = res.headers.get('x-ratelimit-reset');
+    if (remaining === '0' && resetAt && !options._rateRetry) {
+        const waitMs = Math.max(1000, (parseInt(resetAt, 10) * 1000) - Date.now());
+        if (waitMs < 60000) {
+            await new Promise((r) => setTimeout(r, waitMs));
+            return githubApi(pathname, Object.assign({}, options, { _rateRetry: true }));
+        }
+    }
+
     let data = null;
     const text = await res.text();
     try { data = text ? JSON.parse(text) : null; } catch (_) { data = { raw: text }; }
-    return { ok: res.ok, status: res.status, data };
+    return { ok: res.ok, status: res.status, data, rateLimit: { remaining, resetAt } };
 }
 
 app.get('/api/github/status', async (_req, res) => {
@@ -1943,6 +2101,104 @@ app.get('/api/github/status', async (_req, res) => {
     const r = await githubApi('/user');
     if (!r.ok) return res.json({ connected: false, error: r.data && r.data.message });
     res.json({ connected: true, login: r.data.login, name: r.data.name, avatar: r.data.avatar_url, publicRepos: r.data.public_repos });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GitHub Sign in / Sign up — OAuth Device Flow
+   ─────────────────────────────────────────────────────────────────
+   The device flow is ideal for Termux: no redirect URL / client secret
+   is required, and the user just enters a short code on github.com/login/device.
+   Any GitHub account (new or existing) can grant access here — which
+   covers both "sign up" and "sign in" in a single flow.
+
+   A default public OAuth App client_id is used unless the user supplies
+   their own via DS_GITHUB_CLIENT_ID (env) or the github_client_id secret.
+   ═══════════════════════════════════════════════════════════════════ */
+const GH_DEVICE_CODE_URL = 'https://github.com/login/device/code';
+const GH_TOKEN_URL = 'https://github.com/login/oauth/access_token';
+// Public OAuth App client_id (device-flow only, no client secret). Override via env/secret.
+const DEFAULT_GH_CLIENT_ID = process.env.DS_GITHUB_CLIENT_ID || 'Ov23liFZ2XqTa0eGnqJd';
+function ghClientId() {
+    const fromSecret = String(secrets.github_client_id || '').trim();
+    return fromSecret || DEFAULT_GH_CLIENT_ID;
+}
+// Pending device-flow sessions: device_code -> { userCode, interval, expiresAt, clientId }
+const ghDeviceSessions = new Map();
+setInterval(() => {
+    const now = Date.now();
+    for (const [code, s] of ghDeviceSessions) if (now > s.expiresAt) ghDeviceSessions.delete(code);
+}, 60 * 1000).unref();
+
+app.post('/api/github/device/start', async (req, res) => {
+    const clientId = ghClientId();
+    if (!clientId) return res.status(500).json({ error: 'No GitHub OAuth client_id configured. Set DS_GITHUB_CLIENT_ID or the github_client_id secret.' });
+    const scope = String((req.body || {}).scope || 'repo read:user user:email workflow').trim();
+    try {
+        const r = await fetchWithRetry(GH_DEVICE_CODE_URL, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION },
+            body: JSON.stringify({ client_id: clientId, scope }),
+        }, { retries: 1, timeout: 20000 });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.error) return res.status(r.status || 500).json({ error: redact(data.error_description || data.error || 'device code request failed') });
+        ghDeviceSessions.set(data.device_code, {
+            userCode: data.user_code,
+            interval: Math.max(5, parseInt(data.interval, 10) || 5),
+            expiresAt: Date.now() + (parseInt(data.expires_in, 10) || 900) * 1000,
+            clientId,
+        });
+        res.json({
+            deviceCode: data.device_code,
+            userCode: data.user_code,
+            verificationUri: data.verification_uri || 'https://github.com/login/device',
+            verificationUriComplete: data.verification_uri_complete || (data.verification_uri || 'https://github.com/login/device') + '?user_code=' + data.user_code,
+            expiresIn: data.expires_in,
+            interval: Math.max(5, parseInt(data.interval, 10) || 5),
+        });
+    } catch (e) { res.status(500).json({ error: redact(e.message) }); }
+});
+
+app.post('/api/github/device/poll', async (req, res) => {
+    const deviceCode = String((req.body || {}).deviceCode || '').trim();
+    if (!deviceCode) return res.status(400).json({ error: 'deviceCode required' });
+    const session = ghDeviceSessions.get(deviceCode);
+    if (!session) return res.status(400).json({ error: 'expired_or_unknown', status: 'expired' });
+    if (Date.now() > session.expiresAt) { ghDeviceSessions.delete(deviceCode); return res.json({ status: 'expired' }); }
+    try {
+        const r = await fetchWithRetry(GH_TOKEN_URL, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION },
+            body: JSON.stringify({ client_id: session.clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }),
+        }, { retries: 0, timeout: 20000 });
+        const data = await r.json().catch(() => ({}));
+        if (data.error === 'authorization_pending') return res.json({ status: 'pending', interval: session.interval });
+        if (data.error === 'slow_down') { session.interval += 5; return res.json({ status: 'pending', interval: session.interval }); }
+        if (data.error === 'expired_token') { ghDeviceSessions.delete(deviceCode); return res.json({ status: 'expired' }); }
+        if (data.error === 'access_denied') { ghDeviceSessions.delete(deviceCode); return res.json({ status: 'denied' }); }
+        if (data.error || !data.access_token) return res.json({ status: 'error', error: redact(data.error_description || data.error || 'token exchange failed') });
+        // Persist the token exactly like a manually-entered PAT
+        secrets.github_token = String(data.access_token).trim();
+        saveSecrets();
+        ghDeviceSessions.delete(deviceCode);
+        // Resolve the authenticated user for a friendly confirmation
+        let user = null;
+        try {
+            const u = await githubApi('/user');
+            if (u.ok) user = { login: u.data.login, name: u.data.name, avatar: u.data.avatar_url };
+        } catch (_) {}
+        res.json({ status: 'authorized', scope: data.scope || '', tokenType: data.token_type || 'bearer', user });
+    } catch (e) { res.status(500).json({ status: 'error', error: redact(e.message) }); }
+});
+
+app.post('/api/github/signout', (req, res) => {
+    const keepIdentity = (req.body || {}).keepIdentity === true;
+    delete secrets.github_token;
+    saveSecrets();
+    res.json({ ok: true, keptIdentity: keepIdentity });
+});
+
+app.get('/api/github/device/config', (_req, res) => {
+    res.json({ clientIdConfigured: !!ghClientId(), clientIdSource: secrets.github_client_id ? 'secret' : (process.env.DS_GITHUB_CLIENT_ID ? 'env' : 'default') });
 });
 
 app.get('/api/github/repos', async (req, res) => {
@@ -2021,6 +2277,95 @@ app.post('/api/github/list-prs', async (req, res) => {
         if (!r.ok) return res.status(r.status).json({ error: (r.data && r.data.message) || 'failed' });
         res.json({ prs: (r.data || []).map((pr) => ({ number: pr.number, title: pr.title, state: pr.state, url: pr.html_url, head: pr.head.ref, base: pr.base.ref, user: pr.user && pr.user.login })) });
     } catch (e) { res.status(500).json({ error: redact(e.message) }); }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GitHub Releases — create release + upload AAB/APK assets
+   ═══════════════════════════════════════════════════════════════════ */
+app.post('/api/github/create-release', async (req, res) => {
+    const { cwd, tag, name, body, draft, prerelease, artifacts } = req.body || {};
+    if (!tag || !/^[A-Za-z0-9._/-]{1,100}$/.test(tag)) return res.status(400).json({ error: 'invalid tag name' });
+    try {
+        const g = getGit(cwd || '');
+        const remoteUrl = (await g.remote(['get-url', 'origin'])) || '';
+        const slug = parseRepoSlug(remoteUrl.trim());
+        if (!slug) return res.status(400).json({ error: 'origin is not a GitHub remote' });
+        const [owner, repo] = slug.split('/');
+
+        const gh = getOctokit();
+        let release;
+
+        if (gh) {
+            const { data } = await gh.repos.createRelease({
+                owner, repo,
+                tag_name: tag,
+                name: name || tag,
+                body: body || '',
+                draft: draft === true,
+                prerelease: prerelease === true,
+            });
+            release = data;
+
+            if (Array.isArray(artifacts) && artifacts.length) {
+                for (const artifactPath of artifacts) {
+                    const abs = resolveInWorkspace(artifactPath);
+                    if (!abs || !fs.existsSync(abs)) continue;
+                    const assetData = fs.readFileSync(abs);
+                    const fileName = path.basename(abs);
+                    const mime = /\.aab$/i.test(fileName)
+                        ? 'application/octet-stream'
+                        : /\.apk$/i.test(fileName)
+                            ? 'application/vnd.android.package-archive'
+                            : 'application/octet-stream';
+                    await gh.repos.uploadReleaseAsset({
+                        owner, repo,
+                        release_id: release.id,
+                        name: fileName,
+                        data: assetData,
+                        headers: { 'content-type': mime, 'content-length': assetData.length },
+                    });
+                }
+            }
+        } else {
+            const r = await githubApi('/repos/' + slug + '/releases', {
+                method: 'POST',
+                body: JSON.stringify({ tag_name: tag, name: name || tag, body: body || '', draft: draft === true, prerelease: prerelease === true }),
+            });
+            if (!r.ok) return res.status(r.status).json({ error: (r.data && r.data.message) || 'Release creation failed' });
+            release = r.data;
+
+            if (Array.isArray(artifacts) && artifacts.length) {
+                const uploadUrl = String(release.upload_url).replace(/\{[^}]*\}$/, '');
+                for (const artifactPath of artifacts) {
+                    const abs = resolveInWorkspace(artifactPath);
+                    if (!abs || !fs.existsSync(abs)) continue;
+                    const assetData = fs.readFileSync(abs);
+                    const fileName = path.basename(abs);
+                    const assetRes = await fetchWithRetry(
+                        uploadUrl + '?name=' + encodeURIComponent(fileName),
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': 'Bearer ' + ghToken(),
+                                'Content-Type': 'application/octet-stream',
+                                'Accept': 'application/vnd.github+json',
+                            },
+                            body: assetData,
+                        },
+                        { retries: 0, timeout: 120000 }
+                    );
+                    if (!assetRes.ok) {
+                        const err = await assetRes.text().catch(() => '');
+                        console.error('[release] asset upload failed:', err.slice(0, 200));
+                    }
+                }
+            }
+        }
+
+        res.json({ ok: true, release: { id: release.id, tag: release.tag_name, url: release.html_url, uploadUrl: release.upload_url } });
+    } catch (e) {
+        res.status(500).json({ error: redact(e.message) });
+    }
 });
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -2282,12 +2627,41 @@ app.post('/api/deploy/build', async (req, res) => {
     const aliasName = String(alias || keystore || 'release');
     const pw = password || '';
     let cmd, cwdForRun, artifactPath;
+    // Ephemeral signing files we create/append to — restored or deleted after the build
+    const ephemeralFiles = [];
+    const touchEphemeral = (file) => {
+        const bak = file + '.ds-bak';
+        try {
+            if (fs.existsSync(file)) { if (!fs.existsSync(bak)) fs.copyFileSync(file, bak); }
+            else { fs.writeFileSync(bak, '', 'utf8'); } // sentinel: file did not exist
+            fs.chmodSync(bak, 0o600);
+            ephemeralFiles.push(file);
+        } catch (_) {}
+    };
+    const cleanupEphemeral = () => {
+        for (const file of ephemeralFiles) {
+            const bak = file + '.ds-bak';
+            try {
+                if (fs.existsSync(bak)) {
+                    if (fs.statSync(bak).size === 0 && !fs.existsSync(file)) { /* nothing */ }
+                    if (fs.statSync(bak).size === 0) { fs.unlinkSync(file); }
+                    else { fs.copyFileSync(bak, file); }
+                    fs.unlinkSync(bak);
+                } else if (fs.existsSync(file)) {
+                    fs.unlinkSync(file);
+                }
+            } catch (_) {}
+        }
+        ephemeralFiles.length = 0;
+    };
     if (projectType === 'flutter') {
         cwdForRun = workdir;
         if (keystorePath && fs.existsSync(keystorePath)) {
             const keyPropsPath = path.join(workdir, 'android', 'key.properties');
             fs.mkdirSync(path.dirname(keyPropsPath), { recursive: true });
+            touchEphemeral(keyPropsPath);
             fs.writeFileSync(keyPropsPath, 'storePassword=' + pw + '\nkeyPassword=' + pw + '\nkeyAlias=' + aliasName + '\nstoreFile=' + keystorePath + '\n', 'utf8');
+            fs.chmodSync(keyPropsPath, 0o600);
         }
         cmd = wantAab ? 'flutter build appbundle --release 2>&1' : 'flutter build apk --release 2>&1';
         artifactPath = wantAab ? path.join(workdir, 'build', 'app', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(workdir, 'build', 'app', 'outputs', 'flutter-apk', 'app-release.apk');
@@ -2297,8 +2671,10 @@ app.post('/api/deploy/build', async (req, res) => {
         if (keystorePath && fs.existsSync(keystorePath)) {
             const gradleProps = path.join(androidDir, 'gradle.properties');
             let props = fs.existsSync(gradleProps) ? fs.readFileSync(gradleProps, 'utf8') : '';
+            touchEphemeral(gradleProps);
             props += '\nDEEPSEEK_STORE_FILE=' + keystorePath + '\nDEEPSEEK_KEY_ALIAS=' + aliasName + '\nDEEPSEEK_STORE_PASSWORD=' + pw + '\nDEEPSEEK_KEY_PASSWORD=' + pw + '\n';
             fs.writeFileSync(gradleProps, props, 'utf8');
+            fs.chmodSync(gradleProps, 0o600);
         }
         cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
         artifactPath = wantAab ? path.join(androidDir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
@@ -2307,14 +2683,22 @@ app.post('/api/deploy/build', async (req, res) => {
         if (keystorePath && fs.existsSync(keystorePath)) {
             const gradleProps = path.join(workdir, 'gradle.properties');
             let props = fs.existsSync(gradleProps) ? fs.readFileSync(gradleProps, 'utf8') : '';
+            touchEphemeral(gradleProps);
             props += '\nDEEPSEEK_STORE_FILE=' + keystorePath + '\nDEEPSEEK_KEY_ALIAS=' + aliasName + '\nDEEPSEEK_STORE_PASSWORD=' + pw + '\nDEEPSEEK_KEY_PASSWORD=' + pw + '\n';
             fs.writeFileSync(gradleProps, props, 'utf8');
+            fs.chmodSync(gradleProps, 0o600);
         }
         cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
         artifactPath = wantAab ? path.join(workdir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(workdir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
     }
-    const r = await run('sh', ['-c', cmd], { cwd: cwdForRun, timeout: 900000, maxBuffer: 50 * 1024 * 1024 });
-    const out = redact(r.stdout + (r.stderr ? '\n' + r.stderr : ''));
+    let r, out;
+    try {
+        r = await run('sh', ['-c', cmd], { cwd: cwdForRun, timeout: 900000, maxBuffer: 50 * 1024 * 1024 });
+        out = redact(r.stdout + (r.stderr ? '\n' + r.stderr : ''));
+    } finally {
+        // Never leave keystore passwords on disk
+        cleanupEphemeral();
+    }
     const artifactExists = fs.existsSync(artifactPath);
     let artifactSize = 0;
     if (artifactExists) artifactSize = fs.statSync(artifactPath).size;
@@ -2328,6 +2712,137 @@ app.get('/api/deploy/download', (req, res) => {
     const target = resolveInWorkspace(req.query.path || '');
     if (!target || !fs.existsSync(target)) return res.status(404).json({ error: 'not found' });
     res.download(target);
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Google Play Store publishing (Android Publisher API v3)
+   Service account JSON stored as secret "google_play_service_account".
+   Optional "package_name" field in that JSON sets the target package.
+   ═══════════════════════════════════════════════════════════════════ */
+const PLAY_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const PLAY_API = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
+const PLAY_UPLOAD_API = 'https://androidpublisher.googleapis.com/upload/androidpublisher/v3';
+
+function loadPlayServiceAccount() {
+    const raw = secrets.google_play_service_account;
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
+async function getGoogleAccessToken(sa) {
+    const now = Math.floor(Date.now() / 1000);
+    const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    const signingInput = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64({
+        iss: sa.client_email, scope: PLAY_SCOPE, aud: GOOGLE_TOKEN_URL, iat: now, exp: now + 3600,
+    });
+    const sign = require('crypto').createSign('RSA-SHA256');
+    sign.update(signingInput); sign.end();
+    const jwt = signingInput + '.' + sign.sign(sa.private_key).toString('base64url');
+
+    const res = await fetchWithRetry(GOOGLE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=' + jwt,
+    }, { retries: 0, timeout: 15000 });
+    if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        throw new Error('Google auth failed: ' + err.slice(0, 300));
+    }
+    return (await res.json()).access_token;
+}
+
+app.post('/api/deploy/upload-to-play', async (req, res) => {
+    const { aabPath, track, releaseNotes, userFraction, status, packageName: bodyPkg } = req.body || {};
+    const sa = loadPlayServiceAccount();
+    if (!sa) return res.status(400).json({ error: 'Google Play service account not configured. Save the JSON in Setup → Secrets as "google_play_service_account".' });
+
+    const abs = resolveInWorkspace(aabPath || '');
+    if (!abs || !fs.existsSync(abs)) return res.status(404).json({ error: 'AAB not found: ' + aabPath });
+    if (!/\.aab$/i.test(abs)) return res.status(400).json({ error: 'Only .aab files can be uploaded to Play Store' });
+
+    try {
+        const token = await getGoogleAccessToken(sa);
+        const packageName = String(sa.package_name || bodyPkg || '').trim();
+        if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(packageName)) {
+            return res.status(400).json({ error: 'A valid packageName is required (or set "package_name" in the service account JSON)' });
+        }
+        const auth = { 'Authorization': 'Bearer ' + token };
+        const pkg = encodeURIComponent(packageName);
+
+        // 1. Create edit
+        const editRes = await fetchWithRetry(PLAY_API + '/applications/' + pkg + '/edits',
+            { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, auth), body: '{}' },
+            { retries: 0, timeout: 15000 });
+        if (!editRes.ok) {
+            const e = await editRes.text().catch(() => '');
+            return res.status(500).json({ error: 'Failed to create edit: ' + e.slice(0, 300) });
+        }
+        const edit = await editRes.json();
+
+        const deleteEdit = () => fetch(
+            PLAY_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id),
+            { method: 'DELETE', headers: auth }).catch(() => {});
+
+        const aabData = fs.readFileSync(abs);
+        const uploadRes = await fetchWithRetry(
+            PLAY_UPLOAD_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id) + '/bundles',
+            {
+                method: 'POST',
+                headers: Object.assign({
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Length': String(aabData.length),
+                }, auth),
+                body: aabData,
+            },
+            { retries: 0, timeout: 120000 });
+        if (!uploadRes.ok) {
+            const e = await uploadRes.text().catch(() => '');
+            await deleteEdit();
+            return res.status(500).json({ error: 'Bundle upload failed: ' + e.slice(0, 300) });
+        }
+        const bundle = await uploadRes.json();
+
+        // 3. Assign to track
+        const targetTrack = String(track || 'internal').toLowerCase().replace(/[^a-z]/g, '') || 'internal';
+        const releaseStatus = ['completed', 'inProgress', 'halted', 'draft'].includes(status) ? status : 'completed';
+        const trackBody = {
+            track: targetTrack,
+            releases: [Object.assign({
+                status: releaseStatus,
+                versionCodes: [String(bundle.versionCode)],
+            },
+                ((releaseStatus === 'inProgress' || releaseStatus === 'halted') && userFraction != null)
+                    ? { userFraction: Math.min(1, Math.max(0.0001, parseFloat(userFraction))) } : {},
+                releaseNotes ? { releaseNotes: [{ language: 'en-US', text: String(releaseNotes).slice(0, 500) }] } : {})],
+        };
+        const trackRes = await fetchWithRetry(
+            PLAY_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id) + '/tracks/' + encodeURIComponent(targetTrack),
+            { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, auth), body: JSON.stringify(trackBody) },
+            { retries: 0, timeout: 30000 });
+        if (!trackRes.ok) {
+            const e = await trackRes.text().catch(() => '');
+            await deleteEdit();
+            return res.status(500).json({ error: 'Track assignment failed: ' + e.slice(0, 300) });
+        }
+
+        // 4. Commit edit
+        const commitRes = await fetchWithRetry(
+            PLAY_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id) + ':commit',
+            { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, auth), body: '{}' },
+            { retries: 0, timeout: 30000 });
+        if (!commitRes.ok) {
+            const e = await commitRes.text().catch(() => '');
+            return res.status(500).json({ error: 'Commit failed: ' + e.slice(0, 300) });
+        }
+
+        res.json({
+            ok: true, packageName, versionCode: bundle.versionCode,
+            track: targetTrack, status: releaseStatus, editId: edit.id,
+        });
+    } catch (e) {
+        res.status(500).json({ error: redact(e.message) });
+    }
 });
 
 /* ═══════════════════════════════════════════════════════════════════

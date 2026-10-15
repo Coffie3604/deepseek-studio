@@ -169,17 +169,17 @@ disown 2>/dev/null || true
 # Wait for health (up to 20s)
 for i in \$(seq 1 20); do
   sleep 1
-  curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null && break
+  curl -sf -o /dev/null http://127.0.0.1:3002/api/health 2>/dev/null && break
 done
 
-VER=\$(curl -s http://127.0.0.1:3001/api/version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+VER=\$(curl -s http://127.0.0.1:3002/api/version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
 if [ -n "\$VER" ]; then
-  echo "✅ DeepSeek Studio v\${VER} running — http://127.0.0.1:3001"
+  echo "✅ DeepSeek Studio v\${VER} running — http://127.0.0.1:3002"
 else
   echo "⚠️  Server may not have started. Check: ds-log"
 fi
 
-command -v termux-open-url >/dev/null 2>&1 && termux-open-url "http://127.0.0.1:3001" 2>/dev/null &
+command -v termux-open-url >/dev/null 2>&1 && termux-open-url "http://127.0.0.1:3002" 2>/dev/null &
 exit 0
 EOF
 
@@ -189,7 +189,7 @@ write_script ds-boot <<EOF
 DIR="\${DS_INSTALL_DIR:-$INSTALL_DIR}"
 [ -f "\$DIR/server.js" ] || exit 1
 cd "\$DIR" || exit 1
-curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null && exit 0
+curl -sf -o /dev/null http://127.0.0.1:3002/api/health 2>/dev/null && exit 0
 pkill -f "node server.js" 2>/dev/null || true
 sleep 1
 setsid nohup node server.js > "\$HOME/.ds-studio.log" 2>&1 < /dev/null &
@@ -200,16 +200,16 @@ EOF
 # ds-launch — one-tap: start if needed, then open browser
 write_script ds-launch <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
-curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null || {
+curl -sf -o /dev/null http://127.0.0.1:3002/api/health 2>/dev/null || {
   ds-boot
   for i in $(seq 1 20); do
     sleep 1
-    curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null && break
+    curl -sf -o /dev/null http://127.0.0.1:3002/api/health 2>/dev/null && break
   done
 }
 command -v termux-open-url >/dev/null 2>&1 \
-  && termux-open-url "http://127.0.0.1:3001" 2>/dev/null \
-  || am start -a android.intent.action.VIEW -d "http://127.0.0.1:3001" >/dev/null 2>&1 &
+  && termux-open-url "http://127.0.0.1:3002" 2>/dev/null \
+  || am start -a android.intent.action.VIEW -d "http://127.0.0.1:3002" >/dev/null 2>&1 &
 exit 0
 EOF
 
@@ -233,9 +233,9 @@ write_script ds-status <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 if pgrep -f "node server.js" >/dev/null; then
   echo "✅ DeepSeek Studio running (PID $(pgrep -f 'node server.js' | head -1))"
-  echo "   URL: http://127.0.0.1:3001"
+  echo "   URL: http://127.0.0.1:3002"
   echo "   Log: ~/.ds-studio.log"
-  curl -s http://127.0.0.1:3001/api/version 2>/dev/null | head -c 400; echo
+  curl -s http://127.0.0.1:3002/api/version 2>/dev/null | head -c 400; echo
 else
   echo "🛑 DeepSeek Studio not running — start with: ds-launch"
 fi
@@ -290,13 +290,13 @@ else
 fi
 echo ""
 
-if curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null; then
+if curl -sf -o /dev/null http://127.0.0.1:3002/api/health 2>/dev/null; then
   echo -e "\${GREEN}Server: ✅ running\${NC}"
   echo -n "  "
-  curl -s http://127.0.0.1:3001/api/version 2>/dev/null | head -c 300
+  curl -s http://127.0.0.1:3002/api/version 2>/dev/null | head -c 300
   echo
   echo -n "  Features: "
-  curl -s http://127.0.0.1:3001/api/diagnostics 2>/dev/null | grep -o '"features":{[^}]*}' | head -1
+  curl -s http://127.0.0.1:3002/api/diagnostics 2>/dev/null | grep -o '"features":{[^}]*}' | head -1
   echo
 else
   echo -e "\${RED}Server: 🛑 not running\${NC}"
