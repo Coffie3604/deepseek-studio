@@ -3807,11 +3807,7 @@ async function verifyAndSaveWizardKey() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: 'deepseek_key', value: key }),
       }).catch(function() {});
-      fetch(API + '/api/secrets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'deepseek_key', value: key }),
-      }).catch(function() {});
+
       document.getElementById('apiKeyStatus').textContent = '✅ Valid — saved';
       document.getElementById('apiKeyStatus').style.color = 'var(--green)';
       if (statusEl) statusEl.textContent = '✅ Key verified and saved!'; statusEl.className = 'wizard-status ok';
@@ -4588,16 +4584,7 @@ function start() {
       toast('Chat key not synced — open Setup → Test key', 'warn');
     }
   }).catch(function() {});
-  // Warn once if the server has no DeepSeek key — the chat path needs it
-  fetch(API + '/api/version').then(function(r) { return r.json(); }).then(function(d) {
-    var local = localStorage.getItem('ds_key');
-    var serverHas = (d.providersConfigured || []).indexOf('deepseek_key') !== -1;
-    if (local && !serverHas) {
-      console.warn('[DS] Key is in localStorage but not on the server — chat will 400. ' +
-                   'Click "Test key" in Setup to push it server-side.');
-      toast('Chat key not synced — open Setup → Test key', 'warn');
-    }
-  }).catch(function() {});
+
   try { initTerminal(); } catch (e) { console.log('initTerminal fail', e); }
   try { refreshTree(); } catch (e) { console.log('refreshTree fail', e); }
   try { loadWorkspaceSelector(); } catch (e) { console.log('loadWorkspaceSelector fail', e); }
