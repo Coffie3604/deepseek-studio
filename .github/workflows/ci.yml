@@ -113,12 +113,12 @@ jobs:
           PID=$!
           for i in $(seq 1 20); do
             sleep 0.5
-            curl -sf http://127.0.0.1:3001/api/health && break
+            curl -sf http://127.0.0.1:3002/api/health && break
           done
           set -e
-          curl -sf http://127.0.0.1:3001/api/version > /dev/null
-          curl -sf http://127.0.0.1:3001/api/fs/list   > /dev/null
-          curl -sf http://127.0.0.1:3001/api/license/status > /dev/null
+          curl -sf http://127.0.0.1:3002/api/version > /dev/null
+          curl -sf http://127.0.0.1:3002/api/fs/list   > /dev/null
+          curl -sf http://127.0.0.1:3002/api/license/status > /dev/null
           kill $PID
           echo "Smoke test passed"
       - name: Show server log on failure

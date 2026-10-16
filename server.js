@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 /**
- * DeepSeek Studio — Backend v2.3
+ * DeepSeek Studio — Backend v2.6
  * ─────────────────────────────────────────────────────────────────────
  * Local-first coding backend for Termux (Android).
+ *
+ * v2.6 — AUTOMATIC GIT REPOS
+ *   ⚡ /api/git/auto-repo  — one call: init + .gitignore + identity + first commit (+ optional GitHub remote)
+ *   🤖 Auto-init is wired into project creation (templates & AI generator)
  *
  * v2.3 — FULL DEVELOPER FREEDOM
  *   ⚡ /api/compile        — language-aware syntax check for the ⚡ button
@@ -66,6 +70,7 @@ try { termuxApiLib = require('termux-api'); } catch (_) { /* CLI fallback */ }
 
 /* ─── Constants ─── */
 const app = express();
+// Sandbox default port is 3002 so it can run alongside deepseek-editor (3001)
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 const HOST = process.env.HOST || '127.0.0.1';
 const HOME = process.env.HOME || os.homedir();
@@ -82,10 +87,41 @@ const TERMUX_BASH = '/data/data/com.termux/files/usr/bin/bash';
 
 const PRO_LICENSE_PREFIX = 'DS-PRO-';
 const PKG_VERSION = (() => {
-    try { return require('./package.json').version; } catch (_) { return '2.3.0'; }
+    try { return require('./package.json').version; } catch (_) { return '2.4.0'; }
 })();
 
 const CHANGELOG = [
+    {
+        version: '2.6.0', date: '2025-10', type: 'feature',
+        items: [
+            '⚡ /api/git/auto-repo — one-tap repo setup: git init + .gitignore + identity + first commit',
+            '🤖 Repos are auto-initialized automatically when you create a project (template or AI-generated)',
+            '🔗 Optional GitHub repo creation + origin wiring inside the same call',
+        ],
+    },
+    {
+        version: '2.5.0', date: '2025-10', type: 'feature',
+        items: [
+            '🐙 GitHub sign in / sign up via OAuth Device Flow (no PAT copy-paste needed)',
+            '🔗 One-tap clone of any GitHub repo (public or private) once signed in',
+            '⬆️  Stage → Commit → Push directly to the selected GitHub repo',
+            '🔄 Sync local ↔ GitHub with Fetch / Pull / Push in one place',
+            '🚪 Sign out clears the stored token',
+        ],
+    },
+    {
+        version: '2.4.0', date: '2025-10', type: 'feature',
+        items: [
+            '🔒 Security: HOME removed from allowed external roots (blocks secret exfiltration via symlink)',
+            '🌊 Streaming responses now actually stream when the toggle is ON',
+            '⌨️  Keyboard shortcuts no longer fire while typing in inputs',
+            '🧰 Single source of truth for AI_TOOLS (server-side)',
+            '🔀 New rebase endpoint (POST git-rebase API)',
+            '🩺 ds-update refuses to run with local commits instead of silently corrupting',
+            '🐛 Fixed TOML compile recipe',
+            '✨ Stale-while-revalidate service worker',
+        ],
+    },
     {
         version: '2.3.0', date: '2025-10', type: 'feature',
         items: [
@@ -133,14 +169,61 @@ const CHANGELOG = [
     },
 ];
 
+const AI_TOOLS = [
+    { type: 'function', function: { name: 'write_file', description: 'Create or overwrite a file. Paths relative to project root.', parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } }, required: ['path', 'content'] } } },
+    { type: 'function', function: { name: 'read_file', description: 'Read file contents', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+    { type: 'function', function: { name: 'list_files', description: 'List files in a directory', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'create_folder', description: 'Create a new folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+    { type: 'function', function: { name: 'delete_file', description: 'Delete a file or folder', parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } } },
+    { type: 'function', function: { name: 'move_file', description: 'Move or rename a file', parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] } } },
+    { type: 'function', function: { name: 'copy_file', description: 'Copy a file', parameters: { type: 'object', properties: { from: { type: 'string' }, to: { type: 'string' } }, required: ['from', 'to'] } } },
+    { type: 'function', function: { name: 'apply_patch', description: 'Edit an existing file by finding a unique search string and replacing it. Include 3-5 lines of context.', parameters: { type: 'object', properties: { path: { type: 'string' }, search: { type: 'string' }, replace: { type: 'string' }, replace_all: { type: 'boolean' } }, required: ['path', 'search', 'replace'] } } },
+    { type: 'function', function: { name: 'grep_search', description: 'Search for a regex pattern in files', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' }, ignoreCase: { type: 'boolean' } }, required: ['pattern'] } } },
+    { type: 'function', function: { name: 'find_files', description: 'Find files matching a glob pattern', parameters: { type: 'object', properties: { pattern: { type: 'string' }, path: { type: 'string' } }, required: ['pattern'] } } },
+    { type: 'function', function: { name: 'run_command', description: 'Run any shell command in Termux. Set background=true for servers/watchers.', parameters: { type: 'object', properties: { command: { type: 'string' }, cwd: { type: 'string' }, background: { type: 'boolean' } }, required: ['command'] } } },
+    { type: 'function', function: { name: 'notify', description: 'Send an Android notification.', parameters: { type: 'object', properties: { title: { type: 'string' }, message: { type: 'string' } }, required: ['message'] } } },
+    { type: 'function', function: { name: 'termux_toast', description: 'Show a quick Android toast popup (<200 chars).', parameters: { type: 'object', properties: { message: { type: 'string' } }, required: ['message'] } } },
+    { type: 'function', function: { name: 'termux_open_url', description: 'Open a URL in the Android default browser.', parameters: { type: 'object', properties: { url: { type: 'string' } }, required: ['url'] } } },
+    { type: 'function', function: { name: 'termux_clipboard_get', description: 'Read the Android system clipboard.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_clipboard_set', description: 'Write text to the Android system clipboard.', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+    { type: 'function', function: { name: 'termux_battery_status', description: 'Get battery percentage, temperature, charging status.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_torch', description: 'Turn the camera flash on or off.', parameters: { type: 'object', properties: { on: { type: 'boolean' } }, required: ['on'] } } },
+    { type: 'function', function: { name: 'termux_vibrate', description: 'Vibrate the phone.', parameters: { type: 'object', properties: { duration: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_volume', description: 'Get or set device volume.', parameters: { type: 'object', properties: { stream: { type: 'string' }, action: { type: 'string' }, volume: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_brightness', description: 'Get or set screen brightness.', parameters: { type: 'object', properties: { level: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_sensor', description: 'List or read device sensors.', parameters: { type: 'object', properties: { sensor: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'termux_tts_speak', description: 'Speak text out loud using Android TTS.', parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] } } },
+    { type: 'function', function: { name: 'termux_dialog', description: 'Native Android dialog.', parameters: { type: 'object', properties: { kind: { type: 'string' }, title: { type: 'string' }, message: { type: 'string' }, default: { type: 'string' }, items: { type: 'array', items: { type: 'string' } } } } } },
+    { type: 'function', function: { name: 'termux_wifi_info', description: 'Get current WiFi SSID, IP, BSSID.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_wifi_scan', description: 'Scan nearby WiFi networks.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_location', description: 'Get GPS/network location.', parameters: { type: 'object', properties: { provider: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'termux_camera_photo', description: 'Take a photo.', parameters: { type: 'object', properties: { path: { type: 'string' }, camera: { type: 'number' } } } } },
+    { type: 'function', function: { name: 'termux_share', description: 'Open the Android share sheet.', parameters: { type: 'object', properties: { file: { type: 'string' }, text: { type: 'string' }, title: { type: 'string' } } } } },
+    { type: 'function', function: { name: 'termux_download', description: 'Download a URL using Android DownloadManager.', parameters: { type: 'object', properties: { url: { type: 'string' }, path: { type: 'string' } }, required: ['url'] } } },
+    { type: 'function', function: { name: 'termux_sms_send', description: 'Send an SMS.', parameters: { type: 'object', properties: { number: { type: 'string' }, message: { type: 'string' } }, required: ['number', 'message'] } } },
+    { type: 'function', function: { name: 'termux_call', description: 'Place a phone call.', parameters: { type: 'object', properties: { number: { type: 'string' } }, required: ['number'] } } },
+    { type: 'function', function: { name: 'termux_contacts', description: 'Read contacts from the device.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_fingerprint', description: 'Prompt for fingerprint authentication.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_storage_info', description: 'Get disk space info.', parameters: { type: 'object', properties: {} } } },
+    { type: 'function', function: { name: 'termux_ir_transmit', description: 'Transmit an IR pattern.', parameters: { type: 'object', properties: { frequency: { type: 'number' }, pattern: { type: 'array', items: { type: 'number' } } }, required: ['pattern'] } } }
+];
+
 /* ─── Directory setup ─── */
 for (const dir of [WORKSPACE, KEYSTORE_DIR]) {
     try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
 }
 try {
+    // Git asks for username first, then password. Reply with a stable
+    // username for token schemes ("x-access-token" is what GitHub wants
+    // for PAT / fine-grained tokens) and the actual token for the
+    // password prompt. Both are provided via env so nothing lands on disk.
     fs.writeFileSync(ASKPASS_HELPER,
         '#!/data/data/com.termux/files/usr/bin/sh\n' +
-        'printf "%s\\n" "${GIT_ASKPASS_TOKEN:-}"\n', { mode: 0o700 });
+        'case "$1" in\n' +
+        '  *[Uu]sername*) printf "%s\\n" "${GIT_ASKPASS_USER:-x-access-token}" ;;\n' +
+        '  *[Pp]assword*) printf "%s\\n" "${GIT_ASKPASS_TOKEN:-}" ;;\n' +
+        '  *) printf "%s\\n" "${GIT_ASKPASS_TOKEN:-}" ;;\n' +
+        'esac\n', { mode: 0o700 });
     fs.chmodSync(ASKPASS_HELPER, 0o700);
 } catch (_) {}
 
@@ -219,7 +302,8 @@ function safeRealPath(p) {
 }
 
 const ALLOWED_EXTERNAL_ROOTS = (() => {
-    const candidates = [HOME, '/storage/emulated/0', '/storage/self/primary', '/sdcard'];
+    // Only phone storage — never Termux home, which contains secrets
+    const candidates = ['/storage/emulated/0', '/storage/self/primary', '/sdcard'];
     const out = new Set();
     for (const c of candidates) {
         try { out.add(fs.realpathSync(c)); } catch (_) {}
@@ -283,9 +367,10 @@ const rateLimitMap = new Map();
 const RATE_LIMIT_PER_MIN = parseInt(process.env.DS_RATE_LIMIT, 10) || 600;
 const LONG_RUNNING = new Set([
     '/api/git/clone', '/api/git/push', '/api/git/pull', '/api/git/pull/rebase',
-    '/api/git/fetch', '/api/exec', '/api/ai/chat', '/api/ai/tool-call',
-    '/api/backup/restore', '/api/deploy/build', '/api/deploy/aab',
-    '/api/deploy/install-tools', '/api/compile',
+    '/api/git/fetch', '/api/git/sync', '/api/git/status/upstream',
+    '/api/exec', '/api/ai/chat', '/api/ai/tool-call',
+    '/api/backup/restore', '/api/deploy/build', '/api/deploy/download',
+    '/api/deploy/upload-to-play', '/api/deploy/install-tools', '/api/compile',
 ]);
 app.use('/api/', (req, res, next) => {
     const ip = req.ip || 'local';
@@ -325,9 +410,6 @@ function run(bin, argv, opts = {}) {
 function termuxCli(cmd, args = [], timeout = 8000) {
     return run(cmd, args, { timeout });
 }
-function shellQuote(s) {
-    return "'" + String(s == null ? '' : s).replace(/'/g, "'\\''") + "'";
-}
 
 /* ═══════════════════════════════════════════════════════════════════
    git
@@ -339,6 +421,7 @@ async function gitLegacy(workdir, args, opts = {}) {
     if (opts.token) {
         env.GIT_ASKPASS = ASKPASS_HELPER;
         env.GIT_ASKPASS_TOKEN = opts.token;
+        env.GIT_ASKPASS_USER = opts.user || 'x-access-token';
     } else {
         env.GIT_ASKPASS = 'echo';
     }
@@ -357,7 +440,7 @@ function getGit(relDir = '') {
     return g.env({
         GIT_TERMINAL_PROMPT: '0',
         GIT_ASKPASS: token ? ASKPASS_HELPER : 'echo',
-        ...(token ? { GIT_ASKPASS_TOKEN: token } : {}),
+        ...(token ? { GIT_ASKPASS_TOKEN: token, GIT_ASKPASS_USER: 'x-access-token' } : {}),
     });
 }
 
@@ -444,7 +527,6 @@ app.get('/api/diagnostics', (_req, res) => {
             externalLinks: true, termuxApiModule: !!termuxApiLib,
             compile: true, license: true,
         },
-        secrets: Object.keys(secrets),
         hasGitHubToken: !!ghToken(),
     });
 });
@@ -467,7 +549,42 @@ app.post('/api/secrets', (req, res) => {
         delete secrets[name]; saveSecrets();
         return res.json({ ok: true, removed: true });
     }
-    if (typeof value !== 'string' || value.length > 4000) return res.status(400).json({ error: 'invalid value' });
+    if (typeof value !== 'string') return res.status(400).json({ error: 'invalid value' });
+    const cap = name === 'google_play_service_account' ? 20000 : 4000;
+    if (value.length > cap) return res.status(400).json({ error: 'invalid value' });
+    // Reject obvious placeholder text before it becomes a silent auth failure.
+    // Covers the specific case from early docs (sk-paste-it-here) plus the
+    // usual shapes of doc placeholders.
+    if (name.endsWith('_key')) {
+        const v = value.trim();
+        const looksLikePlaceholder =
+            /^sk-(paste|your|xxx|abc|test|foo|bar|placeholder|example|insert|enter|add)/i.test(v) ||
+            /(paste-it-here|paste-your|placeholder|example-key|replace-me|change-me|insert-key|your-key-here)/i.test(v) ||
+            /-here$/i.test(v);
+        if (looksLikePlaceholder) {
+            return res.status(400).json({ error: 'Looks like a placeholder — paste the real key' });
+        }
+    }
+
+    // Validate GitHub token format (classic or fine-grained PAT)
+    if (name === 'github_token') {
+        const trimmed = value.trim();
+        if (!/^(ghp_|gho_|ghu_|ghs_|ghr_|github_pat_)/.test(trimmed)) {
+            return res.status(400).json({ error: 'Invalid GitHub token format. Expected ghp_… (classic) or github_pat_… (fine-grained).' });
+        }
+        if (trimmed.length < 20) return res.status(400).json({ error: 'GitHub token too short' });
+    }
+    // Validate Google Play service account JSON structure
+    if (name === 'google_play_service_account') {
+        try {
+            const parsed = JSON.parse(value);
+            if (!parsed.client_email || !parsed.private_key) {
+                return res.status(400).json({ error: 'Service account JSON must contain client_email and private_key' });
+            }
+        } catch (e) {
+            return res.status(400).json({ error: 'Invalid JSON: ' + e.message });
+        }
+    }
     secrets[name] = value.trim();
     saveSecrets();
     res.json({ ok: true });
@@ -743,7 +860,7 @@ const COMPILE_RECIPES = {
     rb:   { cmd: 'ruby -c "$1"', lang: 'ruby' },
     lua:  { cmd: 'luac -p "$1"', lang: 'lua' },
     sql:  { cmd: null, lang: 'sql', note: 'SQL has no generic syntax check' },
-    toml: { cmd: 'python3 -c "import sys;try:\\n    import tomllib as t\\nexcept: import tomli as t\\nt.load(open(sys.argv[1],\'rb\'))" "$1"', lang: 'toml' },
+    toml: { cmd: 'python3 -c "import sys; m=__import__(\\"tomllib\\" if sys.version_info>=(3,11) else \\"tomli\\"); m.load(open(sys.argv[1],\\"rb\\"))" "$1"', lang: 'toml' },
 };
 
 app.post('/api/compile', async (req, res) => {
@@ -1188,8 +1305,6 @@ app.post('/api/ai/tool-call', async (req, res) => {
         }
         /* ────────── Termux:API — storage ────────── */
         case 'termux_storage_info': {
-            const r = await termuxCli('termux-storage-get', [], 100);
-            // storage-get opens a picker — we want df instead
             const d = await run('sh', ['-c', 'df -h /data /storage/emulated/0 2>/dev/null | tail -n +2'], { timeout: 5000 });
             return toolResult(res, !d.failed, 'Storage info read', { raw: d.stdout });
         }
@@ -1400,9 +1515,13 @@ app.post('/api/git/clone', async (req, res) => {
     if (/^https:\/\/(www\.)?github\.com\//i.test(url) && ghToken()) opts.token = ghToken();
     try {
         if (simpleGitFactory) {
-            const g = simpleGitFactory({ baseDir: WORKSPACE });
-            if (opts.token) g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: ASKPASS_HELPER, GIT_ASKPASS_TOKEN: opts.token });
-            else g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' });
+            // Note: simple-git's .env() returns a *new* instance. The old code
+            // called it and threw the result away, so the token never reached
+            // the clone. Reassign it.
+            let g = simpleGitFactory({ baseDir: WORKSPACE });
+            g = opts.token
+                ? g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: ASKPASS_HELPER, GIT_ASKPASS_TOKEN: opts.token, GIT_ASKPASS_USER: 'x-access-token' })
+                : g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' });
             await g.clone(url, name, ['--progress']);
             return res.json(gitOk({ stdout: 'Cloned into ' + name, dir: name }));
         }
@@ -1412,32 +1531,114 @@ app.post('/api/git/clone', async (req, res) => {
 });
 
 app.post('/api/git/push', async (req, res) => {
-    const { cwd, message, commitOnly } = req.body || {};
+    const { cwd, message, commitOnly, setUpstream } = req.body || {};
     const rel = cwd || '';
     const msg = String(message || 'Update').slice(0, 2000);
+    const token = ghToken() || undefined;
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            await g.add(['-A']);
-            let commitOut = '', commitErr = '';
-            try { const c = await g.commit(msg); commitOut = c.commit || 'committed'; }
-            catch (e) {
-                commitErr = redact(e.message || String(e));
-                if (!/nothing to commit|no changes added|no changes/i.test(commitErr)) return res.json({ code: 1, ok: false, stdout: commitOut, stderr: commitErr });
-            }
-            if (commitOnly) return res.json(gitOk({ stdout: commitOut, stderr: commitErr }));
-            const push = await g.push();
-            const pushOut = JSON.stringify(push && push.pushed ? push.pushed : push || {});
-            return res.json(gitOk({ stdout: commitOut + '\n' + pushOut, stderr: commitErr }));
-        }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
-        await gitLegacy(workdir, ['add', '-A']);
-        const commit = await gitLegacy(workdir, ['commit', '-m', msg], { timeout: 60000 });
-        if (commitOnly) return res.json({ code: commit.code, ok: !commit.failed, stdout: commit.stdout, stderr: commit.stderr });
-        if (commit.failed && !/nothing to commit|no changes added/i.test(commit.stdout + commit.stderr)) return res.json({ code: commit.code, ok: false, stdout: commit.stdout, stderr: commit.stderr });
-        const push = await gitLegacy(workdir, ['push'], { timeout: 180000, token: ghToken() || undefined });
-        res.json({ code: push.code, ok: !push.failed, stdout: commit.stdout + push.stdout, stderr: commit.stderr + push.stderr });
+        if (!fs.existsSync(path.join(workdir, '.git'))) {
+            return res.json({ code: 1, ok: false, stdout: '', stderr: 'Not a git repository', committed: false });
+        }
+
+        /* 1. Stage everything and attempt a commit */
+        let commitOut = '', commitErr = '', committed = false, branch = '';
+
+        if (simpleGitFactory) {
+            const g = getGit(rel);
+            try { branch = (await g.branchLocal()).current || ''; } catch (_) {}
+            await g.add(['-A']);
+            try {
+                const c = await g.commit(msg);
+                commitOut = c.commit || 'committed';
+                committed = true;
+            } catch (e) {
+                commitErr = redact(e.message || String(e));
+                if (!/nothing to commit|no changes added|no changes|working tree clean/i.test(commitErr)) {
+                    return res.json({ code: 1, ok: false, stdout: commitOut, stderr: commitErr, committed: false, branch });
+                }
+            }
+        } else {
+            const b = await gitLegacy(workdir, ['branch', '--show-current'], { token });
+            branch = (b.stdout || '').trim();
+            await gitLegacy(workdir, ['add', '-A'], { token });
+            const commit = await gitLegacy(workdir, ['commit', '-m', msg], { timeout: 60000, token });
+            commitOut = commit.stdout || '';
+            commitErr = commit.stderr || '';
+            committed = !commit.failed;
+            if (commit.failed && !/nothing to commit|no changes added|no changes|working tree clean/i.test(commitOut + commitErr)) {
+                return res.json({ code: commit.code, ok: false, stdout: commitOut, stderr: commitErr, committed: false, branch });
+            }
+        }
+
+        if (commitOnly) {
+            return res.json(gitOk({
+                stdout: commitOut || (committed ? 'committed' : 'Nothing to commit'),
+                stderr: commitErr,
+                committed, branch,
+            }));
+        }
+
+        /* 2. Determine origin + upstream state */
+        let hasOrigin = false, hasUpstream = false;
+        if (simpleGitFactory) {
+            const g = getGit(rel);
+            try { hasOrigin = (await g.getRemotes(true)).some((r) => r.name === 'origin'); } catch (_) {}
+            if (hasOrigin && branch) {
+                try { await g.raw(['rev-parse', '--abbrev-ref', branch + '@{upstream}']); hasUpstream = true; } catch (_) {}
+            }
+        } else {
+            hasOrigin = /(^|\s)origin(\s|$)/.test((await gitLegacy(workdir, ['remote', '-v'], { token })).stdout);
+            if (hasOrigin && branch) {
+                const u = await gitLegacy(workdir, ['rev-parse', '--abbrev-ref', branch + '@{upstream}'], { token });
+                hasUpstream = !u.failed;
+            }
+        }
+
+        if (!hasOrigin) {
+            return res.json(gitOk({
+                stdout: commitOut || '(nothing to commit)',
+                stderr: commitErr,
+                committed, branch,
+                pushed: false, reason: 'no-remote',
+                hint: 'Add a remote with /api/git/set-remote, or create a GitHub repo first.',
+            }));
+        }
+        if (!branch) {
+            return res.json({ code: 1, ok: false, stdout: commitOut, stderr: 'Detached HEAD — cannot push.', committed, branch: '' });
+        }
+
+        /* 3. Push — set upstream on first push (or when caller asks) */
+        const wantSetUpstream = !hasUpstream || setUpstream === true;
+        let pushOut = '', pushErr = '';
+        if (simpleGitFactory) {
+            const g = getGit(rel);
+            try {
+                const push = wantSetUpstream
+                    ? await g.push(['-u', 'origin', branch])
+                    : await g.push();
+                pushOut = JSON.stringify(push && push.pushed ? push.pushed : push || {});
+            } catch (e) {
+                pushErr = redact(e.message || String(e));
+                return res.json({ code: 1, ok: false, stdout: commitOut, stderr: pushErr, committed, pushed: false, branch });
+            }
+        } else {
+            const args = wantSetUpstream ? ['push', '-u', 'origin', branch] : ['push'];
+            const push = await gitLegacy(workdir, args, { timeout: 180000, token });
+            pushOut = push.stdout || '';
+            pushErr = push.stderr || '';
+            if (push.failed) {
+                return res.json({ code: push.code, ok: false, stdout: commitOut + pushOut, stderr: pushErr, committed, pushed: false, branch });
+            }
+        }
+
+        res.json(gitOk({
+            stdout: (commitOut ? commitOut + '\n' : '') + pushOut,
+            stderr: commitErr + pushErr,
+            committed, pushed: true, branch,
+            setUpstream: wantSetUpstream,
+        }));
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
@@ -1758,6 +1959,23 @@ app.post('/api/git/revert', async (req, res) => {
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
+app.post('/api/git/rebase', async (req, res) => {
+    const { cwd, onto } = req.body || {};
+    if (!validRef(onto)) return res.status(400).json({ error: 'invalid ref' });
+    try {
+        if (simpleGitFactory) {
+            const g = getGit(cwd || '');
+            try { return res.json(gitOk({ stdout: JSON.stringify(await g.rebase([onto])) })); }
+            catch (e) { const m = redact(e.message || String(e)); return res.json({ code: 1, ok: false, conflicted: /CONFLICT/i.test(m), stdout: '', stderr: m }); }
+        }
+        const workdir = resolveInWorkspace(cwd || '');
+        if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+        const r = await gitLegacy(workdir, ['rebase', onto], { timeout: 120000 });
+        const out = r.stdout + r.stderr;
+        res.json({ code: r.code, ok: !r.failed, conflicted: /CONFLICT|Automatic merge failed/.test(out), stdout: r.stdout, stderr: r.stderr });
+    } catch (e) { res.status(500).json(gitErr(e)); }
+});
+
 /* ─── Tags — with list endpoint that populates the Git panel ─── */
 app.post('/api/git/tags', async (req, res) => {
     const { cwd, action, name, message } = req.body || {};
@@ -1813,6 +2031,262 @@ app.post('/api/git/undo', async (req, res) => {
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
+/* ────────────────────────────────────────────────────────────────────
+   /api/git/status/upstream — how far ahead/behind of origin we are.
+   Optionally fetches first (default true). Returns a single-word "state"
+   so the UI can drive the sync button's label without extra logic.
+   ──────────────────────────────────────────────────────────────────── */
+app.post('/api/git/status/upstream', async (req, res) => {
+    const rel = (req.body || {}).cwd || '';
+    const doFetch = (req.body || {}).fetch !== false;
+    const token = ghToken() || undefined;
+    try {
+        const workdir = resolveInWorkspace(rel);
+        if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+        if (!fs.existsSync(path.join(workdir, '.git'))) {
+            return res.json({ ok: true, isRepo: false, state: 'not-a-repo' });
+        }
+
+        let fetchError = null;
+        if (doFetch && simpleGitFactory) {
+            try { await getGit(rel).fetch(['--quiet']); } catch (e) { fetchError = redact(e.message || String(e)); }
+        } else if (doFetch) {
+            const fr = await gitLegacy(workdir, ['fetch', '--quiet'], { timeout: 60000, token });
+            if (fr.failed) fetchError = redact(fr.stderr || fr.stdout);
+        }
+
+        let branch = '', upstream = '', ahead = 0, behind = 0;
+        let hasRemote = false, hasUpstream = false;
+
+        if (simpleGitFactory) {
+            const g = getGit(rel);
+            try { branch = (await g.branchLocal()).current || ''; } catch (_) {}
+            try { hasRemote = (await g.getRemotes(true)).some((r) => r.name === 'origin'); } catch (_) {}
+            if (branch && hasRemote) {
+                try {
+                    upstream = (await g.raw(['rev-parse', '--abbrev-ref', branch + '@{upstream}'])).trim();
+                    hasUpstream = true;
+                } catch (_) {}
+            }
+            if (hasUpstream) {
+                try {
+                    const counts = (await g.raw(['rev-list', '--left-right', '--count', branch + '...' + upstream])).trim();
+                    const parts = counts.split(/\s+/).map((x) => parseInt(x, 10) || 0);
+                    ahead = parts[0] || 0; behind = parts[1] || 0;
+                } catch (_) {}
+            }
+        } else {
+            branch = (await gitLegacy(workdir, ['branch', '--show-current'], { token })).stdout.trim();
+            hasRemote = /(^|\s)origin(\s|$)/.test((await gitLegacy(workdir, ['remote', '-v'], { token })).stdout);
+            if (branch && hasRemote) {
+                const u = await gitLegacy(workdir, ['rev-parse', '--abbrev-ref', branch + '@{upstream}'], { token });
+                if (!u.failed) { upstream = (u.stdout || '').trim(); hasUpstream = true; }
+            }
+            if (hasUpstream) {
+                const counts = (await gitLegacy(workdir, ['rev-list', '--left-right', '--count', branch + '...' + upstream], { token })).stdout.trim();
+                const parts = counts.split(/\s+/).map((x) => parseInt(x, 10) || 0);
+                ahead = parts[0] || 0; behind = parts[1] || 0;
+            }
+        }
+
+        let dirty = false;
+        if (simpleGitFactory) {
+            try { dirty = (await getGit(rel).status()).files.length > 0; } catch (_) {}
+        } else {
+            dirty = (await gitLegacy(workdir, ['status', '--porcelain'], { token })).stdout.trim().length > 0;
+        }
+
+        const state = !hasRemote ? 'no-remote'
+            : !hasUpstream ? 'no-upstream'
+            : (ahead > 0 && behind > 0) ? 'diverged'
+            : ahead > 0 ? 'ahead'
+            : behind > 0 ? 'behind'
+            : 'up-to-date';
+
+        res.json({ ok: true, isRepo: true, branch, upstream, ahead, behind, dirty, hasRemote, hasUpstream, state, fetchError });
+    } catch (e) { res.status(500).json({ error: redact(e.message) }); }
+});
+
+/* ────────────────────────────────────────────────────────────────────
+   /api/git/remote-info — parse the origin URL for display.
+   Detects GitHub / GitLab / Bitbucket, HTTPS vs SSH, and returns a
+   clickable web URL when the host is recognised.
+   ──────────────────────────────────────────────────────────────────── */
+app.post('/api/git/remote-info', async (req, res) => {
+    const rel = (req.body || {}).cwd || '';
+    const token = ghToken() || undefined;
+    try {
+        const workdir = resolveInWorkspace(rel);
+        if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+        const r = await gitLegacy(workdir, ['remote', '-v'], { token });
+        const lines = r.stdout.split('\n').filter(Boolean);
+        const map = {};
+        for (const line of lines) {
+            const parts = line.split(/\s+/);
+            if (parts.length < 3) continue;
+            const [name, url, type] = parts;
+            if (!map[name]) map[name] = { name, fetchUrl: '', pushUrl: '' };
+            if (type === '(fetch)') map[name].fetchUrl = url;
+            if (type === '(push)')  map[name].pushUrl  = url;
+        }
+        const out = Object.values(map).map((r) => {
+            const url = r.pushUrl || r.fetchUrl || '';
+            let provider = 'other', webUrl = null;
+            const m = url.match(/github\.com[:/]+([^/]+)\/([^/]+?)(?:\.git)?$/i);
+            if (m) { provider = 'github'; webUrl = 'https://github.com/' + m[1] + '/' + m[2]; }
+            else if (/gitlab\.com[:/]/i.test(url)) provider = 'gitlab';
+            else if (/bitbucket\.org[:/]/i.test(url)) provider = 'bitbucket';
+            const protocol = /^https?:\/\//i.test(url) ? 'https'
+                : /^git@/i.test(url) ? 'ssh'
+                : /^ssh:\/\//i.test(url) ? 'ssh'
+                : /^git:\/\//i.test(url) ? 'git'
+                : 'other';
+            return { name: r.name, fetchUrl: r.fetchUrl, pushUrl: r.pushUrl, provider, protocol, webUrl };
+        });
+        res.json({ remotes: out });
+    } catch (e) { res.status(500).json({ error: redact(e.message) }); }
+});
+
+/* ────────────────────────────────────────────────────────────────────
+   POST /api/git/sync — smart two-way sync with origin.
+   Body: { cwd, strategy?: 'auto'|'rebase'|'merge', allowDirty?: boolean }
+
+     1. Refuse if the working tree is dirty (unless allowDirty:true).
+     2. Fetch origin.
+     3. Compute ahead/behind.
+     4. Only behind → pull --ff-only.
+     5. Only ahead  → push.
+     6. Diverged    → if strategy == 'auto', return the diverged state
+                      and let the caller choose. Otherwise run
+                      `pull --rebase` (rebase) or `pull --no-rebase` (merge),
+                      and push afterwards for rebase.
+     7. Report the final state.
+   ──────────────────────────────────────────────────────────────────── */
+app.post('/api/git/sync', async (req, res) => {
+    const body = req.body || {};
+    const rel = body.cwd || '';
+    const strategy = String(body.strategy || 'auto').toLowerCase();
+    const allowDirty = body.allowDirty === true;
+    const token = ghToken() || undefined;
+    const steps = [];
+
+    try {
+        const workdir = resolveInWorkspace(rel);
+        if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+        if (!fs.existsSync(path.join(workdir, '.git'))) {
+            return res.json({ ok: false, state: 'not-a-repo', error: 'Not a git repository', steps });
+        }
+
+        /* 0. Dirty check */
+        const dirtyProbe = await gitLegacy(workdir, ['status', '--porcelain'], { timeout: 15000, token });
+        const dirty = dirtyProbe.stdout.trim().length > 0;
+        if (dirty && !allowDirty) {
+            return res.json({
+                ok: false, state: 'dirty', dirty: true,
+                error: 'Working tree has uncommitted changes. Commit or stash first.',
+                steps,
+            });
+        }
+
+        /* 1. Fetch */
+        const fetched = await gitLegacy(workdir, ['fetch', '--quiet', 'origin'], { timeout: 120000, token });
+        steps.push({ step: 'fetch', ok: !fetched.failed, detail: fetched.failed ? redact(fetched.stderr || fetched.stdout) : 'ok' });
+        if (fetched.failed) {
+            return res.json({ ok: false, state: 'error', error: 'Fetch failed: ' + redact(fetched.stderr || fetched.stdout), steps });
+        }
+
+        /* 2. Branch + upstream + counts */
+        const branch = (await gitLegacy(workdir, ['branch', '--show-current'], { token })).stdout.trim();
+        if (!branch) return res.json({ ok: false, state: 'detached', error: 'Detached HEAD', steps });
+
+        const up = await gitLegacy(workdir, ['rev-parse', '--abbrev-ref', branch + '@{upstream}'], { token });
+        if (up.failed) {
+            const ls = await gitLegacy(workdir, ['ls-remote', '--heads', 'origin', branch], { token });
+            if (/refs\/heads\//.test(ls.stdout)) {
+                await gitLegacy(workdir, ['branch', '--set-upstream-to', 'origin/' + branch, branch], { token });
+                steps.push({ step: 'set-upstream', ok: true, detail: 'origin/' + branch });
+            } else {
+                const push = await gitLegacy(workdir, ['push', '-u', 'origin', branch], { timeout: 180000, token });
+                steps.push({ step: 'push-initial', ok: !push.failed, detail: push.failed ? redact(push.stderr || push.stdout) : 'ok' });
+                return res.json({
+                    ok: !push.failed,
+                    state: push.failed ? 'error' : 'pushed-initial',
+                    branch, ahead: 0, behind: 0, steps,
+                    output: redact((push.stdout || '') + (push.stderr ? '\n' + push.stderr : '')),
+                });
+            }
+        }
+        const upstream = (await gitLegacy(workdir, ['rev-parse', '--abbrev-ref', branch + '@{upstream}'], { token })).stdout.trim();
+        const counts = (await gitLegacy(workdir, ['rev-list', '--left-right', '--count', branch + '...' + upstream], { token })).stdout.trim();
+        const [ahead, behind] = counts.split(/\s+/).map((x) => parseInt(x, 10) || 0);
+        steps.push({ step: 'compare', ok: true, detail: 'ahead ' + ahead + ', behind ' + behind });
+
+        /* 3. Up to date */
+        if (ahead === 0 && behind === 0) {
+            return res.json({ ok: true, state: 'up-to-date', branch, upstream, ahead, behind, steps });
+        }
+
+        /* 4. Behind only — fast-forward pull */
+        if (behind > 0 && ahead === 0) {
+            const pull = await gitLegacy(workdir, ['pull', '--ff-only', '--no-edit'], { timeout: 180000, token });
+            steps.push({ step: 'pull-ff', ok: !pull.failed, detail: pull.failed ? redact(pull.stderr || pull.stdout) : 'ok' });
+            return res.json({
+                ok: !pull.failed,
+                state: pull.failed ? 'error' : 'pulled',
+                branch, upstream, ahead: 0, behind, steps,
+                output: redact((pull.stdout || '') + (pull.stderr ? '\n' + pull.stderr : '')),
+            });
+        }
+
+        /* 5. Ahead only — push */
+        if (ahead > 0 && behind === 0) {
+            const push = await gitLegacy(workdir, ['push'], { timeout: 180000, token });
+            steps.push({ step: 'push', ok: !push.failed, detail: push.failed ? redact(push.stderr || push.stdout) : 'ok' });
+            return res.json({
+                ok: !push.failed,
+                state: push.failed ? 'error' : 'pushed',
+                branch, upstream, ahead, behind: 0, steps,
+                output: redact((push.stdout || '') + (push.stderr ? '\n' + push.stderr : '')),
+            });
+        }
+
+        /* 6. Diverged */
+        if (strategy === 'auto') {
+            return res.json({
+                ok: false, state: 'diverged',
+                error: 'Local and remote have diverged. Choose a strategy: "rebase" or "merge".',
+                branch, upstream, ahead, behind, steps,
+            });
+        }
+        const pullArgs = strategy === 'rebase'
+            ? ['pull', '--rebase', '--no-edit']
+            : ['pull', '--no-rebase', '--no-edit'];
+        const pull = await gitLegacy(workdir, pullArgs, { timeout: 180000, token });
+        const conflicted = /CONFLICT|Automatic merge failed|needs merge/i.test(pull.stdout + pull.stderr);
+        steps.push({ step: 'pull-' + strategy, ok: !pull.failed, detail: pull.failed ? redact(pull.stderr || pull.stdout) : 'ok', conflicted });
+        if (pull.failed) {
+            return res.json({
+                ok: false, state: conflicted ? 'conflict' : 'error', conflicted,
+                branch, upstream, ahead, behind, steps,
+                output: redact((pull.stdout || '') + (pull.stderr ? '\n' + pull.stderr : '')),
+            });
+        }
+        if (strategy === 'rebase') {
+            const push = await gitLegacy(workdir, ['push'], { timeout: 180000, token });
+            steps.push({ step: 'push-after-rebase', ok: !push.failed, detail: push.failed ? redact(push.stderr || push.stdout) : 'ok' });
+            return res.json({
+                ok: !push.failed, state: push.failed ? 'error' : 'synced',
+                branch, upstream, ahead: 0, behind: 0, steps,
+                output: redact((pull.stdout || '') + '\n' + (push.stdout || '') + (push.stderr ? '\n' + push.stderr : '')),
+            });
+        }
+        return res.json({
+            ok: true, state: 'synced', branch, upstream, ahead: 0, behind: 0, steps,
+            output: redact(pull.stdout || ''),
+        });
+    } catch (e) { res.status(500).json({ error: redact(e.message), steps }); }
+});
+
 app.post('/api/git/auto-init', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
     const workdir = resolveInWorkspace(rel);
@@ -1850,6 +2324,105 @@ app.post('/api/git/auto-commit', async (req, res) => {
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
+/**
+ * POST /api/git/auto-repo
+ * Fully automated repo setup in one call:
+ *   1. git init (branch main) if missing
+ *   2. ensure user.name / user.email are set
+ *   3. write a default .gitignore if none exists
+ *   4. stage everything and make a baseline commit (skipped if no changes)
+ *   5. optionally create a GitHub repo and set it as `origin`
+ * Body: { cwd, remoteUrl?, createGitHub?, repoName?, isPrivate?, initialMessage? }
+ */
+app.post('/api/git/auto-repo', async (req, res) => {
+    const body = req.body || {};
+    const rel = body.cwd || '';
+    const workdir = resolveInWorkspace(rel);
+    if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+
+    const steps = [];
+    const useFluent = !!simpleGitFactory;
+    const git = (...args) => (useFluent ? getGit(rel).raw(args) : gitLegacy(workdir, args, { timeout: 60000 }));
+
+    try {
+        /* 1. init */
+        const gitDir = path.join(workdir, '.git');
+        if (fs.existsSync(gitDir)) {
+            steps.push({ step: 'init', status: 'skipped', detail: 'already a repo' });
+        } else {
+            try { await git('init', '-b', 'main'); } catch (_) { await git('init'); }
+            steps.push({ step: 'init', status: 'ok', detail: 'initialized on main' });
+        }
+
+        /* 2. identity */
+        const idName = (body.name || process.env.GIT_AUTHOR_NAME || 'DeepSeek Studio').toString();
+        const idEmail = (body.email || process.env.GIT_AUTHOR_EMAIL || 'deepseek@localhost').toString();
+        try {
+            const curName = (await git('config', '--get', 'user.name').catch(() => '')).trim();
+            const curEmail = (await git('config', '--get', 'user.email').catch(() => '')).trim();
+            if (!curName) await git('config', 'user.name', idName);
+            if (!curEmail) await git('config', 'user.email', idEmail);
+            steps.push({ step: 'identity', status: 'ok', detail: idName + ' <' + idEmail + '>' });
+        } catch (e) {
+            steps.push({ step: 'identity', status: 'warn', detail: redact(e.message) });
+        }
+
+        /* 3. .gitignore */
+        const gitignorePath = path.join(workdir, '.gitignore');
+        if (!fs.existsSync(gitignorePath)) {
+            const ignore = [
+                'node_modules/', 'dist/', 'build/', '.next/', '.dart_tool/',
+                '*.log', '.env', '.env.*', '!.env.example',
+                '.DS_Store', 'Thumbs.db', '.idea/', '.vscode/', 'coverage/',
+                '*.keystore', '*.jks', '*.apk', '*.aab',
+                '',
+            ].join('\n');
+            fs.writeFileSync(gitignorePath, ignore);
+            steps.push({ step: 'gitignore', status: 'ok', detail: 'written' });
+        } else {
+            steps.push({ step: 'gitignore', status: 'skipped', detail: 'exists' });
+        }
+
+        /* 4. stage + baseline commit */
+        await git('add', '-A');
+        const status = await git('status', '--porcelain').catch(() => '');
+        if (String(status).trim()) {
+            const message = body.initialMessage || ('chore: initial commit — ' + new Date().toISOString().slice(0, 10));
+            await git('commit', '-m', message);
+            steps.push({ step: 'commit', status: 'ok', detail: message });
+        } else {
+            steps.push({ step: 'commit', status: 'skipped', detail: 'nothing to commit' });
+        }
+
+        /* 5. optional GitHub remote */
+        let remoteUrl = body.remoteUrl || '';
+        if (!remoteUrl && body.createGitHub && ghToken()) {
+            const repoName = (body.repoName || path.basename(workdir) || 'project').replace(/[^a-zA-Z0-9._-]/g, '-');
+            const created = await githubApi('/user/repos', {
+                method: 'POST',
+                body: JSON.stringify({ name: repoName, description: body.description || '', private: body.isPrivate !== false, auto_init: false }),
+            });
+            if (created.ok && created.data && created.data.clone_url) {
+                remoteUrl = created.data.clone_url;
+                steps.push({ step: 'create-github', status: 'ok', detail: created.data.full_name || repoName });
+            } else {
+                steps.push({ step: 'create-github', status: 'warn', detail: (created.data && created.data.message) || 'create failed' });
+            }
+        }
+        if (remoteUrl) {
+            await git('remote', 'remove', 'origin').catch(() => {});
+            await git('remote', 'add', 'origin', remoteUrl);
+            steps.push({ step: 'remote', status: 'ok', detail: redact(remoteUrl) });
+        } else {
+            steps.push({ step: 'remote', status: 'skipped', detail: 'no remote configured' });
+        }
+
+        res.json(gitOk({ ok: true, steps, remoteUrl: remoteUrl ? redact(remoteUrl) : '' }));
+    } catch (e) {
+        res.status(500).json(Object.assign(gitErr(e), { steps }));
+    }
+});
+
 /* ═══════════════════════════════════════════════════════════════════
    GitHub REST API
    ═══════════════════════════════════════════════════════════════════ */
@@ -1863,10 +2436,22 @@ async function githubApi(pathname, options = {}) {
         'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION,
     }, options.headers || {});
     const res = await fetchWithRetry('https://api.github.com' + pathname, Object.assign({}, options, { headers }), { retries: 1, timeout: 30000 });
+
+    // Rate-limit awareness: brief back-off to GitHub's reset window, then retry once
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    const resetAt = res.headers.get('x-ratelimit-reset');
+    if (remaining === '0' && resetAt && !options._rateRetry) {
+        const waitMs = Math.max(1000, (parseInt(resetAt, 10) * 1000) - Date.now());
+        if (waitMs < 60000) {
+            await new Promise((r) => setTimeout(r, waitMs));
+            return githubApi(pathname, Object.assign({}, options, { _rateRetry: true }));
+        }
+    }
+
     let data = null;
     const text = await res.text();
     try { data = text ? JSON.parse(text) : null; } catch (_) { data = { raw: text }; }
-    return { ok: res.ok, status: res.status, data };
+    return { ok: res.ok, status: res.status, data, rateLimit: { remaining, resetAt } };
 }
 
 app.get('/api/github/status', async (_req, res) => {
@@ -1879,6 +2464,110 @@ app.get('/api/github/status', async (_req, res) => {
     const r = await githubApi('/user');
     if (!r.ok) return res.json({ connected: false, error: r.data && r.data.message });
     res.json({ connected: true, login: r.data.login, name: r.data.name, avatar: r.data.avatar_url, publicRepos: r.data.public_repos });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GitHub Sign in / Sign up — OAuth Device Flow
+   ─────────────────────────────────────────────────────────────────
+   The device flow is ideal for Termux: no redirect URL / client secret
+   is required, and the user just enters a short code on github.com/login/device.
+   Any GitHub account (new or existing) can grant access here — which
+   covers both "sign up" and "sign in" in a single flow.
+
+   A default public OAuth App client_id is used unless the user supplies
+   their own via DS_GITHUB_CLIENT_ID (env) or the github_client_id secret.
+   ═══════════════════════════════════════════════════════════════════ */
+const GH_DEVICE_CODE_URL = 'https://github.com/login/device/code';
+const GH_TOKEN_URL = 'https://github.com/login/oauth/access_token';
+// Public OAuth App client_id (device-flow only, no client secret). Override via env/secret.
+const DEFAULT_GH_CLIENT_ID = process.env.DS_GITHUB_CLIENT_ID || 'Ov23liFZ2XqTa0eGnqJd';
+if (!process.env.DS_GITHUB_CLIENT_ID && !String(secrets.github_client_id || '').trim()) {
+    console.warn('[github] Using built-in OAuth client_id — device-flow sign-in will fail if that app is revoked.');
+    console.warn('[github] Register your own at https://github.com/settings/developers → OAuth Apps → Enable Device Flow');
+    console.warn('[github] Then set DS_GITHUB_CLIENT_ID or save a github_client_id secret.');
+}
+
+function ghClientId() {
+    const fromSecret = String(secrets.github_client_id || '').trim();
+    return fromSecret || DEFAULT_GH_CLIENT_ID;
+}
+// Pending device-flow sessions: device_code -> { userCode, interval, expiresAt, clientId }
+const ghDeviceSessions = new Map();
+setInterval(() => {
+    const now = Date.now();
+    for (const [code, s] of ghDeviceSessions) if (now > s.expiresAt) ghDeviceSessions.delete(code);
+}, 60 * 1000).unref();
+
+app.post('/api/github/device/start', async (req, res) => {
+    const clientId = ghClientId();
+    if (!clientId) return res.status(500).json({ error: 'No GitHub OAuth client_id configured. Set DS_GITHUB_CLIENT_ID or the github_client_id secret.' });
+    const scope = String((req.body || {}).scope || 'repo read:user user:email workflow').trim();
+    try {
+        const r = await fetchWithRetry(GH_DEVICE_CODE_URL, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION },
+            body: JSON.stringify({ client_id: clientId, scope }),
+        }, { retries: 1, timeout: 20000 });
+        const data = await r.json().catch(() => ({}));
+        if (!r.ok || data.error) return res.status(r.status || 500).json({ error: redact(data.error_description || data.error || 'device code request failed') });
+        ghDeviceSessions.set(data.device_code, {
+            userCode: data.user_code,
+            interval: Math.max(5, parseInt(data.interval, 10) || 5),
+            expiresAt: Date.now() + (parseInt(data.expires_in, 10) || 900) * 1000,
+            clientId,
+        });
+        res.json({
+            deviceCode: data.device_code,
+            userCode: data.user_code,
+            verificationUri: data.verification_uri || 'https://github.com/login/device',
+            verificationUriComplete: data.verification_uri_complete || (data.verification_uri || 'https://github.com/login/device') + '?user_code=' + data.user_code,
+            expiresIn: data.expires_in,
+            interval: Math.max(5, parseInt(data.interval, 10) || 5),
+        });
+    } catch (e) { res.status(500).json({ error: redact(e.message) }); }
+});
+
+app.post('/api/github/device/poll', async (req, res) => {
+    const deviceCode = String((req.body || {}).deviceCode || '').trim();
+    if (!deviceCode) return res.status(400).json({ error: 'deviceCode required' });
+    const session = ghDeviceSessions.get(deviceCode);
+    if (!session) return res.status(400).json({ error: 'expired_or_unknown', status: 'expired' });
+    if (Date.now() > session.expiresAt) { ghDeviceSessions.delete(deviceCode); return res.json({ status: 'expired' }); }
+    try {
+        const r = await fetchWithRetry(GH_TOKEN_URL, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION },
+            body: JSON.stringify({ client_id: session.clientId, device_code: deviceCode, grant_type: 'urn:ietf:params:oauth:grant-type:device_code' }),
+        }, { retries: 0, timeout: 20000 });
+        const data = await r.json().catch(() => ({}));
+        if (data.error === 'authorization_pending') return res.json({ status: 'pending', interval: session.interval });
+        if (data.error === 'slow_down') { session.interval += 5; return res.json({ status: 'pending', interval: session.interval }); }
+        if (data.error === 'expired_token') { ghDeviceSessions.delete(deviceCode); return res.json({ status: 'expired' }); }
+        if (data.error === 'access_denied') { ghDeviceSessions.delete(deviceCode); return res.json({ status: 'denied' }); }
+        if (data.error || !data.access_token) return res.json({ status: 'error', error: redact(data.error_description || data.error || 'token exchange failed') });
+        // Persist the token exactly like a manually-entered PAT
+        secrets.github_token = String(data.access_token).trim();
+        saveSecrets();
+        ghDeviceSessions.delete(deviceCode);
+        // Resolve the authenticated user for a friendly confirmation
+        let user = null;
+        try {
+            const u = await githubApi('/user');
+            if (u.ok) user = { login: u.data.login, name: u.data.name, avatar: u.data.avatar_url };
+        } catch (_) {}
+        res.json({ status: 'authorized', scope: data.scope || '', tokenType: data.token_type || 'bearer', user });
+    } catch (e) { res.status(500).json({ status: 'error', error: redact(e.message) }); }
+});
+
+app.post('/api/github/signout', (req, res) => {
+    const keepIdentity = (req.body || {}).keepIdentity === true;
+    delete secrets.github_token;
+    saveSecrets();
+    res.json({ ok: true, keptIdentity: keepIdentity });
+});
+
+app.get('/api/github/device/config', (_req, res) => {
+    res.json({ clientIdConfigured: !!ghClientId(), clientIdSource: secrets.github_client_id ? 'secret' : (process.env.DS_GITHUB_CLIENT_ID ? 'env' : 'default') });
 });
 
 app.get('/api/github/repos', async (req, res) => {
@@ -1960,6 +2649,95 @@ app.post('/api/github/list-prs', async (req, res) => {
 });
 
 /* ═══════════════════════════════════════════════════════════════════
+   GitHub Releases — create release + upload AAB/APK assets
+   ═══════════════════════════════════════════════════════════════════ */
+app.post('/api/github/create-release', async (req, res) => {
+    const { cwd, tag, name, body, draft, prerelease, artifacts } = req.body || {};
+    if (!tag || !/^[A-Za-z0-9._/-]{1,100}$/.test(tag)) return res.status(400).json({ error: 'invalid tag name' });
+    try {
+        const g = getGit(cwd || '');
+        const remoteUrl = (await g.remote(['get-url', 'origin'])) || '';
+        const slug = parseRepoSlug(remoteUrl.trim());
+        if (!slug) return res.status(400).json({ error: 'origin is not a GitHub remote' });
+        const [owner, repo] = slug.split('/');
+
+        const gh = getOctokit();
+        let release;
+
+        if (gh) {
+            const { data } = await gh.repos.createRelease({
+                owner, repo,
+                tag_name: tag,
+                name: name || tag,
+                body: body || '',
+                draft: draft === true,
+                prerelease: prerelease === true,
+            });
+            release = data;
+
+            if (Array.isArray(artifacts) && artifacts.length) {
+                for (const artifactPath of artifacts) {
+                    const abs = resolveInWorkspace(artifactPath);
+                    if (!abs || !fs.existsSync(abs)) continue;
+                    const assetData = fs.readFileSync(abs);
+                    const fileName = path.basename(abs);
+                    const mime = /\.aab$/i.test(fileName)
+                        ? 'application/octet-stream'
+                        : /\.apk$/i.test(fileName)
+                            ? 'application/vnd.android.package-archive'
+                            : 'application/octet-stream';
+                    await gh.repos.uploadReleaseAsset({
+                        owner, repo,
+                        release_id: release.id,
+                        name: fileName,
+                        data: assetData,
+                        headers: { 'content-type': mime, 'content-length': assetData.length },
+                    });
+                }
+            }
+        } else {
+            const r = await githubApi('/repos/' + slug + '/releases', {
+                method: 'POST',
+                body: JSON.stringify({ tag_name: tag, name: name || tag, body: body || '', draft: draft === true, prerelease: prerelease === true }),
+            });
+            if (!r.ok) return res.status(r.status).json({ error: (r.data && r.data.message) || 'Release creation failed' });
+            release = r.data;
+
+            if (Array.isArray(artifacts) && artifacts.length) {
+                const uploadUrl = String(release.upload_url).replace(/\{[^}]*\}$/, '');
+                for (const artifactPath of artifacts) {
+                    const abs = resolveInWorkspace(artifactPath);
+                    if (!abs || !fs.existsSync(abs)) continue;
+                    const assetData = fs.readFileSync(abs);
+                    const fileName = path.basename(abs);
+                    const assetRes = await fetchWithRetry(
+                        uploadUrl + '?name=' + encodeURIComponent(fileName),
+                        {
+                            method: 'POST',
+                            headers: {
+                                'Authorization': 'Bearer ' + ghToken(),
+                                'Content-Type': 'application/octet-stream',
+                                'Accept': 'application/vnd.github+json',
+                            },
+                            body: assetData,
+                        },
+                        { retries: 0, timeout: 120000 }
+                    );
+                    if (!assetRes.ok) {
+                        const err = await assetRes.text().catch(() => '');
+                        console.error('[release] asset upload failed:', err.slice(0, 200));
+                    }
+                }
+            }
+        }
+
+        res.json({ ok: true, release: { id: release.id, tag: release.tag_name, url: release.html_url, uploadUrl: release.upload_url } });
+    } catch (e) {
+        res.status(500).json({ error: redact(e.message) });
+    }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
    AI proxy
    ═══════════════════════════════════════════════════════════════════ */
 const AI_PROVIDERS = {
@@ -1984,6 +2762,8 @@ app.get('/api/ai/providers', (_req, res) => {
         configured: !!String(secrets[cfg.keyName] || '').trim(),
     })));
 });
+
+app.get('/api/ai/tools', (_req, res) => res.json({ tools: AI_TOOLS }));
 
 app.post('/api/ai/chat', async (req, res) => {
     const { provider, messages, tools, toolChoice, model, temperature, maxTokens, stream } = req.body || {};
@@ -2022,7 +2802,13 @@ app.post('/api/ai/stream', async (req, res) => {
     let upstream;
     try { upstream = await fetchWithRetry(p.cfg.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key }, body: JSON.stringify(payload) }, { retries: 1, timeout: 180000 }); }
     catch (err) { return res.status(502).json({ error: redact(err.message) }); }
-    if (!upstream.ok) return res.status(upstream.status).json({ error: 'Provider error ' + upstream.status });
+    if (!upstream.ok) {
+        const text = await upstream.text().catch(() => '');
+        return res.status(upstream.status).json({
+            error: 'Provider error ' + upstream.status,
+            detail: redact(text).slice(0, 800),
+        });
+    }
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -2216,12 +3002,41 @@ app.post('/api/deploy/build', async (req, res) => {
     const aliasName = String(alias || keystore || 'release');
     const pw = password || '';
     let cmd, cwdForRun, artifactPath;
+    // Ephemeral signing files we create/append to — restored or deleted after the build
+    const ephemeralFiles = [];
+    const touchEphemeral = (file) => {
+        const bak = file + '.ds-bak';
+        try {
+            if (fs.existsSync(file)) { if (!fs.existsSync(bak)) fs.copyFileSync(file, bak); }
+            else { fs.writeFileSync(bak, '', 'utf8'); } // sentinel: file did not exist
+            fs.chmodSync(bak, 0o600);
+            ephemeralFiles.push(file);
+        } catch (_) {}
+    };
+    const cleanupEphemeral = () => {
+        for (const file of ephemeralFiles) {
+            const bak = file + '.ds-bak';
+            try {
+                if (fs.existsSync(bak)) {
+                    if (fs.statSync(bak).size === 0 && !fs.existsSync(file)) { /* nothing */ }
+                    if (fs.statSync(bak).size === 0) { fs.unlinkSync(file); }
+                    else { fs.copyFileSync(bak, file); }
+                    fs.unlinkSync(bak);
+                } else if (fs.existsSync(file)) {
+                    fs.unlinkSync(file);
+                }
+            } catch (_) {}
+        }
+        ephemeralFiles.length = 0;
+    };
     if (projectType === 'flutter') {
         cwdForRun = workdir;
         if (keystorePath && fs.existsSync(keystorePath)) {
             const keyPropsPath = path.join(workdir, 'android', 'key.properties');
             fs.mkdirSync(path.dirname(keyPropsPath), { recursive: true });
+            touchEphemeral(keyPropsPath);
             fs.writeFileSync(keyPropsPath, 'storePassword=' + pw + '\nkeyPassword=' + pw + '\nkeyAlias=' + aliasName + '\nstoreFile=' + keystorePath + '\n', 'utf8');
+            fs.chmodSync(keyPropsPath, 0o600);
         }
         cmd = wantAab ? 'flutter build appbundle --release 2>&1' : 'flutter build apk --release 2>&1';
         artifactPath = wantAab ? path.join(workdir, 'build', 'app', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(workdir, 'build', 'app', 'outputs', 'flutter-apk', 'app-release.apk');
@@ -2231,8 +3046,10 @@ app.post('/api/deploy/build', async (req, res) => {
         if (keystorePath && fs.existsSync(keystorePath)) {
             const gradleProps = path.join(androidDir, 'gradle.properties');
             let props = fs.existsSync(gradleProps) ? fs.readFileSync(gradleProps, 'utf8') : '';
+            touchEphemeral(gradleProps);
             props += '\nDEEPSEEK_STORE_FILE=' + keystorePath + '\nDEEPSEEK_KEY_ALIAS=' + aliasName + '\nDEEPSEEK_STORE_PASSWORD=' + pw + '\nDEEPSEEK_KEY_PASSWORD=' + pw + '\n';
             fs.writeFileSync(gradleProps, props, 'utf8');
+            fs.chmodSync(gradleProps, 0o600);
         }
         cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
         artifactPath = wantAab ? path.join(androidDir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
@@ -2241,14 +3058,22 @@ app.post('/api/deploy/build', async (req, res) => {
         if (keystorePath && fs.existsSync(keystorePath)) {
             const gradleProps = path.join(workdir, 'gradle.properties');
             let props = fs.existsSync(gradleProps) ? fs.readFileSync(gradleProps, 'utf8') : '';
+            touchEphemeral(gradleProps);
             props += '\nDEEPSEEK_STORE_FILE=' + keystorePath + '\nDEEPSEEK_KEY_ALIAS=' + aliasName + '\nDEEPSEEK_STORE_PASSWORD=' + pw + '\nDEEPSEEK_KEY_PASSWORD=' + pw + '\n';
             fs.writeFileSync(gradleProps, props, 'utf8');
+            fs.chmodSync(gradleProps, 0o600);
         }
         cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
         artifactPath = wantAab ? path.join(workdir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(workdir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
     }
-    const r = await run('sh', ['-c', cmd], { cwd: cwdForRun, timeout: 900000, maxBuffer: 50 * 1024 * 1024 });
-    const out = redact(r.stdout + (r.stderr ? '\n' + r.stderr : ''));
+    let r, out;
+    try {
+        r = await run('sh', ['-c', cmd], { cwd: cwdForRun, timeout: 900000, maxBuffer: 50 * 1024 * 1024 });
+        out = redact(r.stdout + (r.stderr ? '\n' + r.stderr : ''));
+    } finally {
+        // Never leave keystore passwords on disk
+        cleanupEphemeral();
+    }
     const artifactExists = fs.existsSync(artifactPath);
     let artifactSize = 0;
     if (artifactExists) artifactSize = fs.statSync(artifactPath).size;
@@ -2262,6 +3087,137 @@ app.get('/api/deploy/download', (req, res) => {
     const target = resolveInWorkspace(req.query.path || '');
     if (!target || !fs.existsSync(target)) return res.status(404).json({ error: 'not found' });
     res.download(target);
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Google Play Store publishing (Android Publisher API v3)
+   Service account JSON stored as secret "google_play_service_account".
+   Optional "package_name" field in that JSON sets the target package.
+   ═══════════════════════════════════════════════════════════════════ */
+const PLAY_SCOPE = 'https://www.googleapis.com/auth/androidpublisher';
+const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+const PLAY_API = 'https://androidpublisher.googleapis.com/androidpublisher/v3';
+const PLAY_UPLOAD_API = 'https://androidpublisher.googleapis.com/upload/androidpublisher/v3';
+
+function loadPlayServiceAccount() {
+    const raw = secrets.google_play_service_account;
+    if (!raw) return null;
+    try { return JSON.parse(raw); } catch (_) { return null; }
+}
+
+async function getGoogleAccessToken(sa) {
+    const now = Math.floor(Date.now() / 1000);
+    const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    const signingInput = b64({ alg: 'RS256', typ: 'JWT' }) + '.' + b64({
+        iss: sa.client_email, scope: PLAY_SCOPE, aud: GOOGLE_TOKEN_URL, iat: now, exp: now + 3600,
+    });
+    const sign = require('crypto').createSign('RSA-SHA256');
+    sign.update(signingInput); sign.end();
+    const jwt = signingInput + '.' + sign.sign(sa.private_key).toString('base64url');
+
+    const res = await fetchWithRetry(GOOGLE_TOKEN_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: 'grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=' + jwt,
+    }, { retries: 0, timeout: 15000 });
+    if (!res.ok) {
+        const err = await res.text().catch(() => '');
+        throw new Error('Google auth failed: ' + err.slice(0, 300));
+    }
+    return (await res.json()).access_token;
+}
+
+app.post('/api/deploy/upload-to-play', async (req, res) => {
+    const { aabPath, track, releaseNotes, userFraction, status, packageName: bodyPkg } = req.body || {};
+    const sa = loadPlayServiceAccount();
+    if (!sa) return res.status(400).json({ error: 'Google Play service account not configured. Save the JSON in Setup → Secrets as "google_play_service_account".' });
+
+    const abs = resolveInWorkspace(aabPath || '');
+    if (!abs || !fs.existsSync(abs)) return res.status(404).json({ error: 'AAB not found: ' + aabPath });
+    if (!/\.aab$/i.test(abs)) return res.status(400).json({ error: 'Only .aab files can be uploaded to Play Store' });
+
+    try {
+        const token = await getGoogleAccessToken(sa);
+        const packageName = String(sa.package_name || bodyPkg || '').trim();
+        if (!/^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z][A-Za-z0-9_]*)+$/.test(packageName)) {
+            return res.status(400).json({ error: 'A valid packageName is required (or set "package_name" in the service account JSON)' });
+        }
+        const auth = { 'Authorization': 'Bearer ' + token };
+        const pkg = encodeURIComponent(packageName);
+
+        // 1. Create edit
+        const editRes = await fetchWithRetry(PLAY_API + '/applications/' + pkg + '/edits',
+            { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, auth), body: '{}' },
+            { retries: 0, timeout: 15000 });
+        if (!editRes.ok) {
+            const e = await editRes.text().catch(() => '');
+            return res.status(500).json({ error: 'Failed to create edit: ' + e.slice(0, 300) });
+        }
+        const edit = await editRes.json();
+
+        const deleteEdit = () => fetch(
+            PLAY_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id),
+            { method: 'DELETE', headers: auth }).catch(() => {});
+
+        const aabData = fs.readFileSync(abs);
+        const uploadRes = await fetchWithRetry(
+            PLAY_UPLOAD_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id) + '/bundles',
+            {
+                method: 'POST',
+                headers: Object.assign({
+                    'Content-Type': 'application/octet-stream',
+                    'Content-Length': String(aabData.length),
+                }, auth),
+                body: aabData,
+            },
+            { retries: 0, timeout: 120000 });
+        if (!uploadRes.ok) {
+            const e = await uploadRes.text().catch(() => '');
+            await deleteEdit();
+            return res.status(500).json({ error: 'Bundle upload failed: ' + e.slice(0, 300) });
+        }
+        const bundle = await uploadRes.json();
+
+        // 3. Assign to track
+        const targetTrack = String(track || 'internal').toLowerCase().replace(/[^a-z]/g, '') || 'internal';
+        const releaseStatus = ['completed', 'inProgress', 'halted', 'draft'].includes(status) ? status : 'completed';
+        const trackBody = {
+            track: targetTrack,
+            releases: [Object.assign({
+                status: releaseStatus,
+                versionCodes: [String(bundle.versionCode)],
+            },
+                ((releaseStatus === 'inProgress' || releaseStatus === 'halted') && userFraction != null)
+                    ? { userFraction: Math.min(1, Math.max(0.0001, parseFloat(userFraction))) } : {},
+                releaseNotes ? { releaseNotes: [{ language: 'en-US', text: String(releaseNotes).slice(0, 500) }] } : {})],
+        };
+        const trackRes = await fetchWithRetry(
+            PLAY_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id) + '/tracks/' + encodeURIComponent(targetTrack),
+            { method: 'PUT', headers: Object.assign({ 'Content-Type': 'application/json' }, auth), body: JSON.stringify(trackBody) },
+            { retries: 0, timeout: 30000 });
+        if (!trackRes.ok) {
+            const e = await trackRes.text().catch(() => '');
+            await deleteEdit();
+            return res.status(500).json({ error: 'Track assignment failed: ' + e.slice(0, 300) });
+        }
+
+        // 4. Commit edit
+        const commitRes = await fetchWithRetry(
+            PLAY_API + '/applications/' + pkg + '/edits/' + encodeURIComponent(edit.id) + ':commit',
+            { method: 'POST', headers: Object.assign({ 'Content-Type': 'application/json' }, auth), body: '{}' },
+            { retries: 0, timeout: 30000 });
+        if (!commitRes.ok) {
+            const e = await commitRes.text().catch(() => '');
+            return res.status(500).json({ error: 'Commit failed: ' + e.slice(0, 300) });
+        }
+
+        res.json({
+            ok: true, packageName, versionCode: bundle.versionCode,
+            track: targetTrack, status: releaseStatus, editId: edit.id,
+        });
+    } catch (e) {
+        res.status(500).json({ error: redact(e.message) });
+    }
 });
 
 /* ═══════════════════════════════════════════════════════════════════
