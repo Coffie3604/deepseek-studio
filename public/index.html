@@ -2601,7 +2601,7 @@ async function sendChat() {
                 for (var tci = 0; tci < d.tool_calls.length; tci++) {
                   var tc = d.tool_calls[tci];
                   var idx = tc.index != null ? tc.index : tci;
-                  if (!toolCalls[idx]) toolCalls[idx] = { id: '', function: { name: '', arguments: '' } };
+                  if (!toolCalls[idx]) toolCalls[idx] = { id: '', type: 'function', function: { name: '', arguments: '' } };
                   if (tc.id) toolCalls[idx].id = tc.id;
                   if (tc.function && tc.function.name) toolCalls[idx].function.name = tc.function.name;
                   if (tc.function && tc.function.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
