@@ -32,6 +32,7 @@ DeepSeek Studio installer
   --update          Update existing install only
   --dir <path>      Install directory (default: ~/projects/deepseek-editor)
   --port <n>        Backend port (default: 3001, env: DS_PORT)
+  --port <n>        Backend port (default: 3001, env: DS_PORT)
   -h, --help        This help
 EOF
   exit 0

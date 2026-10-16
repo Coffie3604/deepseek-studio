@@ -546,6 +546,10 @@ app.post('/api/secrets', (req, res) => {
     if (name.endsWith('_key') && /^sk-(paste|your|xxx|abc|test)/i.test(value.trim())) {
         return res.status(400).json({ error: 'Looks like a placeholder — paste the real key' });
     }
+    // Reject obvious placeholder text before it becomes a silent auth failure
+    if (name.endsWith('_key') && /^sk-(paste|your|xxx|abc|test)/i.test(value.trim())) {
+        return res.status(400).json({ error: 'Looks like a placeholder — paste the real key' });
+    }
     // Validate GitHub token format (classic or fine-grained PAT)
     if (name === 'github_token') {
         const trimmed = value.trim();
@@ -2122,6 +2126,11 @@ const GH_DEVICE_CODE_URL = 'https://github.com/login/device/code';
 const GH_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 // Public OAuth App client_id (device-flow only, no client secret). Override via env/secret.
 const DEFAULT_GH_CLIENT_ID = process.env.DS_GITHUB_CLIENT_ID || 'Ov23liFZ2XqTa0eGnqJd';
+if (!process.env.DS_GITHUB_CLIENT_ID && !String(secrets.github_client_id || '').trim()) {
+    console.warn('[github] Using built-in OAuth client_id — device-flow sign-in will fail if that app is revoked.');
+    console.warn('[github] Register your own at https://github.com/settings/developers → OAuth Apps → Enable Device Flow');
+    console.warn('[github] Then set DS_GITHUB_CLIENT_ID or save a github_client_id secret.');
+}
 if (!process.env.DS_GITHUB_CLIENT_ID && !String(secrets.github_client_id || '').trim()) {
     console.warn('[github] Using built-in OAuth client_id — device-flow sign-in will fail if that app is revoked.');
     console.warn('[github] Register your own at https://github.com/settings/developers → OAuth Apps → Enable Device Flow');
