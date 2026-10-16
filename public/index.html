@@ -2612,7 +2612,22 @@ async function sendChat() {
         }
         hideTypingIndicator();
         var assistantMsg = { role: 'assistant', content: fullText || null };
-        if (toolCalls.length) assistantMsg.tool_calls = toolCalls.filter(Boolean);
+        if (toolCalls.length) {
+          // DeepSeek requires every tool_call entry to have {id, type:'function', function:{name,arguments}}.
+          // Streaming deltas may omit `type` on some fragments — force-normalize here so we never
+          // echo a malformed tool_calls array back (causes 422 messages[i].missing field `type`).
+          assistantMsg.tool_calls = toolCalls.filter(Boolean).map(function (tc, i) {
+            var fn = tc.function || {};
+            return {
+              id: String(tc.id || '').trim() || ('call_' + i + '_' + Date.now().toString(36)),
+              type: 'function',
+              function: {
+                name: String(fn.name || ''),
+                arguments: String(fn.arguments == null ? '{}' : fn.arguments)
+              }
+            };
+          });
+        }
         messages.push(assistantMsg);
         // continue to the tool-call processing that already follows in the loop
       } else if (!res.ok) {
@@ -2667,7 +2682,11 @@ async function sendChat() {
         }
         var result = await callTool(toolName, toolArgs);
         updateToolBubble(bubble, result);
-        messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result.result || result) });
+        messages.push({
+          role: 'tool',
+          tool_call_id: String(tc.id || '').trim() || ('call_' + i),
+          content: JSON.stringify(result.result || result)
+        });
         if (toolName === 'write_file') { try { refreshTree(); } catch (e) {} showFileWrittenToast(toolArgs.path); }
         if (toolName === 'delete_file' || toolName === 'create_folder' || toolName === 'move_file' || toolName === 'copy_file') { try { refreshTree(); } catch (e) {} }
       }
