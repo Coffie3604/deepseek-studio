@@ -819,7 +819,9 @@
 
           <p style="font-size:11px;color:var(--fg-3);margin-top:12px;line-height:1.5">
             <i class="fas fa-lock" style="color:var(--green)"></i>
-            Your key is stored only in this browser's localStorage. It never leaves your device except to call the DeepSeek API directly from your phone.
+            Your key is stored in this browser's localStorage <b>and</b> on your local backend
+            (<code>~/.deepseek-secrets.json</code>, mode 0600), because the streaming chat path
+            runs through the backend. It is never sent anywhere except <code>api.deepseek.com</code>.
           </p>
 
           <p style="font-size:11px;color:var(--fg-3);margin-top:8px">
@@ -1401,42 +1403,7 @@ function getAIEndpoint() {
 /* ═══════════════════════════════════════════════════════════════════
    TOAST
    ═══════════════════════════════════════════════════════════════════ */
-function promptDialog(title, placeholder, defVal) {
-  return new Promise(function(resolve) {
-    var ov = document.createElement('div');
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:99999;display:flex;align-items:center;justify-content:center;padding:20px';
-    var box = document.createElement('div');
-    box.style.cssText = 'background:var(--bg-1);border:1px solid var(--border-1);border-radius:12px;padding:16px;width:100%;max-width:420px';
-    var h = document.createElement('div');
-    h.textContent = title || 'Input';
-    h.style.cssText = 'font-weight:600;color:var(--fg-1);margin-bottom:10px;font-size:14px';
-    var inp = document.createElement('input');
-    inp.type = 'text';
-    inp.placeholder = placeholder || '';
-    inp.value = defVal || '';
-    inp.style.cssText = 'width:100%;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px;padding:10px;font-family:monospace;font-size:13px;margin-bottom:12px';
-    var row = document.createElement('div');
-    row.style.cssText = 'display:flex;gap:8px;justify-content:flex-end';
-    var cancel = document.createElement('button');
-    cancel.textContent = 'Cancel';
-    cancel.className = 'btn';
-    cancel.style.cssText = 'padding:8px 14px';
-    var ok = document.createElement('button');
-    ok.textContent = 'OK';
-    ok.className = 'btn primary';
-    ok.style.cssText = 'padding:8px 14px';
-    var done = function(val) { if (ov.parentNode) ov.parentNode.removeChild(ov); resolve(val); };
-    cancel.onclick = function() { done(null); };
-    ok.onclick = function() { done(inp.value); };
-    inp.addEventListener('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); done(inp.value); } if (e.key === 'Escape') done(null); });
-    ov.onclick = function(e) { if (e.target === ov) done(null); };
-    row.appendChild(cancel); row.appendChild(ok);
-    box.appendChild(h); box.appendChild(inp); box.appendChild(row);
-    ov.appendChild(box);
-    document.body.appendChild(ov);
-    setTimeout(function() { inp.focus(); }, 30);
-  });
-}
+
 
 function toast(msg, type) {
   type = type || 'info';
@@ -1985,8 +1952,8 @@ function renderEditorTabs() {
   });
 }
 function saveFile() {
-  if (!openFile) { toast('No file open', 'error'); return; }
-  fsWrite(openFile, fileContent).then(function() {
+  if (!openFile) { toast('No file open', 'error'); return Promise.resolve(); }
+  return fsWrite(openFile, fileContent).then(function() {
     toast('Saved ' + openFile.split('/').pop(), 'success');
     logActivity('save', 'Saved ' + openFile);
     fileModified = false;
@@ -2607,11 +2574,17 @@ async function sendChat() {
         if (toolCalls.length) assistantMsg.tool_calls = toolCalls.filter(Boolean);
         messages.push(assistantMsg);
         // continue to the tool-call processing that already follows in the loop
+      } else if (!res.ok) {
+        // Provider rejected the request (400/401/402/429/503). The server may
+        // include a `detail` field with the upstream body — surface it.
+        const errBody = await res.text().catch(function() { return ''; });
+        hideTypingIndicator();
+        appendMessage('assistant', '**DeepSeek ' + res.status + '**\n\n```\n' + errBody + '\n```');
+        return;
       } else {
-        // existing non-streaming path — keep as-is
-        if (!res.ok) throw new Error('API ' + res.status);
-        var data = await res.json();
-        var assistantMsg = data.choices[0].message;
+        // Non-streaming happy path
+        const data = await res.json();
+        const assistantMsg = data.choices[0].message;
         messages.push(assistantMsg);
         if (assistantMsg.content) { hideTypingIndicator(); appendMessage('assistant', assistantMsg.content); }
       }
@@ -3829,6 +3802,11 @@ async function verifyAndSaveWizardKey() {
     if (r.ok) {
       localStorage.setItem('ds_key', key);
       document.getElementById('apiKeyInput').value = key;
+      fetch(API + '/api/secrets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'deepseek_key', value: key }),
+      }).catch(function() {});
       document.getElementById('apiKeyStatus').textContent = '✅ Valid — saved';
       document.getElementById('apiKeyStatus').style.color = 'var(--green)';
       if (statusEl) statusEl.textContent = '✅ Key verified and saved!'; statusEl.className = 'wizard-status ok';
@@ -4362,7 +4340,20 @@ function bindHeaderButtons() {
     s.textContent = 'Testing…'; s.style.color = 'var(--yellow)';
     try {
       var r = await fetch('https://api.deepseek.com/v1/models', { headers: { 'Authorization': 'Bearer ' + k } });
-      if (r.ok) { s.textContent = '✅ Valid'; s.style.color = 'var(--green)'; localStorage.setItem('ds_key', k); }
+      if (r.ok) {
+        s.textContent = '✅ Valid';
+        s.style.color = 'var(--green)';
+        localStorage.setItem('ds_key', k);
+        // NEW: push to server so /api/ai/stream works (the streaming path reads
+        // the key from ~/.deepseek-secrets.json, not from the browser)
+        fetch(API + '/api/secrets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: 'deepseek_key', value: k }),
+        }).then(function(r2) { return r2.json(); }).then(function(d2) {
+          if (d2 && d2.ok) toast('Key saved to server', 'success');
+        }).catch(function() {});
+      }
       else { s.textContent = '❌ Invalid (' + r.status + ')'; s.style.color = 'var(--red)'; }
     } catch (e) { s.textContent = '❌ ' + e.message; s.style.color = 'var(--red)'; }
   };
@@ -4582,6 +4573,16 @@ function start() {
   try { setupSnippets(); } catch (e) { console.log('setupSnippets fail', e); }
   try { setupChatTools(); } catch (e) { console.log('setupChatTools fail', e); }
   try { checkBackend(); setInterval(checkBackend, 8000); } catch (e) { console.log('checkBackend fail', e); }
+  // Warn once if the server has no DeepSeek key — the chat path needs it
+  fetch(API + '/api/version').then(function(r) { return r.json(); }).then(function(d) {
+    var local = localStorage.getItem('ds_key');
+    var serverHas = (d.providersConfigured || []).indexOf('deepseek_key') !== -1;
+    if (local && !serverHas) {
+      console.warn('[DS] Key is in localStorage but not on the server — chat will 400. ' +
+                   'Click "Test key" in Setup to push it server-side.');
+      toast('Chat key not synced — open Setup → Test key', 'warn');
+    }
+  }).catch(function() {});
   try { initTerminal(); } catch (e) { console.log('initTerminal fail', e); }
   try { refreshTree(); } catch (e) { console.log('refreshTree fail', e); }
   try { loadWorkspaceSelector(); } catch (e) { console.log('loadWorkspaceSelector fail', e); }
