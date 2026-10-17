@@ -12,7 +12,7 @@
     "start": "node server.js",
     "dev": "node --watch server.js",
     "verify": "node -e \"const p=['express','cors','ws','simple-git','@octokit/rest']; const ok=p.every(m=>{try{require.resolve(m);return true}catch{return false}}); console.log(ok?'✓ required deps present':'✗ missing required deps'); process.exit(ok?0:1)\"",
-    "smoke": "node -e \"require('http').get('http://127.0.0.1:3002/api/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{const j=JSON.parse(d);console.log(j.ok?'✓ backend healthy':'✗ unhealthy',j);process.exit(j.ok?0:1)}catch(e){console.log('✗ bad response',d);process.exit(1)}})}).on('error',e=>{console.log('✗ backend not reachable:',e.message);process.exit(1)})\"",
+    "smoke": "node -e \"const p=process.env.PORT||3001;require('http').get('http://127.0.0.1:'+p+'/api/health',r=>{let d='';r.on('data',c=>d+=c);r.on('end',()=>{try{const j=JSON.parse(d);console.log(j.ok?'✓ backend healthy on '+p:'✗ unhealthy on '+p,j);process.exit(j.ok?0:1)}catch(e){console.log('✗ bad response',d);process.exit(1)}})}).on('error',e=>{console.log('✗ backend not reachable on '+p+':',e.message);process.exit(1)})\"",
     "check:connectivity": "node scripts/check-connectivity.js",
     "gh:status": "bash scripts/gh-sync.sh status",
     "gh:login": "bash scripts/gh-sync.sh login",
