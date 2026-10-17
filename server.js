@@ -279,6 +279,12 @@ try {
 
 /* ─── Safety helpers ─── */
 const BLOCKED_PATTERNS = [
+    // Refuse to start another instance of this server — the AI has no reason to and it
+    // causes port-3001 collisions that take down the live backend.
+    /(^|[;&|]\s*|\bnohup\s+|\bsetsid\s+|\bexec\s+)[a-z0-9_./-]*\bnode\s+[^;&|\n]*server\.js\b/i,
+    /\bnpm\s+(start|run\s+start)\b/,
+    // Belt for the pattern above when the AI writes it with leading env
+    /\bPORT\s*=\s*\d+\s+node\s+[^;&|\n]*server\.js\b/,
     /rm\s+-rf\s+\/(?!(data\/data\/com\.termux|data\/data\/com\.termux\/files\/home))/,
     /\bsudo\b/, /\bmkfs\b/, /\bdd\s+if=\/dev\/(zero|random|urandom)/,
     /:\s*\(\)\s*\{.*\}\s*;\s*:/,
