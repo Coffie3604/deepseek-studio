@@ -16,135 +16,13 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 <link rel="stylesheet" href="/app.css" />
 
-<!-- ═══════════ v2.3 additions (copy everywhere + log + chat search + git records) ═══════════ -->
-<style>
-/* Copy buttons — always visible (faint by default) */
-.copy-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  gap: 4px; padding: 3px 8px;
-  border: 1px solid var(--border); background: var(--bg-2); color: var(--fg-3);
-  border-radius: 5px; font-size: 10px; font-family: inherit; cursor: pointer;
-  transition: all .15s ease; -webkit-tap-highlight-color: transparent;
-  user-select: none; min-height: 22px;
-}
-.copy-btn:hover, .copy-btn:active { background: var(--bg-3); color: var(--fg-1); border-color: var(--border-2); }
-.copy-btn.copied { color: var(--green); border-color: var(--green); background: rgba(63,185,80,.12); }
-.copy-btn svg { display: block; pointer-events: none; }
-
-.tool-call .tool-head { position: relative; padding-right: 60px; }
-.tool-call .tool-head .tool-copy { position: absolute; top: -2px; right: 0; }
-.tool-call .tool-output { position: relative; }
-.tool-call .tool-output .output-copy { position: absolute; top: 6px; right: 6px; z-index: 2; }
-
-.chat-msg.assistant pre .pre-actions {
-  position: absolute; top: 8px; right: 8px;
-  display: flex; gap: 6px; z-index: 2;
-}
-.chat-msg.assistant pre .pre-actions .insert-code-btn { position: static; }
-.chat-msg.assistant pre .pre-actions .copy-btn { padding: 4px 10px; font-size: 10px; min-height: 22px; }
-
-/* Always-visible copy icon on chat messages */
-.chat-msg .msg-copy-btn { opacity: 0.55; }
-.chat-msg:hover .msg-copy-btn,
-.chat-msg:focus-within .msg-copy-btn { opacity: 1; }
-.chat-msg .msg-copy-btn:active { opacity: 1; transform: scale(0.94); }
-
-.chat-header-actions { display: flex; gap: 4px; margin-left: auto; align-items: center; }
-.chat-header-actions .btn.icon-only { min-width: 34px; min-height: 34px; padding: 6px; }
-
-.chat-search-bar {
-  display: none; align-items: center; gap: 6px;
-  padding: 8px 14px; background: var(--bg-1);
-  border-bottom: 1px solid var(--border); flex-shrink: 0;
-}
-.chat-search-bar.active { display: flex; }
-.chat-search-bar input {
-  flex: 1; background: var(--bg-2); border: 1px solid var(--border);
-  color: var(--fg-1); padding: 6px 10px; border-radius: 6px;
-  font-size: 12px; outline: none; min-height: 32px;
-}
-.chat-search-bar input:focus { border-color: var(--blue); }
-.chat-search-bar .result-count {
-  font-size: 11px; color: var(--fg-3); font-family: monospace; white-space: nowrap;
-}
-.chat-search-bar .tsb-btn {
-  background: transparent; border: 1px solid transparent; color: var(--fg-3);
-  padding: 4px 8px; border-radius: 4px; cursor: pointer; min-height: 28px;
-}
-.chat-search-bar .tsb-btn:hover { background: var(--bg-3); color: var(--blue); }
-.chat-msg.search-match { outline: 2px solid var(--yellow); outline-offset: 2px; }
-.chat-msg.search-current { outline: 2px solid var(--orange); outline-offset: 2px; }
-
-/* Log panel */
-.log-entry {
-  padding: 12px 14px; background: var(--bg-1);
-  border: 1px solid var(--border); border-radius: var(--radius-sm);
-  margin-bottom: 10px; border-left: 3px solid var(--blue);
-}
-.log-entry.breaking { border-left-color: var(--red); }
-.log-entry.feature  { border-left-color: var(--green); }
-.log-entry.fix      { border-left-color: var(--yellow); }
-.log-entry .log-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
-.log-entry .log-version { font-family: monospace; font-weight: 700; font-size: 12px; color: var(--blue); }
-.log-entry .log-date { font-size: 10px; color: var(--fg-4); font-family: monospace; }
-.log-entry .log-badge {
-  font-size: 9px; padding: 2px 6px; border-radius: 8px;
-  font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
-}
-.log-entry .log-badge.feature  { background: #23863622; color: var(--green); border: 1px solid #23863655; }
-.log-entry .log-badge.fix      { background: #9e6a0322; color: var(--yellow); border: 1px solid #9e6a0355; }
-.log-entry .log-badge.breaking { background: #da363322; color: var(--red);    border: 1px solid #da363355; }
-.log-entry ul { padding-left: 18px; margin: 6px 0 0 0; font-size: 12px; line-height: 1.6; color: var(--fg-2); }
-.log-entry li { margin-bottom: 4px; }
-.log-entry li code { background: var(--bg-2); padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 11px; color: var(--orange); }
-
-.activity-item {
-  display: flex; align-items: flex-start; gap: 8px;
-  padding: 8px 10px; background: var(--bg-1);
-  border: 1px solid var(--border-2); border-radius: 6px;
-  margin-bottom: 4px; font-size: 11px;
-}
-.activity-item .act-time { font-family: monospace; color: var(--fg-4); font-size: 10px; white-space: nowrap; flex-shrink: 0; min-width: 42px; }
-.activity-item .act-icon { flex-shrink: 0; width: 14px; text-align: center; }
-.activity-item .act-body { flex: 1; color: var(--fg-2); word-break: break-word; }
-.activity-item.kind-file  .act-icon { color: var(--blue); }
-.activity-item.kind-tool  .act-icon { color: var(--green); }
-.activity-item.kind-error .act-icon { color: var(--red); }
-.activity-item.kind-save  .act-icon { color: var(--green); }
-.activity-item.kind-git   .act-icon { color: var(--yellow); }
-
-/* ─── Sync status pill (v2.6) ─── */
-.gh-sync-state {
-  padding: 10px 12px;
-  background: var(--bg-1);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 10px;
-  font-size: 12px;
-  font-family: ui-monospace, 'JetBrains Mono', monospace;
-  line-height: 1.4;
-  word-break: break-word;
-}
-.gh-sync-state.on   { color: var(--green);  border-color: rgba(63,185,80,.4);  background: rgba(63,185,80,.06); }
-.gh-sync-state.warn { color: var(--yellow); border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.06); }
-.gh-sync-state.err  { color: var(--red);    border-color: rgba(248,81,73,.4);  background: rgba(248,81,73,.06); }
-.gh-sync-state.off  { color: var(--fg-3); }
-.gh-remote-info {
-  font-size: 11px;
-  color: var(--fg-3);
-  font-family: ui-monospace, 'JetBrains Mono', monospace;
-  margin-bottom: 10px;
-  word-break: break-all;
-  line-height: 1.4;
-}
-</style>
 </head>
 <body>
 
 <!-- ═══════════ HEADER ═══════════ -->
 <div class="header">
   <div class="header-left">
-    <button class="btn icon-only menu-btn" id="menuLeftBtn" style="display:none" title="Files">
+    <button class="btn icon-only menu-btn" id="menuLeftBtn" style="display:none" title="Files" aria-label="Open file tree">
       <i class="fas fa-bars"></i>
     </button>
     <div class="logo">
@@ -152,18 +30,18 @@
     </div>
   </div>
   <div class="header-right">
-    <div class="status" title="Backend status">
+    <div class="status" id="statusPill" title="Backend status">
       <span class="dot checking" id="statusDot"></span>
       <span id="statusText" class="label">...</span>
     </div>
     <span id="langBadge" class="lang-badge" style="display:none"></span>
-    <button class="btn primary icon-only" id="saveBtn" title="Save (Ctrl+S)">
+    <button class="btn primary icon-only" id="saveBtn" title="Save (Ctrl+S)" aria-label="Save file">
       <i class="fas fa-save"></i>
     </button>
-    <button class="btn icon-only" id="compileBtn" title="Compile current file" style="color:var(--green)">
+    <button class="btn icon-only" id="compileBtn" title="Compile current file" aria-label="Compile" style="color:var(--green)">
       <i class="fas fa-bolt"></i>
     </button>
-    <button class="btn icon-only menu-btn" id="menuRightBtn" style="display:none" title="Panels">
+    <button class="btn icon-only menu-btn" id="menuRightBtn" style="display:none" title="Panels" aria-label="Open panels">
       <i class="fas fa-sliders-h"></i>
     </button>
   </div>
@@ -179,6 +57,12 @@
 <div class="main">
 
   <div class="file-tree" id="fileTree">
+    <div class="drawer-head">
+      <span class="drawer-title"><i class="fas fa-folder-tree"></i> Projects</span>
+      <button class="drawer-close" data-close-drawers aria-label="Close file tree">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
     <div class="ft-head">
       <span>Projects</span>
       <div style="display:flex;gap:4px">
@@ -258,31 +142,19 @@
           <span>Auto</span>
         </label>
         <span class="ctx-indicator" id="ctxIndicator" title="Current file context">📄 No file</span>
-        <div class="edit-tools" id="editTools">
-          <button type="button" class="edit-tools-btn" id="editToolsBtn" title="Editing tools" aria-haspopup="true" aria-expanded="false">
-            <i class="fas fa-ellipsis-vertical"></i>
-          </button>
-          <div class="edit-tools-menu" id="editToolsMenu" role="menu">
-            <div class="edit-tools-item" data-action="cut" role="menuitem"><i class="fas fa-scissors"></i> Cut</div>
-            <div class="edit-tools-item" data-action="copy" role="menuitem"><i class="fas fa-copy"></i> Copy</div>
-            <div class="edit-tools-item" data-action="paste" role="menuitem"><i class="fas fa-paste"></i> Paste</div>
-            <div class="edit-tools-item" data-action="selectAll" role="menuitem"><i class="fas fa-object-group"></i> Select all</div>
-            <div class="edit-tools-sep"></div>
-            <div class="edit-tools-item" data-action="undo" role="menuitem"><i class="fas fa-rotate-left"></i> Undo</div>
-            <div class="edit-tools-item" data-action="redo" role="menuitem"><i class="fas fa-rotate-right"></i> Redo</div>
-            <div class="edit-tools-sep"></div>
-            <div class="edit-tools-item" data-action="clear" role="menuitem"><i class="fas fa-eraser"></i> Clear</div>
-            <div class="edit-tools-item" data-action="copyAll" role="menuitem"><i class="fas fa-clipboard-list"></i> Copy all text</div>
-          </div>
-        </div>
-        <textarea id="aiInput" placeholder="Tell the AI what to do… (type / for snippets)" rows="1"></textarea>
-        <button type="submit" id="aiSendBtn" title="Send"><i class="fas fa-paper-plane"></i></button>
+        <textarea id="aiInput" placeholder="Tell the AI what to do… (type / for snippets)" rows="1"
+          autocomplete="off" autocorrect="off" autocapitalize="sentences" spellcheck="false"
+          enterkeyhint="send" inputmode="text" aria-label="Message the AI"></textarea>
+        <button type="submit" id="aiSendBtn" title="Send (Enter)" aria-label="Send message"><i class="fas fa-paper-plane"></i></button>
       </div>
     </div>
 
     <!-- EDITOR PANEL -->
     <div class="tab-panel" id="panel-editor">
       <div class="editor-tabs-bar" id="editorTabsBar" style="display:none"></div>
+      <div class="editor-toolbar" id="editorToolbar">
+        <span class="editor-toolbar-label" id="editorToolbarLabel">No file</span>
+      </div>
       <div id="monaco">
         <div class="editor-empty" id="editorEmpty">
           <i class="fas fa-file-code"></i>
@@ -343,6 +215,12 @@
 
   <!-- SIDEBAR -->
   <div class="sidebar" id="sidebar">
+    <div class="drawer-head">
+      <span class="drawer-title"><i class="fas fa-sliders-h"></i> Panels</span>
+      <button class="drawer-close" data-close-drawers aria-label="Close panels">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
     <div class="side-tabs">
       <div class="stab active" data-tab="ai"><i class="fas fa-robot"></i><span>AI</span></div>
       <div class="stab" data-tab="templates"><i class="fas fa-cubes"></i><span>Tpl</span></div>
@@ -514,10 +392,26 @@
           </div>
           <div id="ghSignedInUI" style="display:none">
             <div id="ghUserBadge" style="display:flex;gap:10px;align-items:center;margin-bottom:10px"></div>
-            <button class="btn" id="ghSignOutBtn" style="width:100%;justify-content:center;padding:10px">
-              <i class="fas fa-right-from-bracket"></i> Sign out
-            </button>
+            <div id="ghAuthMeta" style="font-size:11px;color:var(--fg-3);line-height:1.6;margin-bottom:10px"></div>
+            <div style="display:flex;gap:8px">
+              <button class="btn" id="ghRepairCredsBtn" style="flex:1;justify-content:center;padding:9px" title="Rewrite ~/.git-credentials from the stored token">
+                <i class="fas fa-screwdriver-wrench"></i> Repair git auth
+              </button>
+              <button class="btn danger" id="ghSignOutBtn" style="flex:1;justify-content:center;padding:9px">
+                <i class="fas fa-right-from-bracket"></i> Sign out
+              </button>
+            </div>
           </div>
+        </div>
+        <div class="settings-section">
+          <h3><i class="fas fa-tower-broadcast"></i> Connectivity</h3>
+          <p style="font-size:11px;color:var(--fg-3);margin-bottom:8px;line-height:1.5">
+            Measures real latency to GitHub's API, web and download hosts, and checks that git can authenticate.
+          </p>
+          <button class="btn" id="ghConnectivityBtn" style="width:100%;justify-content:center;padding:10px">
+            <i class="fas fa-tower-broadcast"></i> Test connection
+          </button>
+          <div id="ghConnectivityResults" style="margin-top:10px;font-size:11px;line-height:1.6"></div>
         </div>
         <div class="settings-section">
           <h3><i class="fab fa-github"></i> Git Identity</h3>
@@ -541,6 +435,21 @@
           <h3><i class="fas fa-code-branch"></i> Repository</h3>
           <p id="ghRepoInfo" style="font-size:11px;color:var(--fg-3);font-family:monospace;word-break:break-all">Not connected</p>
           <p id="ghBranchInfo" style="font-size:11px;color:var(--fg-3);font-family:monospace">Branch: -</p>
+        </div>
+        <div class="settings-section">
+          <h3><i class="fas fa-stethoscope"></i> Connection Doctor</h3>
+          <p style="font-size:11px;color:var(--fg-3);margin-bottom:8px;line-height:1.5">
+            Diagnoses git + GitHub connectivity: binary, TLS, DNS, token, credential store and remote reachability.
+          </p>
+          <div style="display:flex;gap:8px">
+            <button class="btn primary" id="ghDoctorBtn" style="flex:1;justify-content:center;padding:10px">
+              <i class="fas fa-stethoscope"></i> Run diagnostics
+            </button>
+            <button class="btn" id="ghDoctorFixBtn" style="flex:0 0 auto;padding:10px" title="Apply safe automatic repairs">
+              <i class="fas fa-wand-magic-sparkles"></i> Repair
+            </button>
+          </div>
+          <div id="ghDoctorResults" style="margin-top:10px;font-size:11px;line-height:1.6"></div>
         </div>
         <div class="settings-section" id="ghSyncSection">
           <h3><i class="fas fa-arrows-rotate"></i> Sync Status</h3>
@@ -1583,6 +1492,78 @@ function closeDrawers() {
   document.getElementById('sidebar').classList.remove('open');
   document.getElementById('backdrop').classList.remove('active');
 }
+
+/* Swipe a drawer sideways to dismiss it — the gesture people expect
+   from a native app. Only engages on a mostly-horizontal drag. */
+function setupDrawerSwipe() {
+  [['fileTree', -1], ['sidebar', 1]].forEach(function(pair) {
+    var el = document.getElementById(pair[0]);
+    var dir = pair[1]; /* -1 = swipe left to close, 1 = swipe right */
+    if (!el) return;
+    var startX = 0, startY = 0, dx = 0, active = false, decided = false;
+
+    el.addEventListener('touchstart', function(e) {
+      if (!el.classList.contains('open')) return;
+      if (e.touches.length !== 1) return;
+      startX = e.touches[0].clientX;
+      startY = e.touches[0].clientY;
+      dx = 0; active = true; decided = false;
+      el.style.transition = 'none';
+    }, { passive: true });
+
+    el.addEventListener('touchmove', function(e) {
+      if (!active) return;
+      var x = e.touches[0].clientX;
+      var y = e.touches[0].clientY;
+      var mx = x - startX, my = y - startY;
+      if (!decided) {
+        if (Math.abs(mx) < 8 && Math.abs(my) < 8) return;
+        /* Vertical scroll wins — bail out and let the list scroll. */
+        if (Math.abs(my) > Math.abs(mx)) { active = false; el.style.transition = ''; return; }
+        decided = true;
+      }
+      dx = dir < 0 ? Math.min(0, mx) : Math.max(0, mx);
+      el.style.transform = 'translateX(' + dx + 'px)';
+    }, { passive: true });
+
+    var end = function() {
+      if (!active) return;
+      active = false;
+      el.style.transition = '';
+      el.style.transform = '';
+      if (Math.abs(dx) > Math.min(90, el.offsetWidth * 0.3)) closeDrawers();
+      dx = 0;
+    };
+    el.addEventListener('touchend', end, { passive: true });
+    el.addEventListener('touchcancel', end, { passive: true });
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   MOBILE SHELL (v3.0) — bottom nav, keyboard-aware layout, sheets
+   ═══════════════════════════════════════════════════════════════════ */
+function isMobileShell() {
+  return window.matchMedia('(max-width: 900px)').matches;
+}
+
+/* Keep the input bar above the on-screen keyboard. */
+function setupKeyboardAwareLayout() {
+  var vv = window.visualViewport;
+  if (!vv) return;
+  var apply = function() {
+    var kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+    var open = kb > 120;
+    document.body.classList.toggle('kb-open', open);
+    document.documentElement.style.setProperty('--kb', (open ? kb : 0) + 'px');
+    if (open) {
+      var msgs = document.getElementById('chatMessages');
+      if (msgs) msgs.scrollTop = msgs.scrollHeight;
+    }
+  };
+  vv.addEventListener('resize', apply);
+  vv.addEventListener('scroll', apply);
+  apply();
+}
 function setupPrimaryTabs() {
   document.querySelectorAll('.ptab').forEach(function(tab) {
     tab.onclick = function() { switchPrimaryPanel(this.getAttribute('data-panel')); };
@@ -1988,6 +1969,8 @@ function openFileFromTree(path) {
 function renderEditorTabs() {
   var bar = document.getElementById('editorTabsBar');
   bar.innerHTML = '';
+  var tbLabel = document.getElementById('editorToolbarLabel');
+  if (tbLabel) tbLabel.textContent = activeTabPath || 'No file';
   if (!openTabs.length) { bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
   openTabs.forEach(function(p) {
@@ -2293,59 +2276,125 @@ function callTool(name, args) {
 /* ═══════════════════════════════════════════════════════════════════
    CHAT RENDERING
    ═══════════════════════════════════════════════════════════════════ */
+/* Fenced-code aware renderer.
+   Handles: ``` and ~~~ fences, CRLF, info strings like ```js title="x",
+   nested backticks inside code, and — critically — UNTERMINATED fences that
+   appear while a response is still streaming (rendered as a live code block
+   instead of being swallowed as plain text). */
+var FENCE_RE = /(^|\n)(`{3,}|~{3,})([^\n]*)\n([\s\S]*?)(?:\n\2[ \t]*(?=\n|$)|$)/g;
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderCodeBlock(rawLang, code, closed) {
+  var info = String(rawLang || '').trim();
+  var lang = (info.split(/[\s{]/)[0] || 'text').replace(/[^\w+#.-]/g, '') || 'text';
+  var body = code.replace(/\n$/, '');
+  var enc = encodeURIComponent(body);
+  return '<pre' + (closed ? '' : ' class="streaming"') + '>' +
+    '<span class="lang">' + escapeHtml(lang) + '</span>' +
+    '<div class="pre-actions">' +
+      '<button class="copy-btn pre-copy-btn" data-code="' + enc + '" title="Copy code">' +
+        '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
+      '</button>' +
+      '<button class="insert-code-btn" data-code="' + enc + '">Insert</button>' +
+    '</div>' +
+    escapeHtml(body) +
+  '</pre>';
+}
+
 function renderChatContent(content) {
-  var parts = content.split(/(```[\s\S]*?```)/g);
+  content = String(content == null ? '' : content).replace(/\r\n?/g, '\n');
   var html = '';
-  parts.forEach(function(p) {
-    if (p.indexOf('```') === 0) {
-      var match = p.match(/```(\w*)\n?([\s\S]*?)```/);
-      if (match) {
-        var lang = match[1] || 'text';
-        var code = match[2];
-        var escaped = code.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-        html += '<pre>' +
-          '<span class="lang">' + lang + '</span>' +
-          '<div class="pre-actions">' +
-            '<button class="copy-btn pre-copy-btn" data-code="' + encodeURIComponent(code) + '" title="Copy code">' +
-              '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>' +
-            '</button>' +
-            '<button class="insert-code-btn" data-code="' + encodeURIComponent(code) + '">Insert</button>' +
-          '</div>' +
-          escaped +
-        '</pre>';
-      }
-    } else {
-      var esc = p.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-      esc = esc.replace(/`([^`]+)`/g, function(m, code) {
-        if (/\.(py|js|ts|kt|kts|java|dart|rs|go|html|css|json|xml|yaml|yml|sh|md|txt|c|cpp|swift)\b/.test(code)) {
-          return '<span class="file-path-link" data-path="' + code + '">' + code + '</span>';
-        }
-        return '<span class="cmd-link" data-cmd="' + code + '" title="Click to run">' + code + '</span>';
-      });
-      html += '<p>' + esc.replace(/\n/g, '<br>') + '</p>';
-    }
-  });
+  var last = 0;
+  var m;
+  FENCE_RE.lastIndex = 0;
+  while ((m = FENCE_RE.exec(content)) !== null) {
+    var lead = m[1] || '';
+    var start = m.index + lead.length;
+    var end = m.index + m[0].length;
+    // Text before the fence
+    if (start > last) html += renderChatText(content.slice(last, start));
+    // Closed only when the match ends with the same fence marker (optionally
+    // followed by trailing spaces) — otherwise it's still streaming.
+    var tail = m[0].slice(-(m[2].length + 1));
+    var closed = tail.charAt(0) === '\n' && tail.slice(1).replace(/[ \t]+$/, '') === m[2];
+    html += renderCodeBlock(m[3], m[4], closed);
+    last = end;
+    if (m[0].length === 0) FENCE_RE.lastIndex++; // safety against zero-length loops
+  }
+  if (last < content.length) html += renderChatText(content.slice(last));
   return html;
+}
+
+function renderChatText(p) {
+  if (!p) return '';
+  var esc = escapeHtml(p);
+  esc = esc.replace(/`([^`\n]+)`/g, function(m, code) {
+    if (/\.(py|js|ts|kt|kts|java|dart|rs|go|html|css|json|xml|yaml|yml|sh|md|txt|c|cpp|swift)\b/.test(code)) {
+      return '<span class="file-path-link" data-path="' + code + '">' + code + '</span>';
+    }
+    return '<span class="cmd-link" data-cmd="' + code + '" title="Click to run">' + code + '</span>';
+  });
+  return '<p>' + esc.replace(/\n/g, '<br>') + '</p>';
+}
+/* Re-render an assistant bubble in place (used by the streaming path).
+   Keeps the user's scroll position when they've scrolled up to read, and
+   only auto-scrolls when they're already near the bottom. */
+function paintAssistantMessage(div, content) {
+  if (!div || !div._dsBody) return;
+  var box = document.getElementById('chatMessages');
+  var stick = true;
+  if (box) stick = (box.scrollHeight - box.scrollTop - box.clientHeight) < 80;
+  div._dsContent = content;
+  div._dsBody.innerHTML = renderChatContent(content);
+  div._dsBody.querySelectorAll('.insert-code-btn').forEach(function(btn) {
+    btn.onclick = function() { insertCodeToEditor(decodeURIComponent(this.getAttribute('data-code'))); };
+  });
+  div._dsBody.querySelectorAll('.pre-copy-btn').forEach(function(btn) {
+    btn.onclick = function() { copyText(decodeURIComponent(this.getAttribute('data-code')), this); };
+  });
+  div._dsBody.querySelectorAll('.file-path-link').forEach(function(link) {
+    link.onclick = function() { openFileFromTree(this.getAttribute('data-path')); switchPrimaryPanel('editor'); };
+  });
+  div._dsBody.querySelectorAll('.cmd-link').forEach(function(link) {
+    link.onclick = function() { sendToTerminal(this.getAttribute('data-cmd')); };
+  });
+  if (div._dsCopyAll) div._dsCopyAll.style.display = content ? '' : 'none';
+  if (box && stick) box.scrollTop = box.scrollHeight;
+}
+
+function autoGrowInput(el) {
+  if (!el) return;
+  el.style.height = 'auto';
+  el.style.height = Math.min(el.scrollHeight, 140) + 'px';
 }
 function appendMessage(role, content, skipSave) {
   var box = document.getElementById('chatMessages');
   var div = document.createElement('div');
   div.className = 'chat-msg ' + role;
+  div.setAttribute('data-role', role);
+  var meta = document.createElement('div');
+  meta.className = 'msg-meta';
+  var who = role === 'user' ? 'You' : (role === 'assistant' ? 'DeepSeek' : role);
+  var t = new Date();
+  var hh = ('0' + t.getHours()).slice(-2) + ':' + ('0' + t.getMinutes()).slice(-2);
+  meta.textContent = who + ' · ' + hh;
+  div.appendChild(meta);
   if (role === 'assistant') {
-    div.innerHTML = renderChatContent(content);
-    div.querySelectorAll('.insert-code-btn').forEach(function(btn) {
-      btn.onclick = function() { insertCodeToEditor(decodeURIComponent(this.getAttribute('data-code'))); };
-    });
-    div.querySelectorAll('.pre-copy-btn').forEach(function(btn) {
-      btn.onclick = function() { copyText(decodeURIComponent(this.getAttribute('data-code')), this); };
-    });
-    div.querySelectorAll('.file-path-link').forEach(function(link) {
-      link.onclick = function() { openFileFromTree(this.getAttribute('data-path')); switchPrimaryPanel('editor'); };
-    });
-    div.querySelectorAll('.cmd-link').forEach(function(link) {
-      link.onclick = function() { sendToTerminal(this.getAttribute('data-cmd')); };
-    });
-  } else div.textContent = content;
+    var bodyEl = document.createElement('div');
+    bodyEl.className = 'msg-body';
+    div.appendChild(bodyEl);
+    div._dsContent = content;
+    div._dsBody = bodyEl;
+    paintAssistantMessage(div, content);
+  } else {
+    var body = document.createElement('div');
+    body.className = 'msg-body';
+    body.textContent = content;
+    div.appendChild(body);
+  }
 
   var copyBtn = document.createElement('button');
   copyBtn.className = 'msg-copy-btn';
@@ -2372,6 +2421,24 @@ function appendMessage(role, content, skipSave) {
     } else { fallbackCopy(content) ? ok() : fail(); }
   };
   div.appendChild(copyBtn);
+
+  // Assistant answers: always offer a plain-text "Copy all" (works even when
+  // the bubble contains code blocks / links that swallow selection on touch).
+  if (role === 'assistant') {
+    var copyAllBtn = document.createElement('button');
+    copyAllBtn.className = 'copy-btn msg-copy-all-btn';
+    copyAllBtn.type = 'button';
+    copyAllBtn.title = 'Copy full answer as plain text';
+    copyAllBtn.setAttribute('aria-label', 'Copy full answer');
+    copyAllBtn.textContent = 'Copy all';
+    copyAllBtn.style.display = content ? '' : 'none';
+    copyAllBtn.onclick = function(e) {
+      e.stopPropagation();
+      copyText(div._dsContent || '', this);
+    };
+    div.appendChild(copyAllBtn);
+    div._dsCopyAll = copyAllBtn;
+  }
 
   box.appendChild(div);
   box.scrollTop = box.scrollHeight;
@@ -2614,8 +2681,8 @@ async function sendChat() {
               var d = choice.delta || {};
               if (d.content) {
                 fullText += d.content;
-                if (!liveMsg) liveMsg = appendMessage('assistant', '');
-                liveMsg.innerHTML = renderChatContent(fullText);
+                if (!liveMsg) liveMsg = appendMessage('assistant', '', true);
+                paintAssistantMessage(liveMsg, fullText);
               }
               if (d.tool_calls) {
                 for (var tci = 0; tci < d.tool_calls.length; tci++) {
@@ -2631,6 +2698,14 @@ async function sendChat() {
           }
         }
         hideTypingIndicator();
+        // Persist the streamed answer exactly once (the live bubble was created
+        // with skipSave so it isn't duplicated in chat history).
+        if (fullText) {
+          if (liveMsg) paintAssistantMessage(liveMsg, fullText);
+          chatHistory.push({ role: 'assistant', content: fullText });
+          if (chatHistory.length > 100) chatHistory = chatHistory.slice(-100);
+          try { localStorage.setItem('ds_chat', JSON.stringify(chatHistory)); } catch (_) {}
+        }
         var assistantMsg = { role: 'assistant', content: fullText || null };
         if (toolCalls.length) {
           // DeepSeek requires every tool_call entry to have {id, type:'function', function:{name,arguments}}.
@@ -3153,6 +3228,12 @@ function setupGithub() {
 
   /* ─── GitHub Account (OAuth Device Flow) ─── */
   var devicePollTimer = null;
+  /* Local HTML escaper - the markdown renderer's `esc` is block-scoped. */
+  function esc(s) {
+    return String(s == null ? '' : s)
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
   function ghStatusEl() { return document.getElementById('ghAccountStatus'); }
   function ghSetUI(state) {
     document.getElementById('ghSignedOutUI').style.display = state === 'out' ? '' : 'none';
@@ -3160,19 +3241,31 @@ function setupGithub() {
     document.getElementById('ghSignedInUI').style.display = state === 'in' ? '' : 'none';
   }
   function renderGhAccount() {
-    fetch(API + '/api/github/status').then(function(r) { return r.json(); }).then(function(d) {
+    fetch(API + '/api/github/auth').then(function(r) { return r.json(); }).then(function(d) {
+      var meta = document.getElementById('ghAuthMeta');
       if (d.connected) {
         ghSetUI('in');
         ghStatusEl().innerHTML = '<span style="color:var(--green)">● Connected</span>';
         var badge = document.getElementById('ghUserBadge');
-        var avatar = d.avatar ? '<img src="' + d.avatar + '" style="width:38px;height:38px;border-radius:50%">' : '';
+        var u = d.user || {};
+        var avatar = u.avatar ? '<img src="' + escAttr(u.avatar) + '" style="width:38px;height:38px;border-radius:50%">' : '';
         badge.innerHTML = avatar +
-          '<div style="line-height:1.3"><div style="color:var(--fg-1);font-weight:600">' + (d.login || 'github user') + '</div>' +
-          '<div style="font-size:11px;color:var(--fg-3)">' + (d.name || '') + (d.publicRepos != null ? ' · ' + d.publicRepos + ' public repos' : '') + '</div></div>';
-        if (d.name && !document.getElementById('ghName').value) document.getElementById('ghName').value = d.name;
+          '<div style="line-height:1.3"><div style="color:var(--fg-1);font-weight:600">' + esc(u.login || 'github user') + '</div>' +
+          '<div style="font-size:11px;color:var(--fg-3)">' + esc(u.name || '') + (u.publicRepos != null ? ' · ' + u.publicRepos + ' public repos' : '') + '</div></div>';
+        if (u.name && !document.getElementById('ghName').value) document.getElementById('ghName').value = u.name;
+        var kind = d.tokenKind === 'fine-grained' ? 'fine-grained PAT' : d.tokenKind === 'classic' ? 'classic PAT' : d.tokenKind === 'oauth' ? 'OAuth (device flow)' : 'token';
+        var scopes = (d.scopes && d.scopes.length) ? d.scopes.join(', ') : 'none reported';
+        var cred = d.credentialStore
+          ? '<span style="color:var(--green)"><i class="fas fa-circle-check"></i> git credential store synced</span>'
+          : '<span style="color:var(--yellow)"><i class="fas fa-triangle-exclamation"></i> git credential store missing — tap Repair</span>';
+        var push = d.canPush === false
+          ? '<div style="color:var(--red)"><i class="fas fa-lock"></i> token lacks push scope (needs "repo" or Contents: write)</div>' : '';
+        meta.innerHTML = '<div>Auth: ' + esc(kind) + '</div><div>Scopes: ' + esc(scopes) + '</div><div>' + cred + '</div>' + push;
       } else {
         ghSetUI('out');
-        ghStatusEl().innerHTML = '<span style="color:var(--fg-3)">○ Not signed in</span>';
+        ghStatusEl().innerHTML = d.hasToken
+          ? '<span style="color:var(--red)">● Token rejected — ' + esc(d.error || 'invalid') + '</span>'
+          : '<span style="color:var(--fg-3)">○ Not signed in</span>';
       }
     }).catch(function() { ghStatusEl().textContent = 'Unable to reach backend'; });
   }
@@ -3571,6 +3664,97 @@ function setupGithub() {
       })
       .catch(function() { toast('Backend unreachable', 'error'); });
   };
+
+  /* Connection Doctor — one call that explains why git/GitHub is failing. */
+  var ghDoctorBtn = document.getElementById('ghDoctorBtn');
+  if (ghDoctorBtn) ghDoctorBtn.onclick = function() {
+    var box = document.getElementById('ghDoctorResults');
+    box.innerHTML = '<span style="color:var(--fg-3)">Running checks…</span>';
+    ghDoctorBtn.disabled = true;
+    var q = currentProject ? '?cwd=' + encodeURIComponent(currentProject) : '';
+    fetch(API + '/api/git/doctor' + q)
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        ghDoctorBtn.disabled = false;
+        var rows = (d.checks || []).map(function(c) {
+          var icon = c.ok
+            ? '<i class="fas fa-circle-check" style="color:var(--green)"></i>'
+            : '<i class="fas fa-circle-exclamation" style="color:var(--red)"></i>';
+          var fix = c.fix ? '<div style="color:var(--yellow);margin-left:18px">→ ' + esc(c.fix) + '</div>' : '';
+          return '<div style="margin-bottom:6px">' + icon + ' <b>' + esc(c.name) + '</b>' +
+                 '<div style="color:var(--fg-3);margin-left:18px;word-break:break-all">' + esc(c.detail || '') + '</div>' + fix + '</div>';
+        }).join('');
+        box.innerHTML = '<div style="margin-bottom:8px;font-weight:600;color:' + (d.ok ? 'var(--green)' : 'var(--yellow)') + '">' +
+                        esc(d.summary || '') + '</div>' + rows;
+        toast(d.ok ? 'All connectivity checks passed' : d.summary, d.ok ? 'success' : 'error');
+        logGitRecord('doctor', d.summary || 'diagnostics run');
+      })
+      .catch(function() {
+        ghDoctorBtn.disabled = false;
+        box.innerHTML = '<span style="color:var(--red)">Backend unreachable — is the server running?</span>';
+      });
+  };
+
+  /* Repair git auth — rewrite ~/.git-credentials + credential.helper */
+  var repairBtn = document.getElementById('ghRepairCredsBtn');
+  if (repairBtn) repairBtn.onclick = function() {
+    repairBtn.disabled = true;
+    fetch(API + '/api/github/credential/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        repairBtn.disabled = false;
+        if (d.ok) { toast('git auth repaired', 'success'); logGitRecord('auth', 'git credential store repaired'); }
+        else toast(d.error || 'Repair failed', 'error');
+        renderGhAccount();
+      })
+      .catch(function() { repairBtn.disabled = false; toast('Backend unreachable', 'error'); });
+  };
+
+  /* Doctor repair — apply safe automatic fixes */
+  var fixBtn = document.getElementById('ghDoctorFixBtn');
+  if (fixBtn) fixBtn.onclick = function() {
+    fixBtn.disabled = true;
+    fetch(API + '/api/git/doctor/fix', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        fixBtn.disabled = false;
+        toast(d.ok ? 'Applied ' + (d.applied || []).length + ' fixes' : 'Repair failed', d.ok ? 'success' : 'error');
+        logGitRecord('doctor', 'auto-repair: ' + ((d.applied || []).join(', ') || 'none'));
+        if (ghDoctorBtn) ghDoctorBtn.click();
+      })
+      .catch(function() { fixBtn.disabled = false; toast('Backend unreachable', 'error'); });
+  };
+
+  /* Connectivity test — real latency to GitHub hosts + auth check */
+  var connBtn = document.getElementById('ghConnectivityBtn');
+  if (connBtn) connBtn.onclick = function() {
+    var box = document.getElementById('ghConnectivityResults');
+    box.innerHTML = '<span style="color:var(--fg-3)">Testing…</span>';
+    connBtn.disabled = true;
+    fetch(API + '/api/github/connectivity')
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        connBtn.disabled = false;
+        var rows = (d.results || []).map(function(c) {
+          var icon = c.ok ? '<i class="fas fa-circle-check" style="color:var(--green)"></i>'
+                          : '<i class="fas fa-circle-xmark" style="color:var(--red)"></i>';
+          var ms = c.ms != null ? ' · ' + c.ms + 'ms' : '';
+          var err = c.error ? ' <span style="color:var(--red)">' + esc(c.error) + '</span>' : '';
+          return '<div>' + icon + ' <b>' + esc(c.name) + '</b><span style="color:var(--fg-3)">' + ms + '</span>' + err + '</div>';
+        }).join('');
+        var authRow = '';
+        if (d.auth && d.auth.checked) {
+          authRow = d.auth.ok
+            ? '<div><i class="fas fa-circle-check" style="color:var(--green)"></i> auth ok as <b>' + esc(d.auth.login || '') + '</b></div>'
+            : '<div><i class="fas fa-circle-xmark" style="color:var(--red)"></i> auth failed: ' + esc(d.auth.error || '') + '</div>';
+        }
+        box.innerHTML = rows + authRow;
+        toast(d.ok ? 'GitHub reachable' : 'Connectivity problems found', d.ok ? 'success' : 'error');
+        logGitRecord('doctor', 'connectivity: ' + (d.ok ? 'ok' : 'issues'));
+      })
+      .catch(function() { connBtn.disabled = false; box.innerHTML = '<span style="color:var(--red)">Backend unreachable</span>'; });
+  };
+
   document.getElementById('ghSaveIdentity').onclick = function() {
     var n = document.getElementById('ghName').value.trim();
     var e = document.getElementById('ghEmail').value.trim();
@@ -3809,6 +3993,18 @@ async function checkToolchain() {
     var lines = [], missing = [];
     var labels = { java: 'Java (OpenJDK 17)', gradle: 'Gradle', flutter: 'Flutter SDK', androidSdk: 'Android SDK', keytool: 'keytool' };
     Object.keys(labels).forEach(function(k) { lines.push((data[k] ? '✅ ' : '❌ ') + labels[k]); if (!data[k]) missing.push(k); });
+    var tc = data.androidToolchain;
+    if (tc) {
+      var tcLabels = { aapt2: 'aapt2', zipalign: 'zipalign', d8Jar: 'd8.jar', apksignerJar: 'apksigner.jar' };
+      var tcLines = Object.keys(tcLabels).map(function(k) {
+        var ok = !!tc[k];
+        var warnOnly = (k === 'zipalign');
+        return (ok ? '✅ ' : (warnOnly ? '⚠️ ' : '❌ ')) + tcLabels[k] + (ok ? '' : ' <span style="color:var(--fg-4)">' + ((tc.hints && tc.hints[k]) || '') + '</span>');
+      });
+      lines.push('<span style="color:var(--fg-4)">Android build-tools</span>');
+      lines = lines.concat(tcLines);
+      if (!tc.aapt2 || !tc.d8Jar || !tc.apksignerJar) missing.push('android');
+    }
     statusEl.innerHTML = lines.join('<br>');
     if (installBtn) installBtn.style.display = missing.length > 0 ? 'inline-flex' : 'none';
   } catch (e) { if (statusEl) statusEl.textContent = 'Error: ' + e.message; }
@@ -4203,105 +4399,6 @@ function setupSnippets() {
     if (!dropdown.contains(e.target) && e.target !== input) dropdown.classList.remove('active');
   });
 }
-
-/* ═══════════════════════════════════════════════════════════════════
-   Editing tools dropdown (cut / copy / paste / select all / undo …)
-   ═══════════════════════════════════════════════════════════════════ */
-function setupEditTools() {
-  var wrap = document.getElementById('editTools');
-  var btn = document.getElementById('editToolsBtn');
-  var menu = document.getElementById('editToolsMenu');
-  var input = document.getElementById('aiInput');
-  if (!wrap || !btn || !menu || !input) return;
-
-  function close() { wrap.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); }
-  function open() { wrap.classList.add('open'); btn.setAttribute('aria-expanded', 'true'); }
-
-  btn.addEventListener('click', function(e) {
-    e.stopPropagation();
-    wrap.classList.contains('open') ? close() : open();
-  });
-
-  function insertAtCursor(text) {
-    var start = input.selectionStart || 0;
-    var end = input.selectionEnd || 0;
-    var val = input.value || '';
-    input.value = val.slice(0, start) + text + val.slice(end);
-    var pos = start + text.length;
-    input.setSelectionRange(pos, pos);
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    input.focus();
-  }
-
-  function selectedText() {
-    var start = input.selectionStart || 0;
-    var end = input.selectionEnd || 0;
-    return (input.value || '').slice(start, end);
-  }
-
-  function doAction(action) {
-    switch (action) {
-      case 'cut':
-        var sel = selectedText();
-        if (!sel) { toast('Nothing selected', 'warn'); return; }
-        copyText(sel);
-        insertAtCursor('');
-        toast('Cut', 'success');
-        break;
-      case 'copy':
-        var csel = selectedText();
-        if (!csel) { toast('Nothing selected', 'warn'); return; }
-        copyText(csel);
-        break;
-      case 'paste':
-        if (navigator.clipboard && navigator.clipboard.readText) {
-          navigator.clipboard.readText().then(function(t) {
-            if (t) insertAtCursor(t);
-            else toast('Clipboard empty', 'warn');
-          }).catch(function() { toast('Paste blocked — long-press to paste', 'warn'); });
-        } else {
-          toast('Paste blocked — long-press to paste', 'warn');
-        }
-        break;
-      case 'selectAll':
-        input.focus();
-        input.setSelectionRange(0, (input.value || '').length);
-        break;
-      case 'undo':
-        input.focus();
-        try { document.execCommand('undo'); } catch (e) {}
-        break;
-      case 'redo':
-        input.focus();
-        try { document.execCommand('redo'); } catch (e) {}
-        break;
-      case 'clear':
-        if (!input.value) { toast('Already empty', 'warn'); return; }
-        input.value = '';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-        input.focus();
-        break;
-      case 'copyAll':
-        if (!input.value) { toast('Nothing to copy', 'warn'); return; }
-        copyText(input.value);
-        break;
-    }
-  }
-
-  menu.querySelectorAll('.edit-tools-item').forEach(function(item) {
-    item.addEventListener('click', function(e) {
-      e.stopPropagation();
-      doAction(this.getAttribute('data-action'));
-      close();
-    });
-  });
-
-  document.addEventListener('click', function(e) {
-    if (!wrap.contains(e.target)) close();
-  });
-  document.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
-}
-
 /* ═══════════════════════════════════════════════════════════════════
    Chat tools (search, copy-all, export, clear records)
    ═══════════════════════════════════════════════════════════════════ */
@@ -4509,6 +4606,8 @@ function bindHeaderButtons() {
   if (mL) mL.onclick = function() { openDrawer('left'); };
   if (mR) mR.onclick = function() { openDrawer('right'); };
   if (bd) bd.onclick = closeDrawers;
+  try { setupDrawerSwipe(); } catch (e) { console.warn('[DS] drawer swipe', e); }
+  try { setupKeyboardAwareLayout(); } catch (e) { console.warn('[DS] kb layout', e); }
   if (cB) cB.onclick = compileCurrent;
   if (nb) nb.onclick = function() { openNewFileModal(''); };
   if (rtb) rtb.onclick = refreshTree;
@@ -4552,12 +4651,26 @@ function bindHeaderButtons() {
   };
 
   if (aI) {
+    // Hardware / Bluetooth keyboard support:
+    //  Enter = send, Shift+Enter = newline, Ctrl/Cmd+Enter = send,
+    //  Alt+Enter = newline, Esc = blur. IME composition (Android soft
+    //  keyboard, CJK input) is never interrupted.
     aI.onkeydown = function(e) {
-      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendChat(); }
+      if (e.isComposing || e.keyCode === 229) return;
+      var mod = e.ctrlKey || e.metaKey;
+      if (e.key === 'Enter') {
+        if (e.shiftKey || e.altKey) return;          // newline
+        e.preventDefault();
+        sendChat();
+        return;
+      }
+      if (e.key === 'Escape') { e.preventDefault(); aI.blur(); return; }
+      if (mod && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); aI.value = ''; autoGrowInput(aI); }
     };
-    aI.addEventListener('input', function() {
-      this.style.height = 'auto';
-      this.style.height = Math.min(this.scrollHeight, 140) + 'px';
+    aI.addEventListener('input', function() { autoGrowInput(this); });
+    aI.addEventListener('focus', function() {
+      var msgs = document.getElementById('chatMessages');
+      if (msgs) setTimeout(function() { msgs.scrollTop = msgs.scrollHeight; }, 120);
     });
   }
   if (aR) {
@@ -4864,7 +4977,6 @@ function start() {
   try { setupConfirmModal(); } catch (e) { console.log('setupConfirmModal fail', e); }
   try { setupPwa(); } catch (e) { console.log('setupPwa fail', e); }
   try { setupSnippets(); } catch (e) { console.log('setupSnippets fail', e); }
-  try { setupEditTools(); } catch (e) { console.log('setupEditTools fail', e); }
   try { setupChatTools(); } catch (e) { console.log('setupChatTools fail', e); }
   try { checkBackend(); setInterval(checkBackend, 8000); } catch (e) { console.log('checkBackend fail', e); }
   // Warn once if the server has no DeepSeek key — the chat path needs it
@@ -4915,5 +5027,6 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   window.addEventListener('DOMContentLoaded', start);
 }
 </script>
+
 </body>
 </html>

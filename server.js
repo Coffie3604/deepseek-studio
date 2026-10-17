@@ -338,8 +338,12 @@ function isAllowedExternal(absPath) {
 }
 
 function resolveInWorkspace(rel, base = WORKSPACE) {
-    const target = path.resolve(base, rel == null ? '' : String(rel));
-    if (!withinBase(base, target)) return null;
+    // Absolute paths are accepted when they point inside the workspace or an
+    // allowed external root (phone storage). The UI stores absolute project
+    // paths, so rejecting them here broke every git call for those projects.
+    const raw = rel == null ? '' : String(rel);
+    const target = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(base, raw);
+    if (!withinBase(base, target) && !isAllowedExternal(target)) return null;
     const workspaceReal = safeRealPath(WORKSPACE);
     const check = (abs) => {
         const real = safeRealPath(abs);
@@ -383,7 +387,7 @@ const rateLimitMap = new Map();
 const RATE_LIMIT_PER_MIN = parseInt(process.env.DS_RATE_LIMIT, 10) || 600;
 const LONG_RUNNING = new Set([
     '/api/git/clone', '/api/git/push', '/api/git/pull', '/api/git/pull/rebase',
-    '/api/git/fetch', '/api/git/sync', '/api/git/status/upstream',
+    '/api/git/fetch', '/api/git/sync', '/api/git/status/upstream', '/api/git/doctor',
     '/api/exec', '/api/ai/chat', '/api/ai/tool-call',
     '/api/backup/restore', '/api/deploy/build', '/api/deploy/download',
     '/api/deploy/upload-to-play', '/api/deploy/install-tools', '/api/compile',
@@ -432,32 +436,160 @@ function termuxCli(cmd, args = [], timeout = 8000) {
    ═══════════════════════════════════════════════════════════════════ */
 const ghToken = () => String(secrets.github_token || '').trim();
 
-async function gitLegacy(workdir, args, opts = {}) {
-    const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
-    if (opts.token) {
+/* ─── Git connectivity tuning ───────────────────────────────────────
+   Android/Termux networks are flaky (doze, wifi↔mobile handoff, CGNAT).
+   These settings make git fail fast instead of hanging forever, and
+   retry transient transport errors automatically.
+   ─────────────────────────────────────────────────────────────────── */
+const GIT_NET_TIMEOUT = parseInt(process.env.DS_GIT_TIMEOUT, 10) || 180; // seconds
+const GIT_RETRIES = parseInt(process.env.DS_GIT_RETRIES, 10) || 2;
+
+const GIT_NET_CONFIG = {
+    // Fail fast on dead connections rather than hanging the UI.
+    'http.lowSpeedLimit': '1000',
+    'http.lowSpeedTime': '30',
+    'http.postBuffer': '524288000',
+    // Keep connections alive across the many small requests a push makes.
+    'http.version': 'HTTP/1.1',
+    // Don't let a stale credential helper block a non-interactive call.
+    'credential.interactive': 'false',
+    // Reasonable defaults for shallow-ish clones on mobile data.
+    'core.compression': '0',
+    'fetch.prune': 'true',
+    'gc.auto': '0',
+};
+
+/** Build the env for any git invocation, including token auth. */
+function gitEnv(token, user) {
+    const env = {
+        ...process.env,
+        GIT_TERMINAL_PROMPT: '0',
+        // Never let git sit on a prompt in a headless backend.
+        GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new',
+        // Termux has no CA bundle at the usual path; point git at the system one.
+        GIT_SSL_CAINFO: process.env.GIT_SSL_CAINFO || '/data/data/com.termux/files/usr/etc/tls/cert.pem',
+        // Fail fast on stalled transfers.
+        GIT_HTTP_LOW_SPEED_LIMIT: '1000',
+        GIT_HTTP_LOW_SPEED_TIME: '30',
+    };
+    if (!fs.existsSync(env.GIT_SSL_CAINFO)) delete env.GIT_SSL_CAINFO;
+    if (token) {
         env.GIT_ASKPASS = ASKPASS_HELPER;
-        env.GIT_ASKPASS_TOKEN = opts.token;
-        env.GIT_ASKPASS_USER = opts.user || 'x-access-token';
+        env.GIT_ASKPASS_TOKEN = token;
+        env.GIT_ASKPASS_USER = user || 'x-access-token';
     } else {
         env.GIT_ASKPASS = 'echo';
     }
+    return env;
+}
+
+/** True when a git failure looks transient (network) and is worth retrying. */
+function isTransientGitError(text) {
+    return /could not resolve host|connection (reset|refused|timed out|closed)|network is unreachable|temporary failure in name resolution|operation timed out|early eof|rpc failed|the remote end hung up|ssl (connect|error)|unable to access|failed to connect|timeout/i
+        .test(String(text || ''));
+}
+
+/** True when a git failure is an auth problem (retrying won't help). */
+function isAuthGitError(text) {
+    return /authentication failed|could not read (username|password)|terminal prompts disabled|permission denied|invalid username or password|403 forbidden|support for password authentication was removed|bad credentials/i
+        .test(String(text || ''));
+}
+
+async function gitLegacy(workdir, args, opts = {}) {
+    const env = opts.env || gitEnv(opts.token, opts.user);
     const res = await run('git', args, { ...opts, cwd: workdir, env });
     res.stdout = redact(res.stdout);
     res.stderr = redact(res.stderr);
     return res;
 }
 
+/**
+ * Run a network git command with retries on transient failures.
+ * Auth errors and non-network errors return immediately.
+ */
+async function gitNet(workdir, args, opts = {}) {
+    const retries = opts.retries == null ? GIT_RETRIES : opts.retries;
+    const timeout = opts.timeout || GIT_NET_TIMEOUT * 1000;
+    let last = null;
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        last = await gitLegacy(workdir, args, { ...opts, timeout });
+        if (!last.failed) return last;
+        const blob = last.stdout + '\n' + last.stderr;
+        if (isAuthGitError(blob) || !isTransientGitError(blob) || attempt === retries) return last;
+        const wait = 800 * Math.pow(2, attempt);
+        console.warn(`[git] transient failure (attempt ${attempt + 1}/${retries + 1}), retrying in ${wait}ms: ${redact(blob).slice(0, 160)}`);
+        await new Promise((r) => setTimeout(r, wait));
+    }
+    return last;
+}
+
+/** Apply the connectivity config to a repo (idempotent, cheap). */
+async function applyGitNetConfig(workdir) {
+    const pairs = Object.entries(GIT_NET_CONFIG);
+    for (const [k, v] of pairs) {
+        await run('git', ['config', '--local', k, v], { cwd: workdir, timeout: 8000 });
+    }
+}
+
+/**
+ * Normalise a remote URL for display / auth decisions.
+ * Returns { host, owner, repo, isGitHub, httpsUrl, sshUrl, webUrl }.
+ */
+function parseRemoteUrl(raw) {
+    const url = String(raw || '').trim();
+    const out = { host: '', owner: '', repo: '', isGitHub: false, httpsUrl: '', sshUrl: '', webUrl: '' };
+    if (!url) return out;
+    let m = /^(?:https?|git):\/\/(?:[^@/]+@)?([^/:]+)(?::\d+)?\/(.+?)(?:\.git)?\/?$/i.exec(url);
+    if (!m) m = /^(?:ssh:\/\/)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?\/?$/i.exec(url);
+    if (!m) return out;
+    out.host = m[1].toLowerCase();
+    const parts = m[2].replace(/\.git$/, '').split('/').filter(Boolean);
+    out.owner = parts[0] || '';
+    out.repo = parts[1] || '';
+    out.isGitHub = /(^|\.)github\.com$/.test(out.host);
+    if (out.owner && out.repo) {
+        out.httpsUrl = `https://${out.host}/${out.owner}/${out.repo}.git`;
+        out.sshUrl = `git@${out.host}:${out.owner}/${out.repo}.git`;
+        out.webUrl = `https://${out.host}/${out.owner}/${out.repo}`;
+    }
+    return out;
+}
+
+/** Read the origin URL of a repo (empty string when absent). */
+async function getOriginUrl(workdir) {
+    const r = await run('git', ['remote', 'get-url', 'origin'], { cwd: workdir, timeout: 8000 });
+    return r.failed ? '' : r.stdout.trim();
+}
+
+/**
+ * Ensure the repo can authenticate to GitHub.
+ * Rewrites an SSH origin to HTTPS when we hold a token but no SSH key,
+ * so a token-only setup still works.
+ */
+async function ensureRemoteAuth(workdir) {
+    const token = ghToken();
+    if (!token) return { ok: false, reason: 'no-token' };
+    const origin = await getOriginUrl(workdir);
+    if (!origin) return { ok: false, reason: 'no-origin' };
+    const info = parseRemoteUrl(origin);
+    if (!info.isGitHub) return { ok: true, reason: 'non-github', url: origin };
+    if (/^git@|^ssh:\/\//i.test(origin)) {
+        // No SSH key configured? Fall back to HTTPS + token.
+        const keyProbe = await run('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5', '-T', 'git@github.com'], { timeout: 10000 });
+        if (keyProbe.failed && /permission denied|publickey/i.test(keyProbe.stderr || '')) {
+            await run('git', ['remote', 'set-url', 'origin', info.httpsUrl], { cwd: workdir, timeout: 8000 });
+            return { ok: true, reason: 'ssh-to-https', url: info.httpsUrl };
+        }
+    }
+    return { ok: true, reason: 'ok', url: origin };
+}
+
 function getGit(relDir = '') {
     if (!simpleGitFactory) throw Object.assign(new Error('simple-git not installed'), { status: 500 });
     const workdir = resolveInWorkspace(relDir);
     if (!workdir) throw Object.assign(new Error('Forbidden'), { status: 403 });
-    const token = ghToken();
     const g = simpleGitFactory({ baseDir: workdir, binary: 'git', maxConcurrentProcesses: 4, trimmed: true });
-    return g.env({
-        GIT_TERMINAL_PROMPT: '0',
-        GIT_ASKPASS: token ? ASKPASS_HELPER : 'echo',
-        ...(token ? { GIT_ASKPASS_TOKEN: token, GIT_ASKPASS_USER: 'x-access-token' } : {}),
-    });
+    return g.env(gitEnv(ghToken()));
 }
 
 function getOctokit() {
@@ -545,6 +677,143 @@ app.get('/api/diagnostics', (_req, res) => {
         },
         hasGitHubToken: !!ghToken(),
     });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Git / GitHub connectivity doctor
+   ─────────────────────────────────────────────────────────────────
+   One call that answers "why can't I push?" — checks the git binary,
+   TLS trust, DNS, GitHub reachability, token validity, credential
+   store, and (optionally) a specific repo's remote + upstream state.
+   ═══════════════════════════════════════════════════════════════════ */
+app.get('/api/git/doctor', async (req, res) => {
+    const checks = [];
+    const add = (name, ok, detail, fix) => checks.push({ name, ok, detail, fix: ok ? null : (fix || null) });
+
+    // 1. git binary
+    const ver = await run('git', ['--version'], { timeout: 8000 });
+    add('git installed', !ver.failed, ver.failed ? 'git not found on PATH' : ver.stdout.trim(),
+        'pkg install git');
+
+    // 2. TLS CA bundle (a very common Termux failure)
+    const caCandidates = [
+        process.env.GIT_SSL_CAINFO,
+        '/data/data/com.termux/files/usr/etc/tls/cert.pem',
+        '/system/etc/security/cacerts',
+    ].filter(Boolean);
+    const caFound = caCandidates.find((p) => { try { return fs.existsSync(p); } catch (_) { return false; } });
+    add('TLS CA bundle', !!caFound, caFound || 'no CA bundle found',
+        'pkg install ca-certificates');
+
+    // 3. DNS + HTTPS reachability of GitHub
+    let ghReachable = false, ghDetail = '';
+    try {
+        const t0 = Date.now();
+        const r = await fetchWithRetry('https://api.github.com/zen', {
+            headers: { 'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION },
+        }, { retries: 1, timeout: 12000 });
+        ghReachable = r.ok;
+        ghDetail = 'HTTP ' + r.status + ' in ' + (Date.now() - t0) + 'ms';
+    } catch (e) {
+        ghDetail = redact(e.message || String(e));
+    }
+    add('api.github.com reachable', ghReachable, ghDetail,
+        'Check Wi-Fi / mobile data, or disable any VPN/proxy blocking GitHub.');
+
+    // 4. Token
+    const token = ghToken();
+    if (!token) {
+        add('GitHub token', false, 'not signed in', 'Sign in from the Git panel, or run: npm run gh:login');
+    } else {
+        try {
+            const v = await verifyGitHubToken(token);
+            add('GitHub token', v.ok, v.ok ? ('signed in as ' + v.user.login + ' · scopes: ' + (v.scopes.join(',') || 'none'))
+                : (v.error || 'rejected'), 'Re-verify or replace the token in the Git panel.');
+            if (v.ok && v.scopes.length && !v.scopes.includes('repo')) {
+                add('token has "repo" scope', false, 'scopes: ' + v.scopes.join(','),
+                    'Fine-grained tokens need Contents: read+write; classic tokens need the "repo" scope.');
+            }
+        } catch (e) { add('GitHub token', false, redact(e.message), 'Check connectivity first.'); }
+    }
+
+    // 5. Credential store — the file must exist AND git must be told to read it
+    const credExists = fs.existsSync(GIT_CREDENTIALS_FILE);
+    const helper = await run('git', ['config', '--global', 'credential.helper'], { timeout: 8000 });
+    const helperOk = /store/.test(helper.stdout);
+    add('git credential store', credExists && helperOk,
+        'file: ' + (credExists ? 'present' : 'missing') + ' · helper: ' + (helper.stdout.trim() || 'unset'),
+        'Tap "Repair" to rewrite ~/.git-credentials and set credential.helper=store.');
+
+    // 6. git identity (commits fail without it)
+    const uname = await run('git', ['config', '--global', 'user.name'], { timeout: 8000 });
+    const uemail = await run('git', ['config', '--global', 'user.email'], { timeout: 8000 });
+    add('git identity', !!uname.stdout.trim() && !!uemail.stdout.trim(),
+        (uname.stdout.trim() || '(no name)') + ' <' + (uemail.stdout.trim() || '(no email)') + '>',
+        'Set your name + email in the Git panel (Git Identity).');
+
+    // 7. Proxy / VPN interference (a common cause of GitHub timeouts on Android)
+    const proxyEnv = ['HTTPS_PROXY', 'https_proxy', 'HTTP_PROXY', 'http_proxy', 'ALL_PROXY', 'all_proxy']
+        .filter((k) => process.env[k]);
+    const gitProxy = await run('git', ['config', '--global', '--get', 'http.proxy'], { timeout: 8000 });
+    const proxyVal = gitProxy.stdout.trim();
+    add('no blocking proxy', proxyEnv.length === 0 && !proxyVal,
+        proxyEnv.length || proxyVal ? ('proxy: ' + (proxyVal || proxyEnv.join(','))) : 'direct connection',
+        'Unset http.proxy (git config --global --unset http.proxy) or disable the VPN if GitHub is unreachable.');
+
+    // 8. Optional: a specific repo
+    const rel = req.query.cwd;
+    if (rel) {
+        const workdir = resolveInWorkspace(String(rel));
+        if (!workdir) {
+            add('repo', false, 'path outside workspace', null);
+        } else if (!fs.existsSync(path.join(workdir, '.git'))) {
+            add('repo', false, 'not a git repository', 'Run git init, or use /api/git/auto-repo.');
+        } else {
+            const origin = await getOriginUrl(workdir);
+            const info = parseRemoteUrl(origin);
+            add('origin remote', !!origin, origin || 'no origin configured',
+                'Set it in the Git panel or via /api/git/set-remote.');
+            if (origin) {
+                const needsToken = info.isGitHub && /^https:/i.test(origin);
+                add('remote auth', !needsToken || !!token,
+                    needsToken ? (token ? 'HTTPS + token' : 'HTTPS but no token') : 'SSH / non-GitHub',
+                    'Sign in to GitHub so HTTPS pushes can authenticate.');
+                const ls = await gitNet(workdir, ['ls-remote', '--heads', 'origin'], { timeout: 60000, token, retries: 1 });
+                add('remote reachable', !ls.failed,
+                    ls.failed ? redact(ls.stderr || ls.stdout).slice(0, 300) : 'ok',
+                    ls.failed ? gitFailureHint(ls.stderr + ls.stdout) : null);
+            }
+        }
+    }
+
+    const failed = checks.filter((c) => !c.ok);
+    res.json({
+        ok: failed.length === 0,
+        summary: failed.length === 0 ? 'All connectivity checks passed' : failed.length + ' check(s) need attention',
+        checks,
+        config: { timeoutSeconds: GIT_NET_TIMEOUT, retries: GIT_RETRIES, caBundle: caFound || null },
+    });
+});
+
+/**
+ * POST /api/git/doctor/fix — apply the safe, idempotent repairs the doctor
+ * suggests: rewrite the credential store, set credential.helper, and apply
+ * the mobile-network git config globally.
+ */
+app.post('/api/git/doctor/fix', async (_req, res) => {
+    const applied = [];
+    const token = ghToken();
+    if (token) {
+        writeGitCredential(token);
+        applied.push('rewrote ~/.git-credentials');
+    }
+    ensureCredentialHelper();
+    applied.push('credential.helper=store');
+    for (const [k, v] of Object.entries(GIT_NET_CONFIG)) {
+        const r = await run('git', ['config', '--global', k, v], { timeout: 8000 });
+        if (!r.failed) applied.push(k + '=' + v);
+    }
+    res.json({ ok: true, applied, credentialStore: hasGitHubCredential() });
 });
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1519,30 +1788,55 @@ app.post('/api/git/init', async (req, res) => {
 });
 
 app.post('/api/git/clone', async (req, res) => {
-    const { url, dir } = req.body || {};
+    const body = req.body || {};
+    const { dir } = body;
+    let url = String(body.url || '').trim();
     if (!url) return res.status(400).json({ error: 'url required' });
+
+    // Accept "owner/repo" shorthand and bare "github.com/owner/repo".
+    if (/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(url)) url = 'https://github.com/' + url + '.git';
+    else if (/^(www\.)?github\.com\//i.test(url)) url = 'https://' + url;
     if (!/^(https?:\/\/|git@|ssh:\/\/)/.test(url)) return res.status(400).json({ error: 'unsupported url scheme' });
-    const fallbackName = url.split('/').pop().replace(/\.git$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
+
+    const info = parseRemoteUrl(url);
+    const fallbackName = info.repo || url.split('/').pop().replace(/\.git$/, '').replace(/[^a-zA-Z0-9._-]/g, '_');
     const name = String(dir || fallbackName || 'repo');
     const target = resolveInWorkspace(name);
     if (!target || target === WORKSPACE) return res.status(403).json({ error: 'Forbidden' });
     if (fs.existsSync(target)) return res.status(400).json({ error: 'Directory exists: ' + name });
-    const opts = {};
-    if (/^https:\/\/(www\.)?github\.com\//i.test(url) && ghToken()) opts.token = ghToken();
+
+    // A token only helps for HTTPS GitHub URLs. SSH needs a key, not a token.
+    const token = (info.isGitHub && /^https:/i.test(url) && ghToken()) ? ghToken() : undefined;
+    const depth = parseInt(body.depth, 10);
+    const cloneArgs = ['clone', '--progress'];
+    if (depth > 0) cloneArgs.push('--depth', String(Math.min(depth, 1000)));
+    if (body.branch) cloneArgs.push('--branch', String(body.branch).slice(0, 200));
+    if (body.recurseSubmodules) cloneArgs.push('--recurse-submodules');
+    cloneArgs.push(url, name);
+
     try {
-        if (simpleGitFactory) {
-            // Note: simple-git's .env() returns a *new* instance. The old code
-            // called it and threw the result away, so the token never reached
-            // the clone. Reassign it.
-            let g = simpleGitFactory({ baseDir: WORKSPACE });
-            g = opts.token
-                ? g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: ASKPASS_HELPER, GIT_ASKPASS_TOKEN: opts.token, GIT_ASKPASS_USER: 'x-access-token' })
-                : g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' });
-            await g.clone(url, name, ['--progress']);
-            return res.json(gitOk({ stdout: 'Cloned into ' + name, dir: name }));
+        const r = await gitNet(WORKSPACE, cloneArgs, {
+            token,
+            timeout: 600000,
+            maxBuffer: 30 * 1024 * 1024,
+            retries: 1, // a clone is expensive; retry once only
+        });
+        if (r.failed) {
+            // Clean up a half-written directory so a retry isn't blocked.
+            try { if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true }); } catch (_) {}
+            const blob = r.stdout + '\n' + r.stderr;
+            const hint = isAuthGitError(blob)
+                ? (info.isGitHub && !ghToken()
+                    ? 'This looks like a private repo. Sign in to GitHub first (Git panel → Sign in), or use a token.'
+                    : 'Authentication failed. Your GitHub token may be expired or lack the "repo" scope.')
+                : isTransientGitError(blob)
+                    ? 'Network problem reaching ' + (info.host || 'the remote') + '. Check your connection and retry.'
+                    : null;
+            return res.json({ code: r.code, ok: false, stdout: r.stdout, stderr: r.stderr, dir: name, hint, remote: info });
         }
-        const r = await gitLegacy(WORKSPACE, ['clone', '--progress', url, name], Object.assign({ timeout: 300000, maxBuffer: 30 * 1024 * 1024 }, opts));
-        res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr, dir: name });
+        // Make the fresh clone resilient to flaky mobile networks.
+        await applyGitNetConfig(target);
+        res.json(gitOk({ stdout: 'Cloned into ' + name, dir: name, remote: info }));
     } catch (e) { const err = gitErr(e); err.dir = name; res.status(500).json(err); }
 });
 
@@ -1627,26 +1921,20 @@ app.post('/api/git/push', async (req, res) => {
 
         /* 3. Push — set upstream on first push (or when caller asks) */
         const wantSetUpstream = !hasUpstream || setUpstream === true;
-        let pushOut = '', pushErr = '';
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            try {
-                const push = wantSetUpstream
-                    ? await g.push(['-u', 'origin', branch])
-                    : await g.push();
-                pushOut = JSON.stringify(push && push.pushed ? push.pushed : push || {});
-            } catch (e) {
-                pushErr = redact(e.message || String(e));
-                return res.json({ code: 1, ok: false, stdout: commitOut, stderr: pushErr, committed, pushed: false, branch });
-            }
-        } else {
-            const args = wantSetUpstream ? ['push', '-u', 'origin', branch] : ['push'];
-            const push = await gitLegacy(workdir, args, { timeout: 180000, token });
-            pushOut = push.stdout || '';
-            pushErr = push.stderr || '';
-            if (push.failed) {
-                return res.json({ code: push.code, ok: false, stdout: commitOut + pushOut, stderr: pushErr, committed, pushed: false, branch });
-            }
+        // If origin is SSH but we only have a token, switch it to HTTPS first.
+        const authFix = await ensureRemoteAuth(workdir);
+        const pushArgs = wantSetUpstream ? ['push', '-u', 'origin', branch] : ['push'];
+        const push = await gitNet(workdir, pushArgs, { timeout: 300000, token });
+        const pushOut = push.stdout || '';
+        const pushErr = push.stderr || '';
+        if (push.failed) {
+            const blob = pushOut + '\n' + pushErr;
+            return res.json({
+                code: push.code, ok: false, stdout: commitOut + pushOut, stderr: pushErr,
+                committed, pushed: false, branch,
+                hint: gitFailureHint(blob),
+                authFix: authFix.reason,
+            });
         }
 
         res.json(gitOk({
@@ -1654,44 +1942,89 @@ app.post('/api/git/push', async (req, res) => {
             stderr: commitErr + pushErr,
             committed, pushed: true, branch,
             setUpstream: wantSetUpstream,
+            authFix: authFix.reason !== 'ok' ? authFix.reason : undefined,
         }));
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
+/**
+ * Turn a raw git error blob into an actionable, human-readable hint.
+ * Shared by push / pull / fetch / sync so the UI can show one message.
+ */
+function gitFailureHint(blob) {
+    const text = String(blob || '');
+    if (isAuthGitError(text)) {
+        if (!ghToken()) return 'Not signed in to GitHub. Open the Git panel and sign in, or paste a personal access token.';
+        return 'GitHub rejected the stored token. It may be expired or missing the "repo" scope — re-verify it in the Git panel.';
+    }
+    if (/non-fast-forward|fetch first|rejected/i.test(text)) {
+        return 'The remote has commits you do not have. Pull first (or use Sync), then push again.';
+    }
+    if (/protected branch|required status check|pull request/i.test(text)) {
+        return 'The remote branch is protected. Push to a new branch and open a pull request instead.';
+    }
+    if (/no such remote|does not appear to be a git repository/i.test(text)) {
+        return 'The origin remote is missing or wrong. Set it again in the Git panel.';
+    }
+    if (isTransientGitError(text)) {
+        return 'Network error talking to the remote. Check your connection (mobile data / Wi-Fi) and retry.';
+    }
+    if (/repository not found/i.test(text)) {
+        return 'Repository not found. It may be private (sign in), renamed, or the token lacks access.';
+    }
+    return null;
+}
+
 app.post('/api/git/pull', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
+    const token = ghToken() || undefined;
     try {
-        if (simpleGitFactory) {
-            const g = getGit(rel);
-            try { const r = await g.pull(['--no-edit']); const out = JSON.stringify(r); return res.json(gitOk({ stdout: out, conflicted: /CONFLICT/.test(out) })); }
-            catch (e) { const m = redact(e.message || String(e)); return res.json({ code: 1, ok: false, conflicted: /CONFLICT/.test(m), stdout: '', stderr: m }); }
-        }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
-        const r = await gitLegacy(workdir, ['pull', '--no-edit'], { timeout: 180000, token: ghToken() || undefined });
-        res.json({ code: r.code, ok: !r.failed && !/CONFLICT/.test(r.stdout + r.stderr), conflicted: /CONFLICT|Automatic merge failed/.test(r.stdout + r.stderr), stdout: r.stdout, stderr: r.stderr });
+        await ensureRemoteAuth(workdir);
+        const r = await gitNet(workdir, ['pull', '--no-edit'], { timeout: 300000, token });
+        const blob = r.stdout + '\n' + r.stderr;
+        const conflicted = /CONFLICT|Automatic merge failed/i.test(blob);
+        res.json({
+            code: r.code, ok: !r.failed && !conflicted, conflicted,
+            stdout: r.stdout, stderr: r.stderr,
+            hint: r.failed ? gitFailureHint(blob) : null,
+        });
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
 app.post('/api/git/pull/rebase', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
+    const token = ghToken() || undefined;
     try {
-        if (simpleGitFactory) { const g = getGit(rel); return res.json(gitOk({ stdout: JSON.stringify(await g.pull(['--rebase', '--no-edit'])) })); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
-        const r = await gitLegacy(workdir, ['pull', '--rebase', '--no-edit'], { timeout: 180000, token: ghToken() || undefined });
-        res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr });
+        await ensureRemoteAuth(workdir);
+        const r = await gitNet(workdir, ['pull', '--rebase', '--no-edit'], { timeout: 300000, token });
+        const blob = r.stdout + '\n' + r.stderr;
+        res.json({
+            code: r.code, ok: !r.failed,
+            conflicted: /CONFLICT|Automatic merge failed/i.test(blob),
+            stdout: r.stdout, stderr: r.stderr,
+            hint: r.failed ? gitFailureHint(blob) : null,
+        });
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
 app.post('/api/git/fetch', async (req, res) => {
     const rel = (req.body || {}).cwd || '';
+    const token = ghToken() || undefined;
     try {
-        if (simpleGitFactory) { const g = getGit(rel); return res.json(gitOk({ stdout: JSON.stringify(await g.fetch(['--all', '--prune'])) })); }
         const workdir = resolveInWorkspace(rel);
         if (!workdir) return res.status(403).json({ error: 'Forbidden' });
-        const r = await gitLegacy(workdir, ['fetch', '--all', '--prune'], { timeout: 180000, token: ghToken() || undefined });
-        res.json({ code: r.code, ok: !r.failed, stdout: r.stdout, stderr: r.stderr });
+        await ensureRemoteAuth(workdir);
+        const r = await gitNet(workdir, ['fetch', '--all', '--prune', '--tags'], { timeout: 300000, token });
+        const blob = r.stdout + '\n' + r.stderr;
+        res.json({
+            code: r.code, ok: !r.failed,
+            stdout: r.stdout, stderr: r.stderr,
+            hint: r.failed ? gitFailureHint(blob) : null,
+        });
     } catch (e) { res.status(500).json(gitErr(e)); }
 });
 
@@ -2205,10 +2538,16 @@ app.post('/api/git/sync', async (req, res) => {
         }
 
         /* 1. Fetch */
-        const fetched = await gitLegacy(workdir, ['fetch', '--quiet', 'origin'], { timeout: 120000, token });
+        await ensureRemoteAuth(workdir);
+        const fetched = await gitNet(workdir, ['fetch', '--quiet', 'origin'], { timeout: 300000, token });
         steps.push({ step: 'fetch', ok: !fetched.failed, detail: fetched.failed ? redact(fetched.stderr || fetched.stdout) : 'ok' });
         if (fetched.failed) {
-            return res.json({ ok: false, state: 'error', error: 'Fetch failed: ' + redact(fetched.stderr || fetched.stdout), steps });
+            return res.json({
+                ok: false, state: 'error',
+                error: 'Fetch failed: ' + redact(fetched.stderr || fetched.stdout),
+                hint: gitFailureHint(fetched.stderr + fetched.stdout),
+                steps,
+            });
         }
 
         /* 2. Branch + upstream + counts */
@@ -2222,12 +2561,13 @@ app.post('/api/git/sync', async (req, res) => {
                 await gitLegacy(workdir, ['branch', '--set-upstream-to', 'origin/' + branch, branch], { token });
                 steps.push({ step: 'set-upstream', ok: true, detail: 'origin/' + branch });
             } else {
-                const push = await gitLegacy(workdir, ['push', '-u', 'origin', branch], { timeout: 180000, token });
+                const push = await gitNet(workdir, ['push', '-u', 'origin', branch], { timeout: 300000, token });
                 steps.push({ step: 'push-initial', ok: !push.failed, detail: push.failed ? redact(push.stderr || push.stdout) : 'ok' });
                 return res.json({
                     ok: !push.failed,
                     state: push.failed ? 'error' : 'pushed-initial',
                     branch, ahead: 0, behind: 0, steps,
+                    hint: push.failed ? gitFailureHint(push.stderr + push.stdout) : null,
                     output: redact((push.stdout || '') + (push.stderr ? '\n' + push.stderr : '')),
                 });
             }
@@ -2244,24 +2584,26 @@ app.post('/api/git/sync', async (req, res) => {
 
         /* 4. Behind only — fast-forward pull */
         if (behind > 0 && ahead === 0) {
-            const pull = await gitLegacy(workdir, ['pull', '--ff-only', '--no-edit'], { timeout: 180000, token });
+            const pull = await gitNet(workdir, ['pull', '--ff-only', '--no-edit'], { timeout: 300000, token });
             steps.push({ step: 'pull-ff', ok: !pull.failed, detail: pull.failed ? redact(pull.stderr || pull.stdout) : 'ok' });
             return res.json({
                 ok: !pull.failed,
                 state: pull.failed ? 'error' : 'pulled',
                 branch, upstream, ahead: 0, behind, steps,
+                hint: pull.failed ? gitFailureHint(pull.stderr + pull.stdout) : null,
                 output: redact((pull.stdout || '') + (pull.stderr ? '\n' + pull.stderr : '')),
             });
         }
 
         /* 5. Ahead only — push */
         if (ahead > 0 && behind === 0) {
-            const push = await gitLegacy(workdir, ['push'], { timeout: 180000, token });
+            const push = await gitNet(workdir, ['push'], { timeout: 300000, token });
             steps.push({ step: 'push', ok: !push.failed, detail: push.failed ? redact(push.stderr || push.stdout) : 'ok' });
             return res.json({
                 ok: !push.failed,
                 state: push.failed ? 'error' : 'pushed',
                 branch, upstream, ahead, behind: 0, steps,
+                hint: push.failed ? gitFailureHint(push.stderr + push.stdout) : null,
                 output: redact((push.stdout || '') + (push.stderr ? '\n' + push.stderr : '')),
             });
         }
@@ -2277,22 +2619,24 @@ app.post('/api/git/sync', async (req, res) => {
         const pullArgs = strategy === 'rebase'
             ? ['pull', '--rebase', '--no-edit']
             : ['pull', '--no-rebase', '--no-edit'];
-        const pull = await gitLegacy(workdir, pullArgs, { timeout: 180000, token });
+        const pull = await gitNet(workdir, pullArgs, { timeout: 300000, token });
         const conflicted = /CONFLICT|Automatic merge failed|needs merge/i.test(pull.stdout + pull.stderr);
         steps.push({ step: 'pull-' + strategy, ok: !pull.failed, detail: pull.failed ? redact(pull.stderr || pull.stdout) : 'ok', conflicted });
         if (pull.failed) {
             return res.json({
                 ok: false, state: conflicted ? 'conflict' : 'error', conflicted,
                 branch, upstream, ahead, behind, steps,
+                hint: conflicted ? 'Resolve the conflicts, then commit and sync again.' : gitFailureHint(pull.stderr + pull.stdout),
                 output: redact((pull.stdout || '') + (pull.stderr ? '\n' + pull.stderr : '')),
             });
         }
         if (strategy === 'rebase') {
-            const push = await gitLegacy(workdir, ['push'], { timeout: 180000, token });
+            const push = await gitNet(workdir, ['push'], { timeout: 300000, token });
             steps.push({ step: 'push-after-rebase', ok: !push.failed, detail: push.failed ? redact(push.stderr || push.stdout) : 'ok' });
             return res.json({
                 ok: !push.failed, state: push.failed ? 'error' : 'synced',
                 branch, upstream, ahead: 0, behind: 0, steps,
+                hint: push.failed ? gitFailureHint(push.stderr + push.stdout) : null,
                 output: redact((pull.stdout || '') + '\n' + (push.stdout || '') + (push.stderr ? '\n' + push.stderr : '')),
             });
         }
@@ -2594,20 +2938,69 @@ app.post('/api/github/signout', (req, res) => {
    Termux shell works without re-entering anything.
    ═══════════════════════════════════════════════════════════════════ */
 const GIT_CREDENTIALS_FILE = path.join(HOME, '.git-credentials');
+const GIT_CREDENTIAL_HOSTS = ['github.com', 'api.github.com', 'gist.github.com'];
+
+/**
+ * Read ~/.git-credentials into { host: line } so we can update only the
+ * GitHub entries and leave credentials for other hosts untouched.
+ */
+function readGitCredentialLines() {
+    const out = new Map();
+    try {
+        if (!fs.existsSync(GIT_CREDENTIALS_FILE)) return out;
+        const text = fs.readFileSync(GIT_CREDENTIALS_FILE, 'utf8');
+        for (const line of text.split(/\r?\n/)) {
+            const t = line.trim();
+            if (!t) continue;
+            const m = /^[a-z]+:\/\/(?:[^@/]*@)?([^/:]+)/i.exec(t);
+            if (m) out.set(m[1].toLowerCase(), t);
+        }
+    } catch (_) {}
+    return out;
+}
+
+function writeGitCredentialLines(map) {
+    const body = [...map.values()].join('\n') + (map.size ? '\n' : '');
+    fs.writeFileSync(GIT_CREDENTIALS_FILE, body, { mode: 0o600 });
+    try { fs.chmodSync(GIT_CREDENTIALS_FILE, 0o600); } catch (_) {}
+}
+
+/** Make sure git's global credential.helper actually reads the store file. */
+function ensureCredentialHelper(cb) {
+    execFile('git', ['config', '--global', '--get-all', 'credential.helper'], (err, stdout) => {
+        const current = String(stdout || '').trim();
+        if (/store/.test(current)) return cb && cb(true);
+        execFile('git', ['config', '--global', '--replace-all', 'credential.helper', 'store'], () => {
+            if (cb) cb(false);
+        });
+    });
+}
 
 function writeGitCredential(token) {
     if (!token) return;
     try {
-        const line = 'https://x-access-token:' + encodeURIComponent(token) + '@github.com\n';
-        fs.writeFileSync(GIT_CREDENTIALS_FILE, line, { mode: 0o600 });
-        fs.chmodSync(GIT_CREDENTIALS_FILE, 0o600);
-        // Ensure git is configured to read it (idempotent).
-        execFile('git', ['config', '--global', 'credential.helper', 'store'], () => {});
+        const map = readGitCredentialLines();
+        for (const host of GIT_CREDENTIAL_HOSTS) {
+            map.set(host, 'https://x-access-token:' + encodeURIComponent(token) + '@' + host);
+        }
+        writeGitCredentialLines(map);
+        ensureCredentialHelper();
     } catch (err) { console.error('[github] credential store write failed:', err.message); }
 }
 
 function clearGitCredential() {
-    try { if (fs.existsSync(GIT_CREDENTIALS_FILE)) fs.unlinkSync(GIT_CREDENTIALS_FILE); } catch (_) {}
+    try {
+        const map = readGitCredentialLines();
+        for (const host of GIT_CREDENTIAL_HOSTS) map.delete(host);
+        if (map.size) writeGitCredentialLines(map);
+        else if (fs.existsSync(GIT_CREDENTIALS_FILE)) fs.unlinkSync(GIT_CREDENTIALS_FILE);
+    } catch (_) {}
+}
+
+/** Does the credential store currently hold a GitHub token? */
+function hasGitHubCredential() {
+    const map = readGitCredentialLines();
+    return GIT_CREDENTIAL_HOSTS.some((h) => map.has(h));
 }
 
 // Validate a token against the GitHub API and return the authenticated user.
@@ -2659,6 +3052,88 @@ app.post('/api/github/verify', async (_req, res) => {
         if (check.ok) writeGitCredential(token);
         res.json(check);
     } catch (e) { res.status(500).json({ ok: false, error: redact(e.message) }); }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GitHub auth status — one call the UI uses to render the whole
+   account card: token presence, validity, scopes, credential store
+   sync, and the OAuth client_id source.
+   ═══════════════════════════════════════════════════════════════════ */
+app.get('/api/github/auth', async (_req, res) => {
+    const token = ghToken();
+    const out = {
+        hasToken: !!token,
+        tokenKind: !token ? null
+            : (/^github_pat_/.test(token) ? 'fine-grained'
+                : /^ghp_/.test(token) ? 'classic'
+                    : /^gh[ousr]_/.test(token) ? 'oauth' : 'unknown'),
+        credentialStore: hasGitHubCredential(),
+        clientIdSource: secrets.github_client_id ? 'secret' : (process.env.DS_GITHUB_CLIENT_ID ? 'env' : 'default'),
+        connected: false,
+    };
+    if (!token) return res.json(out);
+    try {
+        const v = await verifyGitHubToken(token);
+        out.connected = v.ok;
+        if (v.ok) {
+            out.user = v.user;
+            out.scopes = v.scopes;
+            out.canPush = v.scopes.length === 0 ? true : v.scopes.includes('repo');
+        } else {
+            out.error = v.error;
+        }
+    } catch (e) { out.error = redact(e.message); }
+    res.json(out);
+});
+
+/* Re-write ~/.git-credentials from the stored token (repair action). */
+app.post('/api/github/credential/sync', (_req, res) => {
+    const token = ghToken();
+    if (!token) return res.status(400).json({ ok: false, error: 'Not signed in — no token to sync.' });
+    writeGitCredential(token);
+    ensureCredentialHelper();
+    res.json({ ok: true, credentialStore: hasGitHubCredential(), file: GIT_CREDENTIALS_FILE });
+});
+
+/* Remove the GitHub entries from ~/.git-credentials without signing out. */
+app.post('/api/github/credential/clear', (_req, res) => {
+    clearGitCredential();
+    res.json({ ok: true, credentialStore: hasGitHubCredential() });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Connectivity test — measures real latency to the endpoints that
+   matter (api.github.com, github.com, codeload) and reports whether
+   git itself can authenticate. Used by the "Test connection" button.
+   ═══════════════════════════════════════════════════════════════════ */
+app.get('/api/github/connectivity', async (_req, res) => {
+    const targets = [
+        { name: 'api.github.com', url: 'https://api.github.com/zen' },
+        { name: 'github.com', url: 'https://github.com/favicon.ico' },
+        { name: 'codeload.github.com', url: 'https://codeload.github.com/' },
+    ];
+    const results = await Promise.all(targets.map(async (t) => {
+        const t0 = Date.now();
+        try {
+            const r = await fetchWithRetry(t.url, {
+                method: 'GET',
+                headers: { 'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION },
+            }, { retries: 0, timeout: 10000 });
+            return { name: t.name, ok: r.status < 500, status: r.status, ms: Date.now() - t0 };
+        } catch (e) {
+            return { name: t.name, ok: false, status: 0, ms: Date.now() - t0, error: redact(e.message || String(e)) };
+        }
+    }));
+    const token = ghToken();
+    let auth = { checked: false };
+    if (token) {
+        try {
+            const v = await verifyGitHubToken(token);
+            auth = { checked: true, ok: v.ok, login: v.ok ? v.user.login : null, scopes: v.ok ? v.scopes : [], error: v.ok ? null : v.error };
+        } catch (e) { auth = { checked: true, ok: false, error: redact(e.message) }; }
+    }
+    const ok = results.every((r) => r.ok) && (!auth.checked || auth.ok);
+    res.json({ ok, results, auth, credentialStore: hasGitHubCredential() });
 });
 
 app.get('/api/github/device/config', (_req, res) => {
@@ -3006,7 +3481,172 @@ app.get('/api/deploy/check-tools', async (_req, res) => {
         probe('command -v flutter >/dev/null 2>&1 || echo MISSING'),
         probe('command -v keytool >/dev/null 2>&1 || echo MISSING'),
     ]);
-    res.json({ java, gradle, flutter, keytool, androidSdk: !!(process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT) });
+    const tc = resolveAndroidToolchain();
+    res.json({
+        java, gradle, flutter, keytool,
+        androidSdk: !!(process.env.ANDROID_HOME || process.env.ANDROID_SDK_ROOT || tc.sdk),
+        androidToolchain: { ok: tc.ok, aapt2: tc.aapt2, zipalign: tc.zipalign, d8Jar: tc.d8Jar, apksignerJar: tc.apksignerJar, problems: tc.problems, warnings: tc.warnings, hints: tc.hints },
+    });
+});
+
+/* ─── Android build-tools on Termux ───────────────────────────────────
+   Google's build-tools binaries are glibc/x86_64 ELF files. Running them on
+   Termux (bionic, aarch64) fails with:
+       [Requesting program interpreter: /lib64/ld-linux-x86-64.so.2]
+   or, for the 32-bit zipalign-termux stub, /lib/ld-linux.so.2.
+   We therefore prefer Termux-native tools (aapt2 from `pkg install aapt`,
+   zipalign-termux) and only fall back to SDK copies when they actually run.
+   d8/apksigner are plain JARs, so they run fine under Termux's JVM.
+   ─────────────────────────────────────────────────────────────────── */
+const ANDROID_SDK_CANDIDATES = [
+    process.env.ANDROID_HOME,
+    process.env.ANDROID_SDK_ROOT,
+    path.join(HOME, 'android-sdk'),
+    path.join(HOME, 'Android', 'Sdk'),
+    '/data/data/com.termux/files/usr/opt/android-sdk',
+].filter(Boolean);
+
+function findAndroidSdk() {
+    for (const dir of ANDROID_SDK_CANDIDATES) {
+        try { if (fs.existsSync(path.join(dir, 'build-tools'))) return dir; } catch (_) {}
+    }
+    return null;
+}
+
+function latestBuildTools(sdk) {
+    if (!sdk) return null;
+    try {
+        const versions = fs.readdirSync(path.join(sdk, 'build-tools'))
+            .filter((v) => /^\d+\.\d+\.\d+/.test(v))
+            .sort((a, b) => {
+                const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+                for (let i = 0; i < 3; i++) if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) - (pb[i] || 0);
+                return 0;
+            });
+        return versions.length ? path.join(sdk, 'build-tools', versions[versions.length - 1]) : null;
+    } catch (_) { return null; }
+}
+
+function latestPlatform(sdk) {
+    if (!sdk) return null;
+    try {
+        const plats = fs.readdirSync(path.join(sdk, 'platforms'))
+            .filter((p) => /^android-\d+$/.test(p))
+            .sort((a, b) => parseInt(a.slice(8), 10) - parseInt(b.slice(8), 10));
+        if (!plats.length) return null;
+        const jar = path.join(sdk, 'platforms', plats[plats.length - 1], 'android.jar');
+        return fs.existsSync(jar) ? jar : null;
+    } catch (_) { return null; }
+}
+
+// A tool is unusable on Termux if it is a glibc ELF (bionic cannot load it).
+function isGlibcElf(file) {
+    try {
+        const fd = fs.openSync(file, 'r');
+        const buf = Buffer.alloc(4096);
+        const n = fs.readSync(fd, buf, 0, 4096, 0);
+        fs.closeSync(fd);
+        if (n < 64 || buf[0] !== 0x7f || buf[1] !== 0x45) return false; // not ELF
+        return /ld-linux[^"\0]*\.so/.test(buf.slice(0, n).toString('latin1'));
+    } catch (_) { return false; }
+}
+
+function whichSync(name) {
+    const dirs = (process.env.PATH || '').split(':').filter(Boolean);
+    for (const d of dirs) {
+        const p = path.join(d, name);
+        try { fs.accessSync(p, fs.constants.X_OK); return p; } catch (_) {}
+    }
+    return null;
+}
+
+// A binary can exist and be executable yet still fail on Termux (glibc
+// interpreter, missing libs, 32-bit stub). Never trust `which` alone — the
+// build would die later with a cryptic loader error. Actually run it once.
+function canExecute(file, args) {
+    if (!file) return false;
+    try {
+        const r = require('child_process').spawnSync(file, args || ['--version'], {
+            timeout: 8000, stdio: 'ignore', env: process.env,
+        });
+        // Any normal exit (even non-zero) means the loader worked.
+        return !r.error && r.signal == null;
+    } catch (_) { return false; }
+}
+
+// Termux package names differ from the binary names.
+const TERMUX_PKG_FOR = {
+    aapt2: 'aapt',
+    zipalign: 'zipalign',
+    d8: 'openjdk-17',
+    apksigner: 'openjdk-17',
+    java: 'openjdk-17',
+};
+
+function resolveAndroidToolchain() {
+    const sdk = findAndroidSdk();
+    const bt = latestBuildTools(sdk);
+    // `probeArgs` lets us pass a harmless flag so the binary really runs.
+    const pick = (termuxName, sdkName, probeArgs) => {
+        const native = whichSync(termuxName);
+        if (native && !isGlibcElf(native) && canExecute(native, probeArgs)) {
+            return { path: native, source: 'termux' };
+        }
+        const fromSdk = bt ? path.join(bt, sdkName) : null;
+        if (fromSdk && fs.existsSync(fromSdk) && !isGlibcElf(fromSdk) && canExecute(fromSdk, probeArgs)) {
+            return { path: fromSdk, source: 'sdk' };
+        }
+        return null;
+    };
+    const aapt2 = pick('aapt2', 'aapt2', ['version']);
+    // zipalign is optional: Termux has no native package, and the SDK copy is
+    // glibc-only. apksigner still produces a valid (unaligned) APK; we align
+    // with the pure-JS fallback below when no native binary is available.
+    const zipalign = pick('zipalign-termux', 'zipalign-termux', ['-h']) || pick('zipalign', 'zipalign', ['-h']);
+    const d8Jar = bt && fs.existsSync(path.join(bt, 'lib', 'd8.jar')) ? path.join(bt, 'lib', 'd8.jar') : null;
+    const apksignerJar = bt && fs.existsSync(path.join(bt, 'lib', 'apksigner.jar')) ? path.join(bt, 'lib', 'apksigner.jar') : null;
+    const androidJar = latestPlatform(sdk);
+    const problems = [];
+    const hints = {};
+    if (!aapt2) {
+        problems.push('aapt2 missing — run: pkg install aapt');
+        hints.aapt2 = 'pkg install aapt';
+    }
+    if (!d8Jar) {
+        problems.push('d8.jar missing — install Android SDK build-tools');
+        hints.d8Jar = 'sdkmanager "build-tools;35.0.0"';
+    }
+    if (!apksignerJar) {
+        problems.push('apksigner.jar missing — install Android SDK build-tools');
+        hints.apksignerJar = 'sdkmanager "build-tools;35.0.0"';
+    }
+    if (!androidJar) {
+        problems.push('android.jar missing — sdkmanager "platforms;android-35"');
+        hints.androidJar = 'sdkmanager "platforms;android-35"';
+    }
+    // zipalign is a warning, not a blocker: the JS fallback still aligns.
+    const warnings = [];
+    if (!zipalign) {
+        warnings.push('zipalign unavailable — APK will be aligned by the JS fallback (run: pkg install zipalign)');
+        hints.zipalign = 'pkg install zipalign';
+    }
+    return {
+        sdk, buildTools: bt, androidJar,
+        aapt2: aapt2 && aapt2.path, zipalign: zipalign && zipalign.path,
+        d8Jar, apksignerJar,
+        sources: { aapt2: aapt2 && aapt2.source, zipalign: zipalign && zipalign.source },
+        ok: problems.length === 0, problems, warnings, hints,
+    };
+}
+
+app.get('/api/deploy/android-toolchain', (_req, res) => {
+    const tc = resolveAndroidToolchain();
+    res.json({
+        ok: tc.ok, sdk: tc.sdk, buildTools: tc.buildTools, androidJar: tc.androidJar,
+        aapt2: tc.aapt2, zipalign: tc.zipalign, d8Jar: tc.d8Jar, apksignerJar: tc.apksignerJar,
+        sources: tc.sources, problems: tc.problems, warnings: tc.warnings, hints: tc.hints,
+        hint: 'Termux cannot execute glibc build-tools (ld-linux.so.2). Use pkg install aapt zipalign, or build via Gradle.',
+    });
 });
 
 app.post('/api/deploy/install-tools', async (req, res) => {
@@ -3149,17 +3789,26 @@ app.post('/api/deploy/build', async (req, res) => {
         cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
         artifactPath = wantAab ? path.join(androidDir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(androidDir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
     } else {
+        // Plain Android project. Gradle cannot run reliably on Termux, so when the
+        // project ships the SDK-toolchain build script we drive that instead.
+        const scriptPath = path.join(workdir, 'scripts', 'build-apk.sh');
+        const useScript = !wantAab && fs.existsSync(scriptPath);
         cwdForRun = workdir;
-        if (keystorePath && fs.existsSync(keystorePath)) {
-            const gradleProps = path.join(workdir, 'gradle.properties');
-            let props = fs.existsSync(gradleProps) ? fs.readFileSync(gradleProps, 'utf8') : '';
-            touchEphemeral(gradleProps);
-            props += '\nDEEPSEEK_STORE_FILE=' + keystorePath + '\nDEEPSEEK_KEY_ALIAS=' + aliasName + '\nDEEPSEEK_STORE_PASSWORD=' + pw + '\nDEEPSEEK_KEY_PASSWORD=' + pw + '\n';
-            fs.writeFileSync(gradleProps, props, 'utf8');
-            fs.chmodSync(gradleProps, 0o600);
+        if (useScript) {
+            cmd = 'bash ' + JSON.stringify(scriptPath) + ' release 2>&1';
+            artifactPath = path.join(workdir, 'android', 'build', 'release', 'DeepSeekStudio-release.apk');
+        } else {
+            if (keystorePath && fs.existsSync(keystorePath)) {
+                const gradleProps = path.join(workdir, 'gradle.properties');
+                let props = fs.existsSync(gradleProps) ? fs.readFileSync(gradleProps, 'utf8') : '';
+                touchEphemeral(gradleProps);
+                props += '\nDEEPSEEK_STORE_FILE=' + keystorePath + '\nDEEPSEEK_KEY_ALIAS=' + aliasName + '\nDEEPSEEK_STORE_PASSWORD=' + pw + '\nDEEPSEEK_KEY_PASSWORD=' + pw + '\n';
+                fs.writeFileSync(gradleProps, props, 'utf8');
+                fs.chmodSync(gradleProps, 0o600);
+            }
+            cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
+            artifactPath = wantAab ? path.join(workdir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(workdir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
         }
-        cmd = './gradlew ' + (wantAab ? 'bundleRelease' : 'assembleRelease') + ' 2>&1';
-        artifactPath = wantAab ? path.join(workdir, 'app', 'build', 'outputs', 'bundle', 'release', 'app-release.aab') : path.join(workdir, 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk');
     }
     let r, out;
     try {

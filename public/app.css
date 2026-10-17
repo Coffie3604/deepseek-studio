@@ -255,6 +255,17 @@ body {
   display:block; font-size:10px; color:var(--fg-3);
   margin-bottom:6px; text-transform:uppercase; letter-spacing:.5px;
 }
+/* Code block still being streamed (closing fence not received yet) */
+.chat-msg.assistant pre.streaming {
+  border-color:var(--blue);
+  box-shadow:inset 2px 0 0 var(--blue);
+}
+.chat-msg.assistant pre.streaming .lang::after {
+  content:' · streaming';
+  color:var(--blue);
+  text-transform:none;
+  letter-spacing:0;
+}
 .chat-msg.assistant pre .insert-code-btn {
   background:var(--green-2); border:none; color:#fff;
   padding:4px 10px; border-radius:4px;
@@ -289,6 +300,29 @@ body {
 .chat-msg .msg-copy-btn:hover { background:var(--bg-3); color:var(--fg-1); border-color:var(--border-2); }
 .chat-msg .msg-copy-btn.copied { color:var(--green); border-color:var(--green); background:rgba(63,185,80,0.12); opacity:1; }
 .chat-msg .msg-copy-btn svg { display:block; pointer-events:none; }
+
+/* Plain-text "Copy all" for assistant answers — always visible, thumb-sized */
+.chat-msg .msg-copy-all-btn {
+  position:absolute; top:8px; right:40px;
+  min-height:26px; padding:3px 9px; font-size:10px;
+  opacity:0.7; z-index:2;
+}
+.chat-msg:hover .msg-copy-all-btn,
+.chat-msg:focus-within .msg-copy-all-btn { opacity:1; }
+@media (hover: none) { .chat-msg .msg-copy-all-btn { opacity:0.85; } }
+.chat-msg .msg-copy-all-btn.copied { color:var(--green); border-color:var(--green); background:rgba(63,185,80,0.12); opacity:1; }
+
+/* AI answers must always be selectable/copyable on touch devices */
+.chat-msg.assistant,
+.chat-msg.assistant p,
+.chat-msg.assistant code,
+.chat-msg.assistant pre,
+.chat-msg.assistant .cmd-link,
+.chat-msg.assistant .file-path-link {
+  -webkit-user-select:text; user-select:text;
+  -webkit-touch-callout:default;
+}
+.chat-msg.assistant pre { -webkit-overflow-scrolling:touch; }
 
 /* ═══════════ TOOL CALL BUBBLES ═══════════ */
 .tool-call {
@@ -351,7 +385,7 @@ body {
   position:relative;
 }
 .ai-input-bar textarea {
-  flex:1; background:var(--bg-1);
+  flex:1 1 0; min-width:0; background:var(--bg-1);
   border:1px solid var(--border);
   border-radius:22px; color:var(--fg-1);
   padding:10px 16px; font-size:14px;
@@ -365,7 +399,8 @@ body {
   background:var(--blue-2); border:none; color:#fff;
   padding:11px 18px; border-radius:22px;
   cursor:pointer; font-weight:600; font-size:14px;
-  flex-shrink:0; min-height:44px; min-width:44px;
+  flex:0 0 auto; align-self:flex-end;
+  min-height:44px; min-width:44px;
   display:flex; align-items:center; justify-content:center;
   transition:background .15s;
 }
@@ -413,40 +448,17 @@ body {
 .snippet-item .snip-name { color:var(--blue); font-weight:600; margin-bottom:3px; }
 .snippet-item .snip-desc { color:var(--fg-3); font-size:11px; }
 
-/* ═══════════ EDITING TOOLS DROPDOWN ═══════════ */
-.edit-tools { position:relative; flex-shrink:0; }
-.edit-tools-btn {
-  background:var(--bg-1); border:1px solid var(--border);
-  color:var(--fg-2); border-radius:18px;
-  min-height:44px; min-width:44px;
-  display:flex; align-items:center; justify-content:center;
-  cursor:pointer; font-size:15px;
-  transition:background .15s, color .15s, border-color .15s;
+/* ═══════════ EDITOR TOOLBAR (editing tools live here) ═══════════ */
+.editor-toolbar {
+  display:flex; align-items:center; gap:8px;
+  background:var(--bg-2); border-bottom:1px solid var(--border);
+  padding:5px 8px; flex-shrink:0; min-height:40px;
 }
-.edit-tools-btn:hover, .edit-tools-btn:active { background:var(--bg-3); color:var(--fg-0); }
-.edit-tools.open .edit-tools-btn { color:var(--blue); border-color:var(--blue); background:var(--bg-3); }
-.edit-tools-menu {
-  position:absolute; bottom:calc(100% + 8px); right:0;
-  min-width:210px;
-  background:var(--bg-2); border:1px solid var(--border);
-  border-radius:var(--radius);
-  box-shadow:0 -8px 30px rgba(0,0,0,.6);
-  padding:6px; z-index:210;
-  display:none;
+.editor-toolbar-label {
+  flex:1; min-width:0; font-size:11px; color:var(--fg-3);
+  font-family:ui-monospace,'JetBrains Mono',monospace;
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
-.edit-tools.open .edit-tools-menu { display:block; animation:menuIn .12s ease; }
-.edit-tools-item {
-  display:flex; align-items:center; gap:12px;
-  padding:11px 12px; border-radius:8px;
-  font-size:13px; color:var(--fg-1);
-  cursor:pointer; white-space:nowrap;
-  user-select:none;
-}
-.edit-tools-item i { width:16px; text-align:center; color:var(--fg-3); font-size:13px; }
-.edit-tools-item:hover, .edit-tools-item:active { background:var(--bg-3); }
-.edit-tools-item:hover i { color:var(--blue); }
-.edit-tools-item.disabled { opacity:.4; pointer-events:none; }
-.edit-tools-sep { height:1px; background:var(--border-2); margin:5px 8px; }
 
 /* ═══════════ EDITOR PANEL ═══════════ */
 .editor-tabs-bar {
@@ -718,15 +730,17 @@ body {
 
 /* ═══════════ TOASTS ═══════════ */
 .toast {
-  position:fixed; bottom:80px;
+  position:fixed;
+  bottom:calc(24px + env(safe-area-inset-bottom, 0px));
   left:50%; transform:translateX(-50%);
   background:var(--bg-2); border:1px solid var(--border);
-  border-radius:var(--radius); padding:12px 18px;
+  border-radius:12px; padding:12px 16px;
   font-size:13px; box-shadow:0 12px 40px rgba(0,0,0,.6);
-  z-index:2000; max-width:calc(100vw - 40px);
+  z-index:2000; max-width:calc(100vw - 32px);
   border-left:4px solid var(--blue);
   animation:slideUp .25s ease;
   display:flex; align-items:center; gap:8px;
+  pointer-events:none;
 }
 .toast.success { border-left-color:var(--green); }
 .toast.error { border-left-color:var(--red); }
@@ -918,21 +932,23 @@ body {
 @media (max-width: 900px) {
   .menu-btn { display:inline-flex !important; }
   .file-tree {
-    position:fixed; top:var(--header-h); left:0; bottom:0;
-    width:85vw; max-width:320px;
+    position:fixed; top:0; left:0; bottom:0;
+    width:86vw; max-width:340px;
     transform:translateX(-105%);
-    transition:transform .25s cubic-bezier(.4,0,.2,1);
+    transition:transform .26s cubic-bezier(.32,.72,0,1);
     z-index:601;
     box-shadow:4px 0 30px rgba(0,0,0,.5);
+    will-change:transform;
   }
   .file-tree.open { transform:translateX(0); }
   .sidebar {
-    position:fixed; top:var(--header-h); right:0; bottom:0;
-    width:92vw; max-width:440px;
+    position:fixed; top:0; right:0; bottom:0;
+    width:100vw; max-width:100vw;
     transform:translateX(105%);
-    transition:transform .25s cubic-bezier(.4,0,.2,1);
+    transition:transform .26s cubic-bezier(.32,.72,0,1);
     z-index:601;
     box-shadow:-4px 0 30px rgba(0,0,0,.5);
+    will-change:transform;
   }
   .sidebar.open { transform:translateX(0); }
   .logo span.hide-mobile { display:none; }
@@ -1254,3 +1270,509 @@ body {
 .activity-item.kind-error    .act-icon { color: var(--red); }
 .activity-item.kind-save     .act-icon { color: var(--green); }
 .activity-item.kind-git      .act-icon { color: var(--yellow); }
+/* ═══════════════════════════════════════════════════════════════════
+   MOBILE-FIRST LAYER (v3.0)
+   The app is used exclusively on phones, so the phone layout is the
+   primary layout: top tabs, sheet-style drawers, 44px touch
+   targets, no hover-only affordances, keyboard-aware input bar.
+   ═══════════════════════════════════════════════════════════════════ */
+
+:root {
+  --tap: 44px;              /* minimum comfortable touch target */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --kb: 0px;                /* live keyboard height, set from JS */
+}
+
+/* ── Kill hover-only behaviour on touch devices ── */
+@media (hover: none) {
+  .btn:hover, .tree-item:hover, .snippet-item:hover,
+  .chat-msg .msg-copy-btn:hover { background: inherit; }
+  .btn:active, .tree-item:active, .snippet-item:active,
+  .chat-msg .msg-copy-btn:active { background: var(--bg-3); }
+
+}
+/* ── Text selection / callouts feel native ── */
+body {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  touch-action: manipulation;
+}
+input, textarea, select, button { font-size: 16px; } /* stops iOS/Android zoom-on-focus */
+.chat-msg, .chat-msg *, .tool-call, .tool-call *, .log-entry, .log-entry *,
+.activity-item, .activity-item * {
+  -webkit-user-select: text; user-select: text;
+  -webkit-touch-callout: default;
+}
+/* Chat info lines (author · time, badges, paths) must be copyable too */
+.chat-msg .msg-meta, .chat-msg .msg-body,
+.chat-msg .file-path-link, .chat-msg .cmd-link,
+.chat-msg .tool-arg, .chat-msg .tool-output {
+  -webkit-user-select: text; user-select: text;
+  -webkit-touch-callout: default;
+}
+.tree-item, .ptab, .stab, .btn, .tbtn { -webkit-user-select: none; user-select: none; }
+/* Chat copy buttons stay non-selectable so taps never start a selection */
+.chat-msg .msg-copy-btn, .chat-msg .msg-copy-all-btn, .chat-msg .copy-btn,
+.chat-msg .insert-code-btn, .chat-msg .pre-actions {
+  -webkit-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+}
+
+/* ── Sheet handles for drawers ── */
+.drawer-head { display: none; }
+
+/* ── Keyboard-aware input bar ── */
+.ai-input-bar { padding-bottom: calc(10px + var(--safe-bottom)); }
+body.kb-open .ai-input-bar { padding-bottom: 10px; }
+
+/* ── Scrollable, thumb-friendly chat ── */
+.chat-messages { -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+
+/* ── Bigger, clearer tap targets everywhere ── */
+.btn { min-height: var(--tap); min-width: var(--tap); }
+.btn.icon-only { min-width: var(--tap); min-height: var(--tap); }
+.tree-item { min-height: var(--tap); }
+.terminal-toolbar .tbtn { min-height: 38px; min-width: 38px; }
+.chat-msg .msg-copy-btn { width: 32px; height: 32px; }
+.copy-btn { min-height: 28px; padding: 5px 10px; }
+.chat-search-bar .tsb-btn, .term-search-bar .tsb-btn { min-height: 36px; min-width: 36px; }
+.chat-search-bar input, .term-search-bar input { min-height: 38px; font-size: 16px; }
+
+/* ── Phone layout (primary) ── */
+@media (max-width: 900px) {
+  :root { --header-h: 52px; --tabs-h: 44px; }
+
+  /* Reserve space for the home indicator / safe area */
+  .main { padding-bottom: var(--safe-bottom); }
+
+  /* Header: compact, safe-area aware */
+  .header {
+    padding: 6px 8px;
+    padding-top: calc(6px + var(--safe-top));
+    height: calc(var(--header-h) + var(--safe-top));
+  }
+  .logo { font-size: 13px; }
+  .logo i { font-size: 15px; }
+  .status { padding: 4px 8px; min-height: 26px; }
+  .lang-badge { display: none !important; }
+
+  /* Drawers become full-height sheets with a grab handle */
+  .file-tree, .sidebar {
+    top: 0; bottom: 0;
+    height: 100%;
+    padding-top: var(--safe-top);
+    padding-bottom: var(--safe-bottom);
+    border-radius: 0;
+  }
+  .file-tree { width: 88vw; max-width: 340px; }
+  .sidebar { width: 100vw; max-width: 100vw; }
+
+  .drawer-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 12px; flex-shrink: 0;
+    background: var(--bg-2); border-bottom: 1px solid var(--border);
+    min-height: 52px;
+  }
+  .drawer-head .drawer-title {
+    flex: 1; font-size: 13px; font-weight: 700; color: var(--fg-0);
+    display: flex; align-items: center; gap: 8px;
+  }
+  .drawer-head .drawer-close {
+    background: var(--bg-3); border: 1px solid var(--border);
+    color: var(--fg-2); border-radius: 50%;
+    width: 34px; height: 34px; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 14px; cursor: pointer;
+  }
+  .drawer-head .drawer-close:active { background: var(--bg-4); color: var(--fg-0); }
+
+  /* Sidebar tabs: 2-row grid instead of a scrolling strip */
+  .side-tabs {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    overflow: visible;
+  }
+  .stab { min-width: 0; min-height: 52px; padding: 8px 2px; font-size: 10px; }
+  .stab i { font-size: 16px; }
+
+  /* Primary tabs: equal thirds, icon + label stacked */
+  .primary-tabs { padding: 0; }
+  .ptab {
+    flex: 1; justify-content: center; padding: 8px 4px;
+    font-size: 11px; gap: 5px; min-height: var(--tabs-h);
+  }
+  .ptab i { font-size: 13px; }
+
+  /* Chat header: single compact row, project selector takes the width */
+  .chat-header { padding: 8px 10px; gap: 6px; flex-wrap: nowrap; }
+  .chat-header > label { display: none; }
+  .chat-header select { max-width: none; flex: 1; min-height: 38px; font-size: 16px; }
+  .chat-header .warn-badge { margin-left: 0; }
+  .chat-header-actions { margin-left: 0; gap: 2px; }
+  .chat-header-actions .btn.icon-only { min-width: 38px; min-height: 38px; }
+
+  /* Chat bubbles use the full width on a phone */
+  .chat-messages { padding: 12px 10px; }
+  .chat-msg { padding: 11px 12px; padding-right: 40px; font-size: 14px; }
+  .chat-msg.user { margin-left: 0; }
+  .chat-msg.assistant { margin-right: 0; }
+  .typing-indicator { margin-right: 0; }
+  .chat-msg.assistant pre { font-size: 12px; padding: 10px; }
+
+  /* Input bar: textarea + send button on the SAME line, controls above */
+  .ai-input-bar {
+    flex-wrap: wrap; gap: 6px; padding: 8px 10px;
+    align-items: flex-end;
+  }
+  .ai-input-bar textarea {
+    order: 3; flex: 1 1 0; min-width: 0; width: auto;
+    min-height: 46px; border-radius: 14px; padding: 12px 14px;
+  }
+  .ai-input-bar button[type="submit"] {
+    order: 4; flex: 0 0 auto; align-self: flex-end;
+    border-radius: 14px; min-height: 46px; min-width: 52px;
+  }
+  .ai-toggle { order: 1; min-height: 34px; padding: 6px 10px; }
+  .ctx-indicator { order: 2; min-height: 34px; max-width: none; flex: 1; }
+
+  /* Editor toolbar */
+  .editor-toolbar { min-height: 46px; padding: 4px 8px; }
+
+  /* Terminal toolbar: horizontal scroll with snap */
+  .terminal-toolbar {
+    padding: 6px 8px; gap: 6px;
+    scroll-snap-type: x proximity;
+  }
+  .terminal-toolbar .tbtn { scroll-snap-align: start; }
+  .terminal-toolbar .term-info { display: none; }
+
+  /* Modals: full-width sheets anchored to the bottom */
+  .modal, .modal-box, .modal-content {
+    max-width: 100vw !important;
+    width: 100% !important;
+    border-radius: 16px 16px 0 0 !important;
+    max-height: 88vh;
+  }
+  .modal-overlay, .modal-backdrop { align-items: flex-end !important; }
+
+  /* Snippet dropdown hugs the input bar */
+  .snippet-dropdown { left: 8px; right: 8px; max-height: 46vh; }
+}
+
+/* ── Very small phones (≤ 380px) ── */
+@media (max-width: 380px) {
+  .ptab { font-size: 10px; }
+  .stab { font-size: 9px; }
+  .chat-msg { font-size: 13px; }
+}
+
+/* ── Landscape phones: reclaim vertical space ── */
+@media (max-width: 900px) and (orientation: landscape) {
+  :root { --header-h: 44px; }
+  .primary-tabs { height: 38px; }
+  .ptab { min-height: 38px; }
+}
+
+/* ── Standalone PWA: no pull-to-refresh jank ── */
+@media (display-mode: standalone) {
+  body { overscroll-behavior: none; }
+}
+
+/* ── Respect reduced motion ── */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   NATIVE-APP POLISH (v3.1)
+   Small, high-impact fixes so the PWA reads as a real mobile app:
+   no rubber-band scroll, no text-selection on chrome, no zoom on
+   focus, thumb-sized controls, sheet-style modals, tidy chat.
+   ═══════════════════════════════════════════════════════════════════ */
+
+/* ── 1. Kill browser-ish behaviours ── */
+html, body {
+  overscroll-behavior: none;
+  -webkit-overflow-scrolling: touch;
+}
+body { -webkit-user-select: none; user-select: none; }
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text; user-select: text;
+}
+/* No long-press "save image / open link" callouts on UI chrome */
+.header, .primary-tabs, .side-tabs, .terminal-toolbar,
+.editor-tabs-bar, .chat-header, .ai-input-bar, .drawer-head {
+  -webkit-touch-callout: none;
+}
+/* No grey flash on tap */
+* { -webkit-tap-highlight-color: transparent; }
+/* No accidental double-tap zoom on controls */
+button, .btn, .ptab, .stab, .tree-item, .tbtn { touch-action: manipulation; }
+
+/* ── 2. Scrollbars: invisible on touch, thin on desktop ── */
+@media (hover: none) {
+  ::-webkit-scrollbar { width: 0; height: 0; }
+}
+
+/* ── 3. Header: tighter, app-like ── */
+.header { backdrop-filter: blur(12px); }
+.logo i { color: var(--blue); }
+.status { border-radius: 999px; }
+
+/* ── 4. Primary tabs: pill indicator instead of underline ── */
+@media (max-width: 900px) {
+  .primary-tabs {
+    gap: 4px; padding: 6px 8px;
+    height: auto; min-height: var(--tabs-h);
+    background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .ptab {
+    border-bottom: none;
+    border-radius: 10px;
+    padding: 8px 10px;
+    min-height: 38px;
+    color: var(--fg-3);
+    transition: background .15s ease, color .15s ease;
+  }
+  .ptab.active {
+    background: var(--bg-3);
+    color: var(--fg-0);
+    border-bottom-color: transparent;
+  }
+  .ptab.active i { color: var(--blue); }
+  .ptab .tab-badge { top: 4px; right: 4px; }
+}
+
+/* ── 5. Chat: cleaner bubbles, readable code, no clipped copy btn ── */
+.chat-msg { border-radius: 16px; }
+.chat-msg.user {
+  background: linear-gradient(180deg, #1f6feb, #1a5fd0);
+  box-shadow: 0 2px 10px rgba(31,111,235,.25);
+}
+.chat-msg.assistant { background: var(--bg-2); }
+.chat-msg.assistant pre {
+  border-radius: 10px;
+  background: #0b0f14;
+  border: 1px solid var(--border-2);
+  padding-top: 34px;              /* room for the copy/insert row */
+  -webkit-overflow-scrolling: touch;
+}
+.chat-msg.assistant pre .pre-actions {
+  top: 6px; right: 6px;
+  background: linear-gradient(180deg, rgba(11,15,20,.96), rgba(11,15,20,.75));
+  border-radius: 8px; padding: 2px;
+}
+.chat-msg.assistant pre code { background: none; padding: 0; color: var(--fg-1); }
+.chat-msg.assistant table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.chat-msg.assistant th, .chat-msg.assistant td {
+  border: 1px solid var(--border); padding: 6px 8px; text-align: left;
+}
+.chat-msg.assistant th { background: var(--bg-3); }
+.chat-msg.assistant ul, .chat-msg.assistant ol { padding-left: 20px; margin: 8px 0; }
+.chat-msg.assistant h1, .chat-msg.assistant h2, .chat-msg.assistant h3 {
+  margin: 12px 0 6px; line-height: 1.3; color: var(--fg-0);
+}
+.chat-msg.assistant h1 { font-size: 16px; }
+.chat-msg.assistant h2 { font-size: 15px; }
+.chat-msg.assistant h3 { font-size: 14px; }
+.chat-msg.assistant a { color: var(--blue); }
+
+/* ── 6. Input bar: real app composer ── */
+.ai-input-bar {
+  background: var(--bg-2);
+  box-shadow: 0 -1px 0 var(--border), 0 -8px 24px rgba(0,0,0,.25);
+}
+.ai-input-bar textarea {
+  border-radius: 20px;
+  background: var(--bg-1);
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.ai-input-bar textarea:focus {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 3px rgba(88,166,255,.12);
+}
+.ai-input-bar button[type="submit"] {
+  border-radius: 50%;
+  min-width: 46px; min-height: 46px;
+  padding: 0;
+  box-shadow: 0 2px 10px rgba(31,111,235,.35);
+}
+.ai-input-bar button[type="submit"]:active { transform: scale(.94); }
+.ai-toggle, .ctx-indicator { border-radius: 999px; }
+
+/* ── 7. Modals & dialogs: bottom sheets on phones ── */
+@media (max-width: 900px) {
+  .modal-overlay { padding: 0; align-items: flex-end; }
+  .modal-box {
+    border-radius: 20px 20px 0 0;
+    padding: 20px 18px calc(20px + var(--safe-bottom));
+    max-height: 88vh;
+    animation: sheetUp .26s cubic-bezier(.32,.72,0,1);
+  }
+  .modal-box::before {
+    content: ""; display: block;
+    width: 38px; height: 4px; border-radius: 999px;
+    background: var(--bg-4); margin: -8px auto 14px;
+  }
+  .pd-overlay { padding: 0; align-items: flex-end; }
+  .pd-box {
+    border-radius: 20px 20px 0 0;
+    padding: 20px 18px calc(20px + var(--safe-bottom));
+    max-width: 100vw;
+    animation: sheetUp .26s cubic-bezier(.32,.72,0,1);
+  }
+  .pd-row { flex-direction: column-reverse; }
+  .pd-row .btn { width: 100%; justify-content: center; }
+  .ctx-menu {
+    left: 8px !important; right: 8px !important;
+    min-width: 0; width: auto;
+    border-radius: 14px;
+  }
+}
+@keyframes sheetUp {
+  from { transform: translateY(100%); opacity: .6; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+/* ── 8. Drawer heads: grab handle + sticky ── */
+@media (max-width: 900px) {
+  .drawer-head {
+    position: sticky; top: 0; z-index: 5;
+    padding-top: calc(10px + var(--safe-top));
+    backdrop-filter: blur(12px);
+  }
+  .drawer-head::before {
+    content: ""; position: absolute; top: 6px; left: 50%;
+    transform: translateX(-50%);
+    width: 36px; height: 4px; border-radius: 999px;
+    background: var(--bg-4);
+  }
+  .drawer-head .drawer-close {
+    width: 36px; height: 36px;
+    transition: transform .12s ease, background .12s ease;
+  }
+  .drawer-head .drawer-close:active { transform: scale(.92); }
+  .ft-head { padding-top: 10px; }
+}
+
+/* ── 9. Sidebar tabs: 3-row grid, labelled, thumb-sized ── */
+@media (max-width: 900px) {
+  .side-tabs {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 4px; padding: 8px;
+    background: var(--bg-1);
+  }
+  .stab {
+    border-bottom: none;
+    border-radius: 10px;
+    min-height: 56px;
+    font-size: 10px;
+    color: var(--fg-3);
+    transition: background .15s ease, color .15s ease;
+  }
+  .stab.active {
+    background: var(--bg-3);
+    color: var(--fg-0);
+    border-bottom-color: transparent;
+  }
+  .stab.active i { color: var(--blue); }
+  .panel { padding: 14px; }
+}
+
+/* ── 10. Terminal: full-bleed, no rounded chrome ── */
+#terminal { padding: 6px 4px; }
+.terminal-toolbar {
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--border);
+}
+.terminal-toolbar .tbtn { border-radius: 8px; }
+.terminal-toolbar .tbtn:active { background: var(--bg-3); }
+
+/* ── 11. Editor tabs: pill style, easy to close ── */
+.editor-tab { border-radius: 8px 8px 0 0; }
+.editor-tab .close-x { border-radius: 50%; width: 22px; height: 22px; line-height: 1; }
+
+/* ── 12. Empty states: friendlier ── */
+.editor-empty i { color: var(--blue); opacity: .35; }
+.ft-empty { color: var(--fg-3); }
+
+/* ── 13. Offline banner: pill, not full-bleed bar ── */
+@media (max-width: 900px) {
+  .offline-banner {
+    top: auto;
+    bottom: calc(12px + var(--safe-bottom));
+    left: 12px; right: 12px;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 12px;
+    box-shadow: 0 8px 28px rgba(0,0,0,.5);
+  }
+}
+
+/* ── 14. Focus rings only for keyboard users ── */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+/* ── 15. Landscape phones: give the content the height back ── */
+@media (max-width: 900px) and (orientation: landscape) {
+  .drawer-head { min-height: 44px; padding-top: calc(6px + var(--safe-top)); }
+  .drawer-head::before { display: none; }
+  .side-tabs { grid-template-columns: repeat(5, 1fr); }
+  .stab { min-height: 44px; }
+}
+
+/* ═══════════ v3.1 — Clear chat info + hardware keyboard composer ═══════════ */
+/* Message meta line: who said it + time, readable at a glance */
+.chat-msg .msg-meta {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+  opacity: .72;
+  margin-bottom: 6px;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.chat-msg.user .msg-meta { color: #dbeafe; opacity: .9; }
+.chat-msg.assistant .msg-meta { color: var(--fg-3); }
+.chat-msg .msg-body { white-space: pre-wrap; word-break: break-word; }
+.chat-msg.user { font-size: 14px; line-height: 1.55; }
+.chat-msg.assistant { font-size: 14px; line-height: 1.65; }
+.chat-msg.assistant p { margin: 8px 0; }
+.chat-msg.assistant p:first-of-type { margin-top: 0; }
+.chat-msg.assistant p:last-of-type { margin-bottom: 0; }
+.chat-msg.assistant strong, .chat-msg.assistant b { color: var(--fg-0); }
+
+/* Composer: works with soft keyboard, hardware keyboard and IME */
+.ai-input-bar textarea {
+  font-size: 15px;
+  line-height: 1.45;
+  caret-color: var(--blue);
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: manipulation;
+}
+.ai-input-bar textarea::placeholder { color: var(--fg-3); opacity: .85; }
+.ai-input-bar textarea:focus-visible { outline: none; }
+body.kb-open .chat-messages { padding-bottom: 8px; }
+body.kb-open .chat-header { display: none; }
+@media (max-width: 900px) {
+  .chat-msg { font-size: 14.5px; }
+  .chat-msg .msg-meta { font-size: 11px; }
+  .ai-input-bar textarea { font-size: 16px; } /* no zoom-on-focus on Android */
+}

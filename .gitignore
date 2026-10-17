@@ -26,3 +26,7 @@ dist/
 *.orig
 .patch-backup/
 .patch-backup-index.*
+.chk/
+android/build/
+android/.gradle/
+android/local.properties
