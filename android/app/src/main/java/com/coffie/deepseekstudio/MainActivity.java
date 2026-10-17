@@ -36,6 +36,12 @@ public class MainActivity extends Activity {
 
     /** Default backend. Override at runtime with: adb shell am start -e url http://... */
     private static final String DEFAULT_URL = "http://127.0.0.1:3001/";
+    /**
+     * The web UI bundled inside the APK (public/ copied by
+     * scripts/sync-android-assets.sh). Used when the Termux backend is not
+     * running so the app still opens instead of showing a dead end.
+     */
+    private static final String OFFLINE_URL = "file:///android_asset/www/index.html";
     private static final String PREFS = "deepseek";
     private static final String KEY_URL = "backend_url";
     /** Termux package + the RUN_COMMAND service used to boot the backend. */
@@ -50,6 +56,12 @@ public class MainActivity extends Activity {
     private LinearLayout errorView;
     private TextView errorDetail;
     private String startUrl;
+    /** True while the WebView is showing the bundled offline UI. */
+    private boolean offlineMode = false;
+    /** True once the page reports it owns its own back stack (nav history). */
+    private boolean pageHandlesBack = false;
+    /** Guards against a double back press racing the async JS reply. */
+    private boolean backPending = false;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
@@ -136,6 +148,13 @@ public class MainActivity extends Activity {
                 progress.setVisibility(View.GONE);
                 errorView.setVisibility(View.GONE);
                 webView.setVisibility(View.VISIBLE);
+                backPending = false;
+                offlineMode = url != null && url.startsWith("file://");
+                // Does this build of the UI expose its own back stack?
+                view.evaluateJavascript(
+                        "(!!(window.DS&&window.DS.navBack))",
+                        value -> pageHandlesBack = "true".equals(
+                                value == null ? "" : value.replace("\"", "").trim()));
             }
 
             @Override
@@ -201,6 +220,7 @@ public class MainActivity extends Activity {
         retry.setOnClickListener(v -> {
             errorView.setVisibility(View.GONE);
             webView.setVisibility(View.VISIBLE);
+            offlineMode = false;
             webView.loadUrl(startUrl);
         });
 
@@ -254,6 +274,7 @@ public class MainActivity extends Activity {
             webView.postDelayed(() -> {
                 errorView.setVisibility(View.GONE);
                 webView.setVisibility(View.VISIBLE);
+                offlineMode = false;
                 webView.loadUrl(startUrl);
             }, 2500);
         } catch (Exception e) {
@@ -266,8 +287,20 @@ public class MainActivity extends Activity {
         }
     }
 
+    /**
+     * The backend is unreachable. Rather than a dead end, fall back to the UI
+     * bundled in the APK so the app is still usable (read-only, no backend
+     * features) and the user can start Termux from the banner.
+     */
     private void showError(String detail) {
         progress.setVisibility(View.GONE);
+        if (!offlineMode) {
+            offlineMode = true;
+            webView.setVisibility(View.VISIBLE);
+            errorView.setVisibility(View.GONE);
+            webView.loadUrl(OFFLINE_URL);
+            return;
+        }
         webView.setVisibility(View.GONE);
         errorView.setVisibility(View.VISIBLE);
         errorDetail.setText(detail == null ? "" : detail);
@@ -277,10 +310,42 @@ public class MainActivity extends Activity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
+    /**
+     * Hardware/gesture back.
+     *
+     * The web UI keeps its own navigation stack (modal -> drawer -> side panel
+     * -> primary tab -> file) and exposes window.DS.navBack(). We ask the page
+     * first so back behaves exactly like the browser/PWA build; only when the
+     * page says "nothing left to close" do we fall back to WebView history and
+     * finally to leaving the activity.
+     */
+    @Override
+    public void onBackPressed() {
+        if (webView == null) {
+            super.onBackPressed();
+            return;
+        }
+        if (backPending) return; // a reply is already in flight
+        backPending = true;
+        webView.evaluateJavascript(
+                "(function(){try{return (window.DS&&window.DS.navBack)?window.DS.navBack():'none';}"
+                        + "catch(e){return 'none';}})()",
+                value -> {
+                    backPending = false;
+                    String v = value == null ? "none" : value.replace("\"", "").trim();
+                    if ("handled".equals(v)) return;
+                    if (webView != null && webView.canGoBack()) {
+                        webView.goBack();
+                        return;
+                    }
+                    MainActivity.super.onBackPressed();
+                });
+    }
+
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
-        if (keyCode == KeyEvent.KEYCODE_BACK && webView != null && webView.canGoBack()) {
-            webView.goBack();
+        if (keyCode == KeyEvent.KEYCODE_BACK) {
+            onBackPressed();
             return true;
         }
         return super.onKeyDown(keyCode, event);

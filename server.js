@@ -2820,6 +2820,12 @@ async function githubApi(pathname, options = {}) {
 }
 
 app.get('/api/github/status', async (_req, res) => {
+    // Self-heal first: adopt the token git already uses if secrets drifted.
+    const rec = await reconcileGitHubToken();
+    if (rec.check && rec.check.ok) {
+        const u = rec.check.user;
+        return res.json({ connected: true, login: u.login, name: u.name, avatar: u.avatar, publicRepos: u.publicRepos, adoptedFromGit: rec.adopted, scopes: rec.check.scopes });
+    }
     const gh = getOctokit();
     if (gh) {
         try { const { data } = await gh.users.getAuthenticated(); return res.json({ connected: true, login: data.login, name: data.name, avatar: data.avatar_url, publicRepos: data.public_repos }); }
@@ -3031,6 +3037,59 @@ async function verifyGitHubToken(token) {
     };
 }
 
+/**
+ * Self-healing token reconciliation.
+ * 1. If the stored secret token is valid -> make sure git's credential store
+ *    holds the same token (so plain `git push` works from a Termux shell).
+ * 2. If the stored secret is dead but ~/.git-credentials has a working token,
+ *    adopt it into secrets (this is what makes the UI "just work").
+ * 3. If neither works, clear the dead token so the UI shows "not connected"
+ *    instead of a confusing 401.
+ * Returns { check, adopted } where check is the verifyGitHubToken() result.
+ */
+let _reconcileInFlight = null;
+async function reconcileGitHubToken() {
+    if (_reconcileInFlight) return _reconcileInFlight;
+    _reconcileInFlight = (async () => {
+        const stored = ghToken();
+        if (stored) {
+            const check = await verifyGitHubToken(stored);
+            if (check.ok) {
+                if (!hasGitHubCredential()) writeGitCredential(stored);
+                return { check, adopted: false };
+            }
+            // Stored token is dead - fall through and try the credential store.
+            if (check.status !== 401) return { check, adopted: false };
+        }
+        // Try to adopt a token that git already knows about.
+        const map = readGitCredentialLines();
+        for (const host of GIT_CREDENTIAL_HOSTS) {
+            const line = map.get(host);
+            if (!line) continue;
+            const m = /^[a-z]+:\/\/([^:@/]+):([^@]*)@/i.exec(line);
+            if (!m) continue;
+            const candidate = decodeURIComponent(m[2] || '').trim();
+            if (!candidate || candidate === stored) continue;
+            const check = await verifyGitHubToken(candidate);
+            if (check.ok) {
+                secrets.github_token = candidate;
+                saveSecrets();
+                writeGitCredential(candidate);
+                return { check, adopted: true };
+            }
+        }
+        // Nothing usable anywhere - drop the dead token so the UI is honest.
+        if (stored) {
+            delete secrets.github_token;
+            saveSecrets();
+            clearGitCredential();
+        }
+        return { check: { ok: false, status: 401, error: 'Not connected to GitHub' }, adopted: false };
+    })().catch((e) => ({ check: { ok: false, status: 500, error: redact(e.message) }, adopted: false }))
+        .finally(() => { _reconcileInFlight = null; });
+    return _reconcileInFlight;
+}
+
 // Save a manually-pasted PAT (or fine-grained token) after verifying it.
 app.post('/api/github/token', async (req, res) => {
     const token = String((req.body || {}).token || '').trim();
@@ -3065,6 +3124,7 @@ app.post('/api/github/verify', async (_req, res) => {
    sync, and the OAuth client_id source.
    ═══════════════════════════════════════════════════════════════════ */
 app.get('/api/github/auth', async (_req, res) => {
+    await reconcileGitHubToken();
     const token = ghToken();
     const out = {
         hasToken: !!token,
@@ -3146,17 +3206,62 @@ app.get('/api/github/device/config', (_req, res) => {
 });
 
 app.get('/api/github/repos', async (req, res) => {
-    const perPage = Math.min(Math.max(parseInt(req.query.per_page, 10) || 30, 1), 100);
+    const perPage = Math.min(Math.max(parseInt(req.query.per_page, 10) || 100, 1), 100);
+    const maxPages = Math.min(Math.max(parseInt(req.query.pages, 10) || 5, 1), 10);
+    const rec = await reconcileGitHubToken();
+    if (!rec.check || !rec.check.ok) {
+        return res.status(401).json({
+            error: (rec.check && rec.check.error) || 'Not connected to GitHub',
+            connected: false,
+            hint: 'Sign in with GitHub (device flow) or paste a PAT at /api/github/token.',
+        });
+    }
+    const mapRepo = (repo) => ({
+        name: repo.name,
+        fullName: repo.full_name,
+        owner: (repo.owner && repo.owner.login) || String(repo.full_name || '').split('/')[0],
+        private: !!repo.private,
+        fork: !!repo.fork,
+        archived: !!repo.archived,
+        cloneUrl: repo.clone_url,
+        sshUrl: repo.ssh_url,
+        htmlUrl: repo.html_url,
+        defaultBranch: repo.default_branch,
+        updatedAt: repo.updated_at,
+        pushedAt: repo.pushed_at,
+        language: repo.language,
+        description: repo.description,
+    });
     const gh = getOctokit();
     if (gh) {
         try {
-            const { data } = await gh.repos.listForAuthenticatedUser({ sort: 'updated', per_page: perPage });
-            return res.json({ repos: data.map((repo) => ({ name: repo.name, fullName: repo.full_name, private: repo.private, cloneUrl: repo.clone_url, sshUrl: repo.ssh_url, defaultBranch: repo.default_branch, updatedAt: repo.updated_at, description: repo.description })) });
-        } catch (e) { return res.status(e.status || 500).json({ error: redact(e.message) }); }
+            const all = [];
+            for (let page = 1; page <= maxPages; page++) {
+                const { data } = await gh.repos.listForAuthenticatedUser({
+                    sort: 'updated', per_page: perPage, page,
+                    affiliation: 'owner,collaborator,organization_member',
+                });
+                all.push(...data.map(mapRepo));
+                if (data.length < perPage) break;
+            }
+            return res.json({ connected: true, login: rec.check.user && rec.check.user.login, count: all.length, repos: all });
+        } catch (e) {
+            return res.status(e.status || 500).json({ error: redact(e.message), connected: true });
+        }
     }
-    const r = await githubApi('/user/repos?sort=updated&per_page=' + perPage);
-    if (!r.ok) return res.status(r.status).json({ error: (r.data && r.data.message) || 'GitHub request failed' });
-    res.json({ repos: (r.data || []).map((repo) => ({ name: repo.name, fullName: repo.full_name, private: repo.private, cloneUrl: repo.clone_url, sshUrl: repo.ssh_url, defaultBranch: repo.default_branch, updatedAt: repo.updated_at, description: repo.description })) });
+    const all = [];
+    for (let page = 1; page <= maxPages; page++) {
+        const r = await githubApi('/user/repos?sort=updated&per_page=' + perPage + '&page=' + page +
+            '&affiliation=owner,collaborator,organization_member');
+        if (!r.ok) {
+            if (page === 1) return res.status(r.status).json({ error: (r.data && r.data.message) || 'GitHub request failed' });
+            break;
+        }
+        const batch = Array.isArray(r.data) ? r.data : [];
+        all.push(...batch.map(mapRepo));
+        if (batch.length < perPage) break;
+    }
+    res.json({ connected: true, login: rec.check.user && rec.check.user.login, count: all.length, repos: all });
 });
 
 app.post('/api/github/create-repo', async (req, res) => {

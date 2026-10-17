@@ -1667,12 +1667,27 @@ function navCloseTopLayer() {
   return false;
 }
 
-/* Manual back (hardware key / Alt+← / mouse button). */
+/* Manual back (hardware key / Alt+← / mouse button).
+   Returns true when the app consumed the press. */
 function navBack() {
-  if (navCloseTopLayer()) { navPush(); return; }
-  if (navDepth > 0) { history.back(); return; }
-  if (activeTabPanel !== 'chat') { switchPrimaryPanel('chat'); navPush(); }
+  // Do NOT navPush() here: navPush appends a NEW history entry, so pushing
+  // after closing a layer makes the stack grow forever and back never
+  // unwinds. Closing a layer is a forward action; popstate already tracks it.
+  if (navCloseTopLayer()) return true;
+  if (navDepth > 0) { history.back(); return true; }
+  if (activeTabPanel !== 'chat') { switchPrimaryPanel('chat'); return true; }
+  return false;
 }
+
+/* Bridge for the native Android shell (MainActivity.onBackPressed).
+   Returns 'handled' when the app consumed back, 'none' when the shell
+   should fall through to WebView history / leaving the app. */
+function navBackForShell() {
+  try { return navBack() ? 'handled' : 'none'; } catch (e) { return 'none'; }
+}
+window.DS = window.DS || {};
+window.DS.navBack = navBackForShell;
+window.DS.navPush = function() { try { navPush(); } catch (e) {} };
 
 function setupNavigationHistory() {
   try {

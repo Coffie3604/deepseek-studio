@@ -1,0 +1,133 @@
+name: Build APK
+
+# Produces an installable, signed DeepSeek Studio APK and publishes it as a
+# GitHub Release asset, so it can be downloaded straight to another phone.
+#
+#   • every push to main / android-apk  → rolling "latest" release
+#   • pushing a tag like v2.7.0         → versioned release
+#   • manual run                        → rolling "latest" release
+#
+# Signing: set the repository secrets DS_KEYSTORE_B64 (base64 of the .jks) and
+# DS_KEYSTORE_PASS. Without them the APK is signed with a throwaway key, which
+# still installs but cannot upgrade an existing install.
+
+on:
+  push:
+    branches: [main, android-apk]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: Build signed APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Android build tools
+        run: |
+          set -euo pipefail
+          SDK="$HOME/android-sdk"
+          mkdir -p "$SDK"
+          # aapt2 + apksigner + d8 live in build-tools; android.jar in platforms.
+          echo "y" | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+              --sdk_root="$SDK" \
+              "build-tools;35.0.0" "platforms;android-35" > /dev/null
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/build-tools/35.0.0" >> "$GITHUB_PATH"
+
+      - name: Show toolchain
+        run: |
+          aapt2 version || true
+          java -version
+          ls "$ANDROID_HOME/build-tools/35.0.0/lib" | head
+
+      - name: Build release APK
+        env:
+          DS_KEYSTORE_B64: ${{ secrets.DS_KEYSTORE_B64 }}
+          DS_KEYSTORE_PASS: ${{ secrets.DS_KEYSTORE_PASS }}
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build-apk.sh scripts/sync-android-assets.sh
+          ./scripts/build-apk.sh release --clean
+
+      - name: Verify APK
+        run: |
+          set -euo pipefail
+          APK=android/build/release/DeepSeekStudio-release.apk
+          test -f "$APK"
+          java -jar "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" \
+              verify --min-sdk-version 24 "$APK"
+          # The bundled web UI must be inside the APK.
+          unzip -l "$APK" | grep -q 'assets/www/index.html'
+          ls -lh "$APK"
+
+      - name: Name the artifact
+        id: meta
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="latest"
+          fi
+          OUT="DeepSeekStudio-${VERSION}.apk"
+          cp android/build/release/DeepSeekStudio-release.apk "$OUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG"        >> "$GITHUB_OUTPUT"
+          echo "apk=$OUT"        >> "$GITHUB_OUTPUT"
+          echo "sha=$(sha256sum "$OUT" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: DeepSeekStudio-${{ steps.meta.outputs.version }}
+          path: ${{ steps.meta.outputs.apk }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: DeepSeek Studio ${{ steps.meta.outputs.version }}
+          prerelease: false
+          make_latest: true
+          body: |
+            **DeepSeek Studio ${{ steps.meta.outputs.version }}** — Android APK
+
+            ### Install on your phone
+            1. Download `${{ steps.meta.outputs.apk }}` below.
+            2. Tap it and allow *Install unknown apps* for your browser/file manager.
+            3. Open **DeepSeek Studio**.
+
+            The app opens with the bundled UI even without the backend. For the
+            full editor, run the Node backend in Termux:
+
+            ```bash
+            cd ~/projects/deepseek-editor && node server.js
+            ```
+
+            Then tap **Retry** in the app (or just reopen it).
+
+            | | |
+            |---|---|
+            | Version | `${{ steps.meta.outputs.version }}` |
+            | Package | `com.coffie.deepseekstudio` |
+            | minSdk | 24 (Android 7.0) |
+            | SHA-256 | `${{ steps.meta.outputs.sha }}` |
+          files: ${{ steps.meta.outputs.apk }}
+          fail_on_unmatched_files: true

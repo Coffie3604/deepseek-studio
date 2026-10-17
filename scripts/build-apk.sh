@@ -36,6 +36,19 @@ KEYSTORE="$KEYSTORE_DIR/deepseek-studio.jks"
 KEY_ALIAS="deepseek"
 KEY_PASS_FILE="$KEYSTORE_DIR/.pass"
 
+# CI (GitHub Actions) supplies the signing material through the environment so
+# every release APK is signed with the same key and can be installed as an
+# upgrade over the previous one.
+if [ -n "${DS_KEYSTORE_B64:-}" ] && [ -n "${DS_KEYSTORE_PASS:-}" ]; then
+    KEYSTORE_DIR="$BUILD_DIR/keystore"
+    KEYSTORE="$KEYSTORE_DIR/deepseek-studio.jks"
+    KEY_PASS_FILE="$KEYSTORE_DIR/.pass"
+    KEY_ALIAS="${DS_KEY_ALIAS:-deepseek}"
+    CI_SIGNING=1
+else
+    CI_SIGNING=0
+fi
+
 # ── Colours ──────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
     R=$'\033[0m'; B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; E=$'\033[31m'; C=$'\033[36m'
@@ -148,6 +161,13 @@ CLASSES_DIR="$BUILD_DIR/classes"
 DEX_DIR="$BUILD_DIR/dex"
 mkdir -p "$OUT_DIR" "$RES_COMPILED" "$GEN_DIR" "$CLASSES_DIR" "$DEX_DIR"
 
+# ── 2b. Bundle the web UI as assets (offline shell) ──────────────────────────
+step "Syncing web assets"
+bash "$PROJECT_ROOT/scripts/sync-android-assets.sh" --clean \
+    || die "failed to sync public/ into android assets"
+ASSETS_DIR="$APP_DIR/src/main/assets"
+[ -d "$ASSETS_DIR" ] || die "assets dir missing after sync"
+
 # ── 3. Compile resources ─────────────────────────────────────────────────────
 step "Compiling resources (aapt2 compile)"
 "$AAPT2" compile --dir "$APP_DIR/src/main/res" -o "$RES_COMPILED/" \
@@ -173,6 +193,7 @@ LINK_ARGS=(
     --version-code "$VERSION_CODE"
     --version-name "$VERSION_NAME"
     --auto-add-overlay
+    -A "$ASSETS_DIR"
 )
 if [ "$BUILD_TYPE" = "debug" ]; then
     LINK_ARGS+=(--debug-mode)
@@ -262,6 +283,15 @@ step "Signing (apksigner)"
 mkdir -p "$KEYSTORE_DIR"
 chmod 700 "$KEYSTORE_DIR"
 
+if [ "$CI_SIGNING" -eq 1 ]; then
+    # Decode the keystore + password handed over by the workflow.
+    printf '%s' "$DS_KEYSTORE_B64" | base64 -d > "$KEYSTORE" \
+        || die "could not decode DS_KEYSTORE_B64"
+    printf '%s' "$DS_KEYSTORE_PASS" > "$KEY_PASS_FILE"
+    chmod 600 "$KEYSTORE" "$KEY_PASS_FILE"
+    ok "using CI keystore (alias: $KEY_ALIAS)"
+fi
+
 if [ ! -f "$KEYSTORE" ]; then
     ok "generating keystore (first run)"
     # Random password, stored 0600 next to the keystore.
@@ -282,6 +312,12 @@ fi
 
 STOREPASS="$(cat "$KEY_PASS_FILE")"
 SIGNED_APK="$OUT_DIR/$APP_NAME-$BUILD_TYPE.apk"
+
+# A CI build without a keystore secret would otherwise silently produce an APK
+# signed with a throwaway key, which cannot be installed over a previous build.
+if [ "$CI_SIGNING" -eq 0 ] && [ -n "${CI:-}" ]; then
+    warn "no DS_KEYSTORE_B64 secret — APK signed with a temporary key"
+fi
 
 java -jar "$APKSIGNER_JAR" sign \
      --ks "$KEYSTORE" \
