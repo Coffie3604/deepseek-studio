@@ -61,6 +61,20 @@ body {
   background:var(--bg-3); border:1px solid var(--border);
 }
 
+/* Staging marker — shown only when /api/version reports env:"sandbox".
+   Amber, not red: it is a warning about *which* instance you are editing,
+   not an error. Kept small so it never pushes the header buttons off-screen. */
+.env-badge {
+  font-size:9px; font-weight:700; letter-spacing:.06em;
+  color:#0d1117; background:#d29922;
+  padding:3px 7px; border-radius:10px;
+  border:1px solid #b8860b;
+  flex-shrink:0;
+}
+@media (max-width:420px) {
+  .env-badge { font-size:8px; padding:2px 5px; }
+}
+
 /* ═══════════ BUTTONS ═══════════ */
 .btn {
   background:transparent; border:1px solid var(--border);
@@ -371,6 +385,9 @@ body {
 }
 .ai-input-bar button[type="submit"]:hover { background:#388bfd; }
 .ai-input-bar button[type="submit"]:disabled { opacity:.5; }
+/* Stop button — replaces Send while a stream is in flight. */
+#aiStopBtn { background:var(--red, #f85149); }
+#aiStopBtn:hover { background:#da3633; }
 .ai-toggle {
   display:flex; align-items:center; gap:5px;
   font-size:11px; color:var(--fg-3);
@@ -496,6 +513,30 @@ body {
 }
 .term-info .pulse { width:6px; height:6px; border-radius:50%; background:var(--green); animation:pulse 2s infinite; }
 #terminal { flex:1; padding:8px; overflow:hidden; min-height:0; }
+
+/* ═══════════ TERMINAL MOBILE KEY ROW ═══════════ */
+/* xterm on Android is nearly unusable without Esc/Tab/Ctrl/arrows.
+   Hidden on devices with a real keyboard (pointer:fine). */
+.term-key-row {
+  display:none;
+  gap:4px; padding:6px 8px;
+  padding-bottom:calc(6px + env(safe-area-inset-bottom, 0px));
+  background:var(--bg-2); border-top:1px solid var(--border);
+  overflow-x:auto; flex-shrink:0; scrollbar-width:none;
+  -webkit-overflow-scrolling:touch;
+}
+.term-key-row::-webkit-scrollbar { display:none; }
+@media (pointer:coarse) { .term-key-row { display:flex; } }
+.term-key-row .tkey {
+  flex:0 0 auto; min-width:40px; min-height:36px;
+  background:var(--bg-1); border:1px solid var(--border);
+  color:var(--fg-2); border-radius:var(--radius-sm);
+  font-family:inherit; font-size:12px; cursor:pointer;
+  display:inline-flex; align-items:center; justify-content:center;
+  -webkit-tap-highlight-color:transparent; user-select:none;
+}
+.term-key-row .tkey:active { background:var(--bg-3); border-color:var(--blue); color:var(--blue); }
+.term-key-row .tkey-mod.armed { background:var(--blue); border-color:var(--blue); color:#fff; }
 
 /* ═══════════ TERMINAL SEARCH BAR ═══════════ */
 .term-search-bar {
@@ -1219,3 +1260,124 @@ body {
 .activity-item.kind-error    .act-icon { color: var(--red); }
 .activity-item.kind-save     .act-icon { color: var(--green); }
 .activity-item.kind-git      .act-icon { color: var(--yellow); }
+
+/* ═══════════ v2.3 additions (extracted from index.html inline <style>) ═══════════ */
+/* Copy buttons — always visible (faint by default) */
+.copy-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  gap: 4px; padding: 3px 8px;
+  border: 1px solid var(--border); background: var(--bg-2); color: var(--fg-3);
+  border-radius: 5px; font-size: 10px; font-family: inherit; cursor: pointer;
+  transition: all .15s ease; -webkit-tap-highlight-color: transparent;
+  user-select: none; min-height: 22px;
+}
+.copy-btn:hover, .copy-btn:active { background: var(--bg-3); color: var(--fg-1); border-color: var(--border-2); }
+.copy-btn.copied { color: var(--green); border-color: var(--green); background: rgba(63,185,80,.12); }
+.copy-btn svg { display: block; pointer-events: none; }
+
+.tool-call .tool-head { position: relative; padding-right: 60px; }
+.tool-call .tool-head .tool-copy { position: absolute; top: -2px; right: 0; }
+.tool-call .tool-output { position: relative; }
+.tool-call .tool-output .output-copy { position: absolute; top: 6px; right: 6px; z-index: 2; }
+
+.chat-msg.assistant pre .pre-actions {
+  position: absolute; top: 8px; right: 8px;
+  display: flex; gap: 6px; z-index: 2;
+}
+.chat-msg.assistant pre .pre-actions .insert-code-btn { position: static; }
+.chat-msg.assistant pre .pre-actions .copy-btn { padding: 4px 10px; font-size: 10px; min-height: 22px; }
+
+/* Always-visible copy icon on chat messages */
+.chat-msg .msg-copy-btn { opacity: 0.55; }
+.chat-msg:hover .msg-copy-btn,
+.chat-msg:focus-within .msg-copy-btn { opacity: 1; }
+.chat-msg .msg-copy-btn:active { opacity: 1; transform: scale(0.94); }
+
+.chat-header-actions { display: flex; gap: 4px; margin-left: auto; align-items: center; }
+.chat-header-actions .btn.icon-only { min-width: 34px; min-height: 34px; padding: 6px; }
+
+.chat-search-bar {
+  display: none; align-items: center; gap: 6px;
+  padding: 8px 14px; background: var(--bg-1);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.chat-search-bar.active { display: flex; }
+.chat-search-bar input {
+  flex: 1; background: var(--bg-2); border: 1px solid var(--border);
+  color: var(--fg-1); padding: 6px 10px; border-radius: 6px;
+  font-size: 12px; outline: none; min-height: 32px;
+}
+.chat-search-bar input:focus { border-color: var(--blue); }
+.chat-search-bar .result-count {
+  font-size: 11px; color: var(--fg-3); font-family: monospace; white-space: nowrap;
+}
+.chat-search-bar .tsb-btn {
+  background: transparent; border: 1px solid transparent; color: var(--fg-3);
+  padding: 4px 8px; border-radius: 4px; cursor: pointer; min-height: 28px;
+}
+.chat-search-bar .tsb-btn:hover { background: var(--bg-3); color: var(--blue); }
+.chat-msg.search-match { outline: 2px solid var(--yellow); outline-offset: 2px; }
+.chat-msg.search-current { outline: 2px solid var(--orange); outline-offset: 2px; }
+
+/* Log panel */
+.log-entry {
+  padding: 12px 14px; background: var(--bg-1);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+  margin-bottom: 10px; border-left: 3px solid var(--blue);
+}
+.log-entry.breaking { border-left-color: var(--red); }
+.log-entry.feature  { border-left-color: var(--green); }
+.log-entry.fix      { border-left-color: var(--yellow); }
+.log-entry .log-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.log-entry .log-version { font-family: monospace; font-weight: 700; font-size: 12px; color: var(--blue); }
+.log-entry .log-date { font-size: 10px; color: var(--fg-4); font-family: monospace; }
+.log-entry .log-badge {
+  font-size: 9px; padding: 2px 6px; border-radius: 8px;
+  font-weight: 600; text-transform: uppercase; letter-spacing: .5px;
+}
+.log-entry .log-badge.feature  { background: #23863622; color: var(--green); border: 1px solid #23863655; }
+.log-entry .log-badge.fix      { background: #9e6a0322; color: var(--yellow); border: 1px solid #9e6a0355; }
+.log-entry .log-badge.breaking { background: #da363322; color: var(--red);    border: 1px solid #da363355; }
+.log-entry ul { padding-left: 18px; margin: 6px 0 0 0; font-size: 12px; line-height: 1.6; color: var(--fg-2); }
+.log-entry li { margin-bottom: 4px; }
+.log-entry li code { background: var(--bg-2); padding: 1px 5px; border-radius: 3px; font-family: monospace; font-size: 11px; color: var(--orange); }
+
+.activity-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px 10px; background: var(--bg-1);
+  border: 1px solid var(--border-2); border-radius: 6px;
+  margin-bottom: 4px; font-size: 11px;
+}
+.activity-item .act-time { font-family: monospace; color: var(--fg-4); font-size: 10px; white-space: nowrap; flex-shrink: 0; min-width: 42px; }
+.activity-item .act-icon { flex-shrink: 0; width: 14px; text-align: center; }
+.activity-item .act-body { flex: 1; color: var(--fg-2); word-break: break-word; }
+.activity-item.kind-file  .act-icon { color: var(--blue); }
+.activity-item.kind-tool  .act-icon { color: var(--green); }
+.activity-item.kind-error .act-icon { color: var(--red); }
+.activity-item.kind-save  .act-icon { color: var(--green); }
+.activity-item.kind-git   .act-icon { color: var(--yellow); }
+
+/* ─── Sync status pill (v2.6) ─── */
+.gh-sync-state {
+  padding: 10px 12px;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 10px;
+  font-size: 12px;
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  line-height: 1.4;
+  word-break: break-word;
+}
+.gh-sync-state.on   { color: var(--green);  border-color: rgba(63,185,80,.4);  background: rgba(63,185,80,.06); }
+.gh-sync-state.warn { color: var(--yellow); border-color: rgba(210,153,34,.4); background: rgba(210,153,34,.06); }
+.gh-sync-state.err  { color: var(--red);    border-color: rgba(248,81,73,.4);  background: rgba(248,81,73,.06); }
+.gh-sync-state.off  { color: var(--fg-3); }
+.gh-remote-info {
+  font-size: 11px;
+  color: var(--fg-3);
+  font-family: ui-monospace, 'JetBrains Mono', monospace;
+  margin-bottom: 10px;
+  word-break: break-all;
+  line-height: 1.4;
+}

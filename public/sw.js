@@ -1,12 +1,27 @@
 /* DeepSeek Studio Service Worker */
-const CACHE_NAME = 'deepseek-studio-v4';
+/* Bump this whenever the module graph changes — the activate handler
+   deletes every cache whose name differs, so a stale v5 would keep serving
+   the pre-split index.html against the new js/ modules. */
+const CACHE_NAME = 'deepseek-studio-v8';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
   '/app.css',
   '/guide.html',
   '/manifest.json',
-  '/icon-v2.svg'
+  '/icon-v2.svg',
+  // The ES module graph. index.html loads only boot.js; the rest are
+  // static imports, so they must be cached or offline boot dies on the
+  // first import. Keep this list in sync with public/js/**.
+  '/js/boot.js',
+  '/js/legacy.js',
+  '/js/core/state.js',
+  '/js/core/bus.js',
+  '/js/core/api.js',
+  '/js/core/ui.js',
+  '/js/core/lifecycle.js',
+  '/js/features/terminal.js',
+  '/js/features/chat.js'
 ];
 
 self.addEventListener('install', function(event) {

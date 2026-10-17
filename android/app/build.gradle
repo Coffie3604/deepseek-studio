@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.coffie.deepseekstudio'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "com.coffie.deepseekstudio"
+        minSdk 24
+        targetSdk 35
+        versionCode 270
+        versionName "2.7.0"
+    }
+
+    buildTypes {
+        debug {
+            applicationIdSuffix ".debug"
+            versionNameSuffix "-debug"
+        }
+        release {
+            minifyEnabled false
+            // Signed by scripts/build-apk.sh with the local keystore.
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    sourceSets {
+        main {
+            // The WebView shell is plain Java, no Kotlin/AndroidX needed.
+            java.srcDirs = ['src/main/java']
+        }
+    }
+}

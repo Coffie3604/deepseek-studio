@@ -90,6 +90,15 @@ const PKG_VERSION = (() => {
     try { return require('./package.json').version; } catch (_) { return '2.4.0'; }
 })();
 
+/* Which instance is this? The sandbox runs on 3002, production on 3001.
+   The UI shows a STAGING badge so you never edit the wrong one on a phone.
+   Explicit DS_ENV wins; otherwise infer from the port. */
+const DS_ENV = (() => {
+    const explicit = String(process.env.DS_ENV || '').trim().toLowerCase();
+    if (explicit === 'sandbox' || explicit === 'production') return explicit;
+    return PORT === 3002 ? 'sandbox' : 'production';
+})();
+
 const CHANGELOG = [
     {
         version: '2.6.0', date: '2025-10', type: 'feature',
@@ -490,6 +499,7 @@ async function fetchWithRetry(url, options = {}, conf = {}) {
 app.get('/api/version', (_req, res) => {
     res.json({
         version: PKG_VERSION, node: process.version, uptime: process.uptime(),
+        env: DS_ENV, port: PORT, staging: DS_ENV === 'sandbox',
         workspace: WORKSPACE, sdCard: fs.existsSync(SD_CARD_ROOT),
         providersConfigured: Object.keys(secrets).filter((k) => k.endsWith('_key')),
         hasGitHubToken: !!ghToken(),
@@ -507,7 +517,29 @@ app.get('/api/changelog', (_req, res) => {
     res.json({ current: PKG_VERSION, changelog: CHANGELOG });
 });
 
-app.get('/api/health', (_req, res) => res.json({ ok: true, ts: Date.now() }));
+app.get('/api/health', (_req, res) => {
+    // "ok" means the app can actually do work, not just that Express is up.
+    const providers = Object.entries(AI_PROVIDERS)
+        .filter(([, cfg]) => !!String(secrets[cfg.keyName] || '').trim())
+        .map(([id]) => id);
+    const checks = {
+        workspace: fs.existsSync(WORKSPACE),
+        aiKey: providers.length > 0,
+    };
+    res.json({
+        ok: checks.workspace && checks.aiKey,
+        ts: Date.now(),
+        version: PKG_VERSION,
+        uptime: Math.round(process.uptime()),
+        workspace: WORKSPACE,
+        providersConfigured: providers,
+        checks,
+        warnings: [
+            ...(checks.workspace ? [] : ['Workspace folder missing: ' + WORKSPACE]),
+            ...(checks.aiKey ? [] : ['No AI provider key saved — chat will fail. Setup → paste key → Test key.']),
+        ],
+    });
+});
 
 app.get('/api/diagnostics', (_req, res) => {
     res.json({
@@ -542,8 +574,23 @@ app.get('/api/secrets', (_req, res) => {
     res.json(out);
 });
 
+// The browser historically stored keys under localStorage names (ds_key,
+// gemini_key). Map those onto the canonical secret names the AI providers
+// read, so "Test key" in Setup actually makes chat work.
+const SECRET_ALIASES = {
+    ds_key: 'deepseek_key',
+    deepseek_api_key: 'deepseek_key',
+    openai_api_key: 'openai_key',
+    openrouter_api_key: 'openrouter_key',
+    groq_api_key: 'groq_key',
+    gemini_api_key: 'gemini_key',
+    google_key: 'gemini_key',
+    github_pat: 'github_token',
+};
+
 app.post('/api/secrets', (req, res) => {
-    const { name, value } = req.body || {};
+    let { name, value } = req.body || {};
+    if (name && SECRET_ALIASES[name]) name = SECRET_ALIASES[name];
     if (!name || !/^[a-z0-9_]{2,40}$/.test(name)) return res.status(400).json({ error: 'invalid secret name' });
     if (value === null || value === '' || typeof value === 'undefined') {
         delete secrets[name]; saveSecrets();
@@ -587,7 +634,7 @@ app.post('/api/secrets', (req, res) => {
     }
     secrets[name] = value.trim();
     saveSecrets();
-    res.json({ ok: true });
+    res.json({ ok: true, name });
 });
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -2796,7 +2843,8 @@ app.post('/api/ai/stream', async (req, res) => {
     req.body = Object.assign({}, req.body, { stream: true });
     const { provider, messages, tools, toolChoice, model, temperature, maxTokens } = req.body || {};
     const p = resolveProvider(provider);
-    if (!p || !p.configured) return res.status(400).json({ error: 'Provider not configured' });
+    if (!p) return res.status(400).json({ error: 'Unknown provider' });
+    if (!p.configured) return res.status(400).json({ error: 'No API key configured for ' + p.id });
     const payload = { model: model || p.cfg.model, messages: Array.isArray(messages) ? messages : [], temperature: typeof temperature === 'number' ? temperature : 0.3, max_tokens: typeof maxTokens === 'number' ? maxTokens : 4096, stream: true };
     if (Array.isArray(tools) && tools.length && p.cfg.supportsTools) { payload.tools = tools; payload.tool_choice = toolChoice || 'auto'; }
     let upstream;
@@ -2812,8 +2860,26 @@ app.post('/api/ai/stream', async (req, res) => {
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
-    try { for await (const chunk of upstream.body) res.write(chunk); }
-    catch (err) { res.write('data: ' + JSON.stringify({ error: redact(err.message) }) + '\n\n'); }
+    res.setHeader('X-Accel-Buffering', 'no');
+    if (typeof res.flushHeaders === 'function') res.flushHeaders();
+    // Keep the SSE connection alive through slow first tokens / long tool calls
+    const keepAlive = setInterval(() => {
+        try { res.write(': ping\n\n'); } catch (_) {}
+    }, 15000);
+    if (typeof keepAlive.unref === 'function') keepAlive.unref();
+    // If the client goes away (tab closed, navigation), stop pulling upstream
+    let clientGone = false;
+    req.on('close', () => { clientGone = true; });
+    try {
+        for await (const chunk of upstream.body) {
+            if (clientGone) break;
+            res.write(chunk);
+        }
+    } catch (err) {
+        if (!clientGone) res.write('data: ' + JSON.stringify({ error: redact(err.message) }) + '\n\n');
+    } finally {
+        clearInterval(keepAlive);
+    }
     res.end();
 });
 
