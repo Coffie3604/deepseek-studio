@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # fix-port-conflict.sh
 # Fixes process-scoping bug in ds-* launchers.
 # Backups written to <file>.bak-<timestamp>.

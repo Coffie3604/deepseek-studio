@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
 #  setup-apk-signing.sh — create a release keystore and register it as GitHub
 #  Actions secrets so every CI-built APK is signed with the same key.

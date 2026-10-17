@@ -61,8 +61,17 @@ jobs:
           DS_KEYSTORE_PASS: ${{ secrets.DS_KEYSTORE_PASS }}
         run: |
           set -euo pipefail
+          # Scripts must be portable: a Termux-only shebang such as
+          # #!/data/data/com.termux/files/usr/bin/bash makes the kernel
+          # fail with "cannot execute: required file not found".
+          for f in scripts/*.sh; do
+            head -1 "$f" | grep -qx '#!/usr/bin/env bash' \
+              || { echo "::error file=$f::bad shebang: $(head -1 "$f")"; exit 1; }
+          done
           chmod +x scripts/build-apk.sh scripts/sync-android-assets.sh
-          ./scripts/build-apk.sh release --clean
+          # Invoke through bash so the build never depends on the exec bit
+          # or on the shebang resolving on this machine.
+          bash scripts/build-apk.sh release --clean
 
       - name: Verify APK
         run: |

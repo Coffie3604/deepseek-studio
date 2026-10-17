@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────
 # DeepSeek Studio — GitHub sync helper for Termux
 #
