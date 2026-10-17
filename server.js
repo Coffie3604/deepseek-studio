@@ -70,9 +70,11 @@ try { termuxApiLib = require('termux-api'); } catch (_) { /* CLI fallback */ }
 
 /* ─── Constants ─── */
 const app = express();
-// Sandbox default port is 3002 so it can run alongside deepseek-editor (3001)
+// Default port is 3001; the sandbox/CI runs on 3002 via PORT=3002.
+// HOST defaults to loopback; set HOST=0.0.0.0 to expose on the LAN.
 const PORT = parseInt(process.env.PORT, 10) || 3001;
 const HOST = process.env.HOST || '127.0.0.1';
+const IS_TERMUX = fs.existsSync('/data/data/com.termux/files/usr');
 const HOME = process.env.HOME || os.homedir();
 
 const WORKSPACE = path.resolve(process.env.DS_WORKSPACE || path.join(HOME, 'projects'));
@@ -227,8 +229,11 @@ try {
     // username for token schemes ("x-access-token" is what GitHub wants
     // for PAT / fine-grained tokens) and the actual token for the
     // password prompt. Both are provided via env so nothing lands on disk.
+    // Shebang must point at a shell that exists on this host (Termux bash on
+    // Android, /bin/sh in CI/Linux) — a missing interpreter makes git fail.
+    const askpassShell = fs.existsSync(TERMUX_BASH) ? TERMUX_BASH : '/bin/sh';
     fs.writeFileSync(ASKPASS_HELPER,
-        '#!/data/data/com.termux/files/usr/bin/sh\n' +
+        '#!' + askpassShell + '\n' +
         'case "$1" in\n' +
         '  *[Uu]sername*) printf "%s\\n" "${GIT_ASKPASS_USER:-x-access-token}" ;;\n' +
         '  *[Pp]assword*) printf "%s\\n" "${GIT_ASKPASS_TOKEN:-}" ;;\n' +
@@ -277,8 +282,8 @@ function redact(input) {
         .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, '***REDACTED***');
 }
 
-/* ─── Wake lock ─── */
-try {
+/* ─── Wake lock (Termux only) ─── */
+if (IS_TERMUX) try {
     require('child_process').execSync(
         'command -v termux-wake-lock >/dev/null 2>&1 && termux-wake-lock',
         { timeout: 5000, stdio: 'ignore' });
@@ -4052,7 +4057,7 @@ function shutdown(signal) {
     shuttingDown = true;
     console.log('\n[' + signal + '] Shutting down...');
     try { wss.close(); } catch (_) {}
-    try { require('child_process').execSync('command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock', { timeout: 3000, stdio: 'ignore' }); console.log('\uD83D\uDD13 Wake lock released'); } catch (_) {}
+    if (IS_TERMUX) try { require('child_process').execSync('command -v termux-wake-unlock >/dev/null 2>&1 && termux-wake-unlock', { timeout: 3000, stdio: 'ignore' }); console.log('\uD83D\uDD13 Wake lock released'); } catch (_) {}
     server.close(() => { console.log('Server closed.'); process.exit(0); });
     setTimeout(() => process.exit(1), 5000).unref();
 }
