@@ -24,3 +24,5 @@ dist/
 *.bak-*
 *.ds-bak
 *.orig
+.patch-backup/
+.patch-backup-index.*

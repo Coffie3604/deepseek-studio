@@ -413,6 +413,41 @@ body {
 .snippet-item .snip-name { color:var(--blue); font-weight:600; margin-bottom:3px; }
 .snippet-item .snip-desc { color:var(--fg-3); font-size:11px; }
 
+/* ═══════════ EDITING TOOLS DROPDOWN ═══════════ */
+.edit-tools { position:relative; flex-shrink:0; }
+.edit-tools-btn {
+  background:var(--bg-1); border:1px solid var(--border);
+  color:var(--fg-2); border-radius:18px;
+  min-height:44px; min-width:44px;
+  display:flex; align-items:center; justify-content:center;
+  cursor:pointer; font-size:15px;
+  transition:background .15s, color .15s, border-color .15s;
+}
+.edit-tools-btn:hover, .edit-tools-btn:active { background:var(--bg-3); color:var(--fg-0); }
+.edit-tools.open .edit-tools-btn { color:var(--blue); border-color:var(--blue); background:var(--bg-3); }
+.edit-tools-menu {
+  position:absolute; bottom:calc(100% + 8px); right:0;
+  min-width:210px;
+  background:var(--bg-2); border:1px solid var(--border);
+  border-radius:var(--radius);
+  box-shadow:0 -8px 30px rgba(0,0,0,.6);
+  padding:6px; z-index:210;
+  display:none;
+}
+.edit-tools.open .edit-tools-menu { display:block; animation:menuIn .12s ease; }
+.edit-tools-item {
+  display:flex; align-items:center; gap:12px;
+  padding:11px 12px; border-radius:8px;
+  font-size:13px; color:var(--fg-1);
+  cursor:pointer; white-space:nowrap;
+  user-select:none;
+}
+.edit-tools-item i { width:16px; text-align:center; color:var(--fg-3); font-size:13px; }
+.edit-tools-item:hover, .edit-tools-item:active { background:var(--bg-3); }
+.edit-tools-item:hover i { color:var(--blue); }
+.edit-tools-item.disabled { opacity:.4; pointer-events:none; }
+.edit-tools-sep { height:1px; background:var(--border-2); margin:5px 8px; }
+
 /* ═══════════ EDITOR PANEL ═══════════ */
 .editor-tabs-bar {
   display:flex; background:var(--bg-2);

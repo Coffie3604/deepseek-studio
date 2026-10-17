@@ -92,6 +92,16 @@ const PKG_VERSION = (() => {
 
 const CHANGELOG = [
     {
+        version: '2.7.0', date: '2025-10', type: 'feature',
+        items: [
+            '🔐 GitHub tokens are now verified against the API before being saved (/api/github/token)',
+            '🧪 "Test" button + /api/github/verify to re-check the stored token and show its scopes',
+            '🗄️  Tokens are mirrored into git\'s credential store (~/.git-credentials, 0600) so plain `git push` works in Termux',
+            '🚪 Sign-out now also clears the git credential store',
+            '🖥️  New Termux CLI: scripts/gh-sync.sh (status/login/token/verify/logout/repos/sync/clone) + npm run gh:* aliases',
+        ],
+    },
+    {
         version: '2.6.0', date: '2025-10', type: 'feature',
         items: [
             '⚡ /api/git/auto-repo — one-tap repo setup: git init + .gitignore + identity + first commit',
@@ -2554,6 +2564,7 @@ app.post('/api/github/device/poll', async (req, res) => {
         // Persist the token exactly like a manually-entered PAT
         secrets.github_token = String(data.access_token).trim();
         saveSecrets();
+        writeGitCredential(secrets.github_token);
         ghDeviceSessions.delete(deviceCode);
         // Resolve the authenticated user for a friendly confirmation
         let user = null;
@@ -2569,7 +2580,85 @@ app.post('/api/github/signout', (req, res) => {
     const keepIdentity = (req.body || {}).keepIdentity === true;
     delete secrets.github_token;
     saveSecrets();
+    // Also drop any token cached by git's credential helper so plain `git`
+    // commands stop authenticating as the signed-out user.
+    try { clearGitCredential(); } catch (_) {}
     res.json({ ok: true, keptIdentity: keepIdentity });
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   GitHub token validation + git credential-store persistence
+   ─────────────────────────────────────────────────────────────────
+   A "proper" auth system verifies a token before trusting it, and
+   keeps git's own credential store in sync so `git push` from a plain
+   Termux shell works without re-entering anything.
+   ═══════════════════════════════════════════════════════════════════ */
+const GIT_CREDENTIALS_FILE = path.join(HOME, '.git-credentials');
+
+function writeGitCredential(token) {
+    if (!token) return;
+    try {
+        const line = 'https://x-access-token:' + encodeURIComponent(token) + '@github.com\n';
+        fs.writeFileSync(GIT_CREDENTIALS_FILE, line, { mode: 0o600 });
+        fs.chmodSync(GIT_CREDENTIALS_FILE, 0o600);
+        // Ensure git is configured to read it (idempotent).
+        execFile('git', ['config', '--global', 'credential.helper', 'store'], () => {});
+    } catch (err) { console.error('[github] credential store write failed:', err.message); }
+}
+
+function clearGitCredential() {
+    try { if (fs.existsSync(GIT_CREDENTIALS_FILE)) fs.unlinkSync(GIT_CREDENTIALS_FILE); } catch (_) {}
+}
+
+// Validate a token against the GitHub API and return the authenticated user.
+async function verifyGitHubToken(token) {
+    const res = await fetchWithRetry('https://api.github.com/user', {
+        headers: {
+            'Authorization': 'Bearer ' + token,
+            'Accept': 'application/vnd.github+json',
+            'X-GitHub-Api-Version': '2022-11-28',
+            'User-Agent': 'DeepSeek-Studio/' + PKG_VERSION,
+        },
+    }, { retries: 1, timeout: 20000 });
+    const scopes = res.headers.get('x-oauth-scopes');
+    let data = null;
+    try { data = await res.json(); } catch (_) {}
+    if (!res.ok) {
+        return { ok: false, status: res.status, error: (data && data.message) || ('HTTP ' + res.status) };
+    }
+    return {
+        ok: true,
+        user: { login: data.login, name: data.name, avatar: data.avatar_url, publicRepos: data.public_repos },
+        scopes: scopes ? scopes.split(',').map((s) => s.trim()).filter(Boolean) : [],
+    };
+}
+
+// Save a manually-pasted PAT (or fine-grained token) after verifying it.
+app.post('/api/github/token', async (req, res) => {
+    const token = String((req.body || {}).token || '').trim();
+    if (!token) return res.status(400).json({ error: 'token required' });
+    if (!/^(gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,})$/.test(token)) {
+        return res.status(400).json({ error: 'That does not look like a GitHub token (expected gh*_… or github_pat_…).' });
+    }
+    try {
+        const check = await verifyGitHubToken(token);
+        if (!check.ok) return res.status(check.status || 401).json({ error: check.error || 'token rejected by GitHub' });
+        secrets.github_token = token;
+        saveSecrets();
+        writeGitCredential(token);
+        res.json({ ok: true, user: check.user, scopes: check.scopes });
+    } catch (e) { res.status(500).json({ error: redact(e.message) }); }
+});
+
+// Re-verify the currently stored token (used by the UI "Test connection" button).
+app.post('/api/github/verify', async (_req, res) => {
+    const token = ghToken();
+    if (!token) return res.status(400).json({ ok: false, error: 'No token configured' });
+    try {
+        const check = await verifyGitHubToken(token);
+        if (check.ok) writeGitCredential(token);
+        res.json(check);
+    } catch (e) { res.status(500).json({ ok: false, error: redact(e.message) }); }
 });
 
 app.get('/api/github/device/config', (_req, res) => {

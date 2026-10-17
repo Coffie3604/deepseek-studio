@@ -258,6 +258,23 @@
           <span>Auto</span>
         </label>
         <span class="ctx-indicator" id="ctxIndicator" title="Current file context">📄 No file</span>
+        <div class="edit-tools" id="editTools">
+          <button type="button" class="edit-tools-btn" id="editToolsBtn" title="Editing tools" aria-haspopup="true" aria-expanded="false">
+            <i class="fas fa-ellipsis-vertical"></i>
+          </button>
+          <div class="edit-tools-menu" id="editToolsMenu" role="menu">
+            <div class="edit-tools-item" data-action="cut" role="menuitem"><i class="fas fa-scissors"></i> Cut</div>
+            <div class="edit-tools-item" data-action="copy" role="menuitem"><i class="fas fa-copy"></i> Copy</div>
+            <div class="edit-tools-item" data-action="paste" role="menuitem"><i class="fas fa-paste"></i> Paste</div>
+            <div class="edit-tools-item" data-action="selectAll" role="menuitem"><i class="fas fa-object-group"></i> Select all</div>
+            <div class="edit-tools-sep"></div>
+            <div class="edit-tools-item" data-action="undo" role="menuitem"><i class="fas fa-rotate-left"></i> Undo</div>
+            <div class="edit-tools-item" data-action="redo" role="menuitem"><i class="fas fa-rotate-right"></i> Redo</div>
+            <div class="edit-tools-sep"></div>
+            <div class="edit-tools-item" data-action="clear" role="menuitem"><i class="fas fa-eraser"></i> Clear</div>
+            <div class="edit-tools-item" data-action="copyAll" role="menuitem"><i class="fas fa-clipboard-list"></i> Copy all text</div>
+          </div>
+        </div>
         <textarea id="aiInput" placeholder="Tell the AI what to do… (type / for snippets)" rows="1"></textarea>
         <button type="submit" id="aiSendBtn" title="Send"><i class="fas fa-paper-plane"></i></button>
       </div>
@@ -510,11 +527,14 @@
         </div>
         <div class="settings-section">
           <h3><i class="fas fa-key"></i> GitHub Token</h3>
-          <input type="password" id="ghToken" placeholder="ghp_..." style="margin-bottom:10px" />
-          <button class="btn" id="ghSaveToken" style="width:100%;justify-content:center;padding:10px">Save Token</button>
+          <input type="password" id="ghToken" placeholder="ghp_... or github_pat_..." style="margin-bottom:10px" />
+          <div style="display:flex;gap:8px">
+            <button class="btn primary" id="ghSaveToken" style="flex:1;justify-content:center;padding:10px">Save &amp; Verify</button>
+            <button class="btn" id="ghVerifyToken" style="flex:0 0 auto;padding:10px" title="Re-check the stored token"><i class="fas fa-plug-circle-check"></i> Test</button>
+          </div>
           <p style="font-size:11px;color:var(--fg-3);margin-top:8px;line-height:1.5">
             <i class="fas fa-lock" style="color:var(--green)"></i>
-            Token stored server-side in <code>~/.deepseek-secrets.json</code> (mode 0600). Never appears in git config or process args.
+            Token is verified against GitHub before saving, stored server-side in <code>~/.deepseek-secrets.json</code> (mode 0600), and mirrored into git's credential store so plain <code>git push</code> works in Termux.
           </p>
         </div>
         <div class="settings-section">
@@ -2853,7 +2873,7 @@ function initTerminal() {
 
     var wsUrl = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/pty';
     try { ws = new WebSocket(wsUrl); }
-    catch (e) { ws = new WebSocket('ws://127.0.0.1:3002/pty'); }
+    catch (e) { ws = new WebSocket('ws://127.0.0.1:3001/pty'); }
 
     ws.onopen = function() {
       term.writeln('\x1b[32m● Connected to Termux\x1b[0m');
@@ -3520,13 +3540,36 @@ function setupGithub() {
   document.getElementById('ghSaveToken').onclick = function() {
     var token = tIn.value.trim();
     if (!token) { toast('Enter a token', 'error'); return; }
-    fetch(API + '/api/secrets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'github_token', value: token }) })
+    toast('Verifying token with GitHub…', 'info');
+    fetch(API + '/api/github/token', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token }) })
       .then(function(r) { return r.json(); })
       .then(function(d) {
-        if (d.ok) { toast('Token saved server-side', 'success'); logActivity('git', 'GitHub token saved'); logGitRecord('token', 'GitHub token saved server-side'); }
-        else { localStorage.setItem('gh_token', token); toast('Saved locally (server rejected)', 'warn'); }
+        if (d.ok) {
+          tIn.value = '';
+          toast('Token verified — signed in as ' + ((d.user && d.user.login) || 'GitHub user'), 'success');
+          logActivity('git', 'GitHub token verified');
+          logGitRecord('token', 'GitHub token verified' + (d.user ? ' as ' + d.user.login : ''));
+          renderGhAccount();
+          if (window.loadGhRepoPicker) loadGhRepoPicker();
+        } else {
+          toast(d.error || 'Token rejected by GitHub', 'error');
+          logGitRecord('error', 'Token rejected', (d.error || '').slice(0, 200));
+        }
       })
-      .catch(function() { localStorage.setItem('gh_token', token); toast('Saved locally', 'info'); });
+      .catch(function() { toast('Could not reach backend to verify token', 'error'); });
+  };
+  if (document.getElementById('ghVerifyToken')) document.getElementById('ghVerifyToken').onclick = function() {
+    toast('Testing stored token…', 'info');
+    fetch(API + '/api/github/verify', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) {
+          var sc = (d.scopes && d.scopes.length) ? ' · scopes: ' + d.scopes.join(', ') : '';
+          toast('Token valid — ' + ((d.user && d.user.login) || 'GitHub user') + sc, 'success');
+          renderGhAccount();
+        } else { toast(d.error || 'Token invalid', 'error'); }
+      })
+      .catch(function() { toast('Backend unreachable', 'error'); });
   };
   document.getElementById('ghSaveIdentity').onclick = function() {
     var n = document.getElementById('ghName').value.trim();
@@ -4162,6 +4205,104 @@ function setupSnippets() {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   Editing tools dropdown (cut / copy / paste / select all / undo …)
+   ═══════════════════════════════════════════════════════════════════ */
+function setupEditTools() {
+  var wrap = document.getElementById('editTools');
+  var btn = document.getElementById('editToolsBtn');
+  var menu = document.getElementById('editToolsMenu');
+  var input = document.getElementById('aiInput');
+  if (!wrap || !btn || !menu || !input) return;
+
+  function close() { wrap.classList.remove('open'); btn.setAttribute('aria-expanded', 'false'); }
+  function open() { wrap.classList.add('open'); btn.setAttribute('aria-expanded', 'true'); }
+
+  btn.addEventListener('click', function(e) {
+    e.stopPropagation();
+    wrap.classList.contains('open') ? close() : open();
+  });
+
+  function insertAtCursor(text) {
+    var start = input.selectionStart || 0;
+    var end = input.selectionEnd || 0;
+    var val = input.value || '';
+    input.value = val.slice(0, start) + text + val.slice(end);
+    var pos = start + text.length;
+    input.setSelectionRange(pos, pos);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  }
+
+  function selectedText() {
+    var start = input.selectionStart || 0;
+    var end = input.selectionEnd || 0;
+    return (input.value || '').slice(start, end);
+  }
+
+  function doAction(action) {
+    switch (action) {
+      case 'cut':
+        var sel = selectedText();
+        if (!sel) { toast('Nothing selected', 'warn'); return; }
+        copyText(sel);
+        insertAtCursor('');
+        toast('Cut', 'success');
+        break;
+      case 'copy':
+        var csel = selectedText();
+        if (!csel) { toast('Nothing selected', 'warn'); return; }
+        copyText(csel);
+        break;
+      case 'paste':
+        if (navigator.clipboard && navigator.clipboard.readText) {
+          navigator.clipboard.readText().then(function(t) {
+            if (t) insertAtCursor(t);
+            else toast('Clipboard empty', 'warn');
+          }).catch(function() { toast('Paste blocked — long-press to paste', 'warn'); });
+        } else {
+          toast('Paste blocked — long-press to paste', 'warn');
+        }
+        break;
+      case 'selectAll':
+        input.focus();
+        input.setSelectionRange(0, (input.value || '').length);
+        break;
+      case 'undo':
+        input.focus();
+        try { document.execCommand('undo'); } catch (e) {}
+        break;
+      case 'redo':
+        input.focus();
+        try { document.execCommand('redo'); } catch (e) {}
+        break;
+      case 'clear':
+        if (!input.value) { toast('Already empty', 'warn'); return; }
+        input.value = '';
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+        break;
+      case 'copyAll':
+        if (!input.value) { toast('Nothing to copy', 'warn'); return; }
+        copyText(input.value);
+        break;
+    }
+  }
+
+  menu.querySelectorAll('.edit-tools-item').forEach(function(item) {
+    item.addEventListener('click', function(e) {
+      e.stopPropagation();
+      doAction(this.getAttribute('data-action'));
+      close();
+    });
+  });
+
+  document.addEventListener('click', function(e) {
+    if (!wrap.contains(e.target)) close();
+  });
+  document.addEventListener('keydown', function(e) { if (e.key === 'Escape') close(); });
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    Chat tools (search, copy-all, export, clear records)
    ═══════════════════════════════════════════════════════════════════ */
 var chatSearch = { matches: [], index: 0, query: '' };
@@ -4723,6 +4864,7 @@ function start() {
   try { setupConfirmModal(); } catch (e) { console.log('setupConfirmModal fail', e); }
   try { setupPwa(); } catch (e) { console.log('setupPwa fail', e); }
   try { setupSnippets(); } catch (e) { console.log('setupSnippets fail', e); }
+  try { setupEditTools(); } catch (e) { console.log('setupEditTools fail', e); }
   try { setupChatTools(); } catch (e) { console.log('setupChatTools fail', e); }
   try { checkBackend(); setInterval(checkBackend, 8000); } catch (e) { console.log('checkBackend fail', e); }
   // Warn once if the server has no DeepSeek key — the chat path needs it
