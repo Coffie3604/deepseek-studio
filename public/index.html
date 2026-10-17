@@ -1590,6 +1590,138 @@ function showTabBadge(tabName, show) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════
+   NAVIGATION HISTORY (v3.1)
+   Hardware/gesture back, Alt+←, mouse back button and browser back all
+   walk the same stack: modal → drawer → side panel → primary tab → file.
+   ═══════════════════════════════════════════════════════════════════ */
+var navState = { panel: 'chat', side: 'templates', drawer: null, file: null };
+var navDepth = 0;
+var navApplying = false;
+
+function navSnapshot() {
+  var drawer = null;
+  var ft = document.getElementById('fileTree');
+  var sb = document.getElementById('sidebar');
+  if (ft && ft.classList.contains('open')) drawer = 'left';
+  else if (sb && sb.classList.contains('open')) drawer = 'right';
+  return {
+    panel: activeTabPanel || 'chat',
+    side: (document.querySelector('.stab.active') || {}).getAttribute
+      ? (document.querySelector('.stab.active').getAttribute('data-tab') || 'templates')
+      : 'templates',
+    drawer: drawer,
+    file: activeTabPath || null
+  };
+}
+
+function navPush() {
+  if (navApplying) return;
+  var s = navSnapshot();
+  if (s.panel === navState.panel && s.side === navState.side &&
+      s.drawer === navState.drawer && s.file === navState.file) return;
+  navState = s;
+  navDepth++;
+  try { history.pushState({ dsNav: navDepth, state: s }, ''); } catch (e) {}
+}
+
+/* Apply a snapshot without re-pushing history. */
+function navApply(s) {
+  if (!s) return;
+  navApplying = true;
+  try {
+    if (s.panel && s.panel !== activeTabPanel) switchPrimaryPanel(s.panel);
+    if (s.side) {
+      var stab = document.querySelector('.stab[data-tab="' + s.side + '"]');
+      if (stab && !stab.classList.contains('active')) stab.click();
+    }
+    if (s.drawer) openDrawer(s.drawer); else closeDrawers();
+    if (s.file && s.file !== activeTabPath && openTabs.indexOf(s.file) >= 0) {
+      openFileFromTree(s.file);
+    }
+  } catch (e) { console.log('[DS] navApply fail', e); }
+  navState = s;
+  setTimeout(function() { navApplying = false; }, 60);
+}
+
+/* Close the topmost transient layer. Returns true if something closed. */
+function navCloseTopLayer() {
+  var ctx = document.getElementById('ctxMenu');
+  if (ctx && ctx.classList.contains('active')) { hideContextMenu(); return true; }
+  var modals = ['confirmModal', 'newFileModal', 'linkFolderModal', 'apiKeyWizardModal'];
+  for (var i = 0; i < modals.length; i++) {
+    var m = document.getElementById(modals[i]);
+    if (m && m.classList.contains('active')) {
+      if (modals[i] === 'confirmModal') hideConfirm();
+      else if (modals[i] === 'newFileModal') closeNewFileModal();
+      else if (modals[i] === 'linkFolderModal') closeLinkFolderModal();
+      else if (modals[i] === 'apiKeyWizardModal') closeApiKeyWizard();
+      return true;
+    }
+  }
+  var ft = document.getElementById('fileTree');
+  var sb = document.getElementById('sidebar');
+  if ((ft && ft.classList.contains('open')) || (sb && sb.classList.contains('open'))) {
+    closeDrawers();
+    return true;
+  }
+  return false;
+}
+
+/* Manual back (hardware key / Alt+← / mouse button). */
+function navBack() {
+  if (navCloseTopLayer()) { navPush(); return; }
+  if (navDepth > 0) { history.back(); return; }
+  if (activeTabPanel !== 'chat') { switchPrimaryPanel('chat'); navPush(); }
+}
+
+function setupNavigationHistory() {
+  try {
+    history.replaceState({ dsNav: 0, state: navSnapshot() }, '');
+  } catch (e) {}
+  navState = navSnapshot();
+
+  window.addEventListener('popstate', function(e) {
+    var st = e.state && e.state.state;
+    if (st) { navDepth = e.state.dsNav || 0; navApply(st); return; }
+    // No app state left → we're at the root entry.
+    navDepth = 0;
+    if (!navCloseTopLayer()) {
+      if (activeTabPanel !== 'chat') switchPrimaryPanel('chat');
+      closeDrawers();
+    }
+  });
+
+  // Hardware back on Android (Capacitor/TWA) and desktop Alt+← / Backspace.
+  window.addEventListener('keydown', function(e) {
+    var altLeft = e.altKey && (e.key === 'ArrowLeft' || e.key === 'Left');
+    var backspace = e.key === 'Backspace' && !inEditableField(e) && !e.ctrlKey && !e.metaKey;
+    if (altLeft || backspace) { e.preventDefault(); navBack(); }
+  });
+
+  // Mouse side buttons (button 3 = back).
+  window.addEventListener('mouseup', function(e) {
+    if (e.button === 3) { e.preventDefault(); navBack(); }
+  });
+
+  // Android hardware back via Capacitor, when running in the APK shell.
+  if (window.Capacitor && window.Capacitor.Plugins && window.Capacitor.Plugins.App) {
+    try {
+      window.Capacitor.Plugins.App.addListener('backButton', function() { navBack(); });
+    } catch (e) {}
+  }
+
+  // Record every section change so back always has somewhere to go.
+  document.addEventListener('click', function(e) {
+    var t = e.target;
+    if (!t || !t.closest) return;
+    if (t.closest('.ptab') || t.closest('.stab') || t.closest('#backdrop') ||
+        t.closest('#menuLeftBtn') || t.closest('#menuRightBtn')) {
+      setTimeout(navPush, 0);
+    }
+  }, true);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
    FILE TREE
    ═══════════════════════════════════════════════════════════════════ */
 function refreshTree() {
@@ -1944,6 +2076,7 @@ function openFileFromTree(path) {
   trackRecent(path);
   if (openTabs.indexOf(path) < 0) openTabs.push(path);
   renderEditorTabs();
+  try { navPush(); } catch (e) {}
   fsRead(path).then(function(r) {
     fileContent = r.content || '';
     fileModified = false;
@@ -4968,6 +5101,7 @@ function start() {
   try { bindHeaderButtons(); } catch (e) { console.log('bindHeaderButtons fail', e); }
   try { setupPrimaryTabs(); } catch (e) { console.log('setupPrimaryTabs fail', e); }
   try { setupSideTabs(); } catch (e) { console.log('setupSideTabs fail', e); }
+  try { setupNavigationHistory(); } catch (e) { console.log('setupNavigationHistory fail', e); }
   try { setupTemplates(); } catch (e) { console.log('setupTemplates fail', e); }
   try { setupGenerator(); } catch (e) { console.log('setupGenerator fail', e); }
   try { setupGithub(); } catch (e) { console.log('setupGithub fail', e); }

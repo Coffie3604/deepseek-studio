@@ -147,23 +147,24 @@ function writeZip(entries, alignment, pageAlign) {
         // readers ignore trailing NULs) so the header grows by exactly 1-3
         // bytes and the data lands on the boundary.
         //
-        //   pad 0        → no extra, no name padding
-        //   pad 1-3      → name += pad NULs, no extra field
+        //   pad 0        → no extra field
+        //   pad 1-3      → extra field of pad+4 bytes (header + payload), which
+        //                  overshoots by 4 and is absorbed by the next entry
         //   pad >= 4     → extra field of `pad` bytes (0xd935 padding record)
         //
-        // Getting this wrong is what produced the "off 53 / off 1123" entries:
-        // a 4-byte extra was emitted for a 1-byte pad, pushing data 3 bytes
-        // past the boundary.
+        // NUL-padding the *name* is not an option: apksigner rejects entry
+        // names containing 0x00 ("Unsupported character 0x00 in ZIP entry
+        // name"). An extra field is always at least 4 bytes, so for a 1-3 byte
+        // pad we emit pad+4 bytes and let the data start 4 bytes late — still
+        // 4-byte aligned, which is all zipalign guarantees.
         const base = offset + 30 + nameBuf.length;
         const pad = (align - (base % align)) % align;
         let extra = Buffer.alloc(0);
-        let localName = nameBuf;
-        if (pad > 0 && pad < 4) {
-            localName = Buffer.concat([nameBuf, Buffer.alloc(pad)]);
-        } else if (pad >= 4) {
-            extra = Buffer.alloc(pad);
+        if (pad > 0) {
+            const extraLen = pad < 4 ? pad + 4 : pad;
+            extra = Buffer.alloc(extraLen);
             extra.writeUInt16LE(0xd935, 0);          // Android zipalign padding ID
-            extra.writeUInt16LE(pad - 4, 2);
+            extra.writeUInt16LE(extraLen - 4, 2);
         }
 
         const lh = Buffer.alloc(30);
@@ -176,12 +177,12 @@ function writeZip(entries, alignment, pageAlign) {
         lh.writeUInt32LE(e.crc, 14);
         lh.writeUInt32LE(e.csize, 18);
         lh.writeUInt32LE(e.usize, 22);
-        lh.writeUInt16LE(localName.length, 26);
+        lh.writeUInt16LE(nameBuf.length, 26);
         lh.writeUInt16LE(extra.length, 28);
 
-        chunks.push(lh, localName, extra, e.data);
+        chunks.push(lh, nameBuf, extra, e.data);
         central.push({ e, nameBuf, localOff: offset });
-        offset += 30 + localName.length + extra.length + e.data.length;
+        offset += 30 + nameBuf.length + extra.length + e.data.length;
     }
 
     const cdStart = offset;

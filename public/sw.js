@@ -1,5 +1,5 @@
 /* DeepSeek Studio Service Worker */
-const CACHE_NAME = 'deepseek-studio-v12';
+const CACHE_NAME = 'deepseek-studio-v13';
 const PRECACHE_URLS = [
   '/',
   '/index.html',
