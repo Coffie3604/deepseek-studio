@@ -34,8 +34,20 @@ import android.widget.TextView;
  */
 public class MainActivity extends Activity {
 
+    /**
+     * Candidate backends, probed in order on first launch.
+     *
+     * 3001 = production (deepseek-editor), 3002 = sandbox
+     * (deepseek-editor-sandbox). The APK used to hardcode 3001, which meant it
+     * could never talk to the sandbox at all — staging was untestable on
+     * device. Probing makes one APK work against either checkout.
+     */
+    private static final String[] CANDIDATE_URLS = {
+            "http://127.0.0.1:3001/",
+            "http://127.0.0.1:3002/",
+    };
     /** Default backend. Override at runtime with: adb shell am start -e url http://... */
-    private static final String DEFAULT_URL = "http://127.0.0.1:3001/";
+    private static final String DEFAULT_URL = CANDIDATE_URLS[0];
     /**
      * The web UI bundled inside the APK (public/ copied by
      * scripts/sync-android-assets.sh). Used when the Termux backend is not
@@ -48,10 +60,18 @@ public class MainActivity extends Activity {
     private static final String TERMUX_PKG = "com.termux";
     private static final String TERMUX_SERVICE = "com.termux.app.RunCommandService";
     private static final String ACTION_RUN_COMMAND = "com.termux.RUN_COMMAND";
+    /**
+     * Start whichever checkout exists. Production first, sandbox second — the
+     * same order the URL probe uses, so the backend we boot is the one we
+     * then connect to.
+     */
     private static final String START_CMD =
-            "cd ~/projects/deepseek-editor && (node server.js >/dev/null 2>&1 &)";
+            "cd ~/projects/deepseek-editor 2>/dev/null || cd ~/projects/deepseek-editor-sandbox; "
+            + "(node server.js >/dev/null 2>&1 &)";
 
     private WebView webView;
+    /** Native replacement for Termux:API - exposed to JS as window.AndroidDevice. */
+    private DeviceBridge deviceBridge;
     private ProgressBar progress;
     private LinearLayout errorView;
     private TextView errorDetail;
@@ -101,7 +121,61 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         configureWebView();
-        webView.loadUrl(startUrl);
+
+        // An explicit ?url= override wins; otherwise find whichever backend is
+        // actually up before loading anything.
+        if (intent != null && intent.getStringExtra("url") != null) {
+            webView.loadUrl(startUrl);
+        } else {
+            probeAndLoad();
+        }
+    }
+
+    /**
+     * Probe CANDIDATE_URLS in order and load the first one that answers
+     * /api/health. Falls through to the bundled offline UI if none do, so the
+     * app always opens to something usable.
+     */
+    private void probeAndLoad() {
+        probeNext(CANDIDATE_URLS, 0);
+    }
+
+    private void probeNext(final String[] candidates, final int index) {
+        if (index >= candidates.length) {
+            // Nothing listening — show the bundled UI, which offers Retry /
+            // Start backend.
+            startUrl = candidates[0];
+            showError("No backend on 3001 or 3002");
+            return;
+        }
+        final String base = candidates[index];
+        final String health = base + "api/health";
+        new Thread(() -> {
+            boolean ok = false;
+            java.net.HttpURLConnection conn = null;
+            try {
+                conn = (java.net.HttpURLConnection) new java.net.URL(health).openConnection();
+                conn.setConnectTimeout(700);
+                conn.setReadTimeout(900);
+                conn.setRequestMethod("GET");
+                ok = conn.getResponseCode() == 200;
+            } catch (Exception ignored) {
+                ok = false;
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
+            final boolean reachable = ok;
+            runOnUiThread(() -> {
+                if (reachable) {
+                    startUrl = base;
+                    getSharedPreferences(PREFS, MODE_PRIVATE)
+                            .edit().putString(KEY_URL, base).apply();
+                    webView.loadUrl(startUrl);
+                } else {
+                    probeNext(candidates, index + 1);
+                }
+            });
+        }, "ds-probe-" + index).start();
     }
 
     private void configureWebView() {
@@ -121,6 +195,11 @@ public class MainActivity extends Activity {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             s.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         }
+
+        // Native Android bridge: replaces the Termux:API app entirely.
+        // JS calls window.AndroidDevice.<method>(json) -> JSON string.
+        deviceBridge = new DeviceBridge(this, webView);
+        webView.addJavascriptInterface(deviceBridge, "AndroidDevice");
 
         // Keep the WebView's own storage (localStorage, IndexedDB) persistent.
         webView.setWebChromeClient(new WebChromeClient() {
@@ -353,7 +432,12 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        if (deviceBridge != null) {
+            deviceBridge.release();
+            deviceBridge = null;
+        }
         if (webView != null) {
+            webView.removeJavascriptInterface("AndroidDevice");
             webView.destroy();
             webView = null;
         }

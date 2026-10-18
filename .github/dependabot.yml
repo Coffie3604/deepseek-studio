@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  # Node backend + frontend tooling
+  - package-ecosystem: npm
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:30'
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      minor-and-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+    ignore:
+      # node-pty ships native bindings; bump it deliberately, not automatically.
+      - dependency-name: node-pty
+        update-types: [version-update:semver-major]
+
+  # GitHub Actions used by ci.yml / android-apk.yml / deps.yml
+  - package-ecosystem: github-actions
+    directory: '/'
+    schedule:
+      interval: weekly
+      day: monday
+      time: '04:30'
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        applies-to: version-updates
+        update-types: [minor, patch]

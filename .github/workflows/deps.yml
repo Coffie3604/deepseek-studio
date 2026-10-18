@@ -1,0 +1,59 @@
+name: Dependencies
+
+# Weekly dependency health check. Keeps the lockfile honest without touching
+# the working tree: it only reports, never commits.
+#
+#   • schedule  → every Monday 04:00 UTC
+#   • manual    → Actions ▸ Dependencies ▸ Run workflow
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deps-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    name: Audit & outdated
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install from lockfile
+        run: npm ci
+
+      - name: Verify required deps resolve
+        run: npm run verify
+
+      - name: npm audit (high and above)
+        run: npm audit --audit-level=high || true
+
+      - name: Outdated packages
+        run: |
+          echo '### Outdated dependencies' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          npm outdated >> "$GITHUB_STEP_SUMMARY" 2>&1 || true
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Lockfile is in sync with package.json
+        run: |
+          set -euo pipefail
+          cp package-lock.json /tmp/lock.before
+          npm install --package-lock-only --ignore-scripts > /dev/null
+          if ! diff -q /tmp/lock.before package-lock.json > /dev/null; then
+            echo '::error::package-lock.json is out of date — run `npm install` and commit the lockfile'
+            diff -u /tmp/lock.before package-lock.json | head -50 || true
+            exit 1
+          fi
+          echo 'Lockfile in sync'
