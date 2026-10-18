@@ -101,6 +101,9 @@ jobs:
     runs-on: ubuntu-latest
     env:
       HOME: /home/runner
+      PORT: '3002'
+      HOST: 127.0.0.1
+      DS_WORKSPACE: /home/runner/deepseek-projects
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -108,19 +111,35 @@ jobs:
       - run: npm ci
       - name: Boot server & curl endpoints
         run: |
-          mkdir -p "$HOME/deepseek-projects"
+          set -uo pipefail
+          BASE="http://127.0.0.1:${PORT}"
+          mkdir -p "$DS_WORKSPACE"
           node server.js > server.log 2>&1 &
           PID=$!
-          for i in $(seq 1 20); do
+          trap 'kill $PID 2>/dev/null || true' EXIT
+
+          ready=0
+          for i in $(seq 1 40); do
+            if ! kill -0 "$PID" 2>/dev/null; then
+              echo "::error::Server exited before becoming ready"
+              cat server.log
+              exit 1
+            fi
+            if curl -sf "$BASE/api/health" > /dev/null; then ready=1; break; fi
             sleep 0.5
-            curl -sf http://127.0.0.1:3002/api/health && break
           done
+          if [ "$ready" -ne 1 ]; then
+            echo "::error::Server did not answer on $BASE within 20s"
+            cat server.log
+            exit 1
+          fi
+
           set -e
-          curl -sf http://127.0.0.1:3002/api/version > /dev/null
-          curl -sf http://127.0.0.1:3002/api/fs/list   > /dev/null
-          curl -sf http://127.0.0.1:3002/api/license/status > /dev/null
-          kill $PID
-          echo "Smoke test passed"
+          curl -sf "$BASE/api/health"          > /dev/null
+          curl -sf "$BASE/api/version"         > /dev/null
+          curl -sf "$BASE/api/fs/list"         > /dev/null
+          curl -sf "$BASE/api/license/status"  > /dev/null
+          echo "Smoke test passed on $BASE"
       - name: Show server log on failure
         if: failure()
         run: cat server.log

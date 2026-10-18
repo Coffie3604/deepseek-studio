@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 #
-# DeepSeek Studio — One-time installer (v2.3)
+# DeepSeek Studio — One-time installer (v2.6)
 # ─────────────────────────────────────────────────────────────────
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/Coffie3604/deepseek-studio/main/install.sh | bash
@@ -13,7 +13,6 @@ REPO="https://github.com/Coffie3604/deepseek-studio.git"
 REF="${DS_REF:-main}"
 INSTALL_DIR="${DS_INSTALL_DIR:-$HOME/projects/deepseek-editor}"
 BIN_DIR="${PREFIX:-/data/data/com.termux/files/usr}/bin"
-PORT="${DS_PORT:-3001}"
 UPDATE_ONLY=0
 
 # ─── Colors ───
@@ -31,8 +30,6 @@ DeepSeek Studio installer
   --ref <ref>       Git ref to install (default: main)
   --update          Update existing install only
   --dir <path>      Install directory (default: ~/projects/deepseek-editor)
-  --port <n>        Backend port (default: 3001, env: DS_PORT)
-
   -h, --help        This help
 EOF
   exit 0
@@ -42,8 +39,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --ref) REF="$2"; shift 2 ;;
     --update) UPDATE_ONLY=1; shift ;;
-        --port) PORT="$2"; shift 2 ;;
---dir) INSTALL_DIR="$2"; shift 2 ;;
+    --dir) INSTALL_DIR="$2"; shift 2 ;;
     -h|--help) usage ;;
     *) fail "Unknown option: $1"; usage ;;
   esac
@@ -58,7 +54,7 @@ fi
 
 echo ""
 printf "${BLUE}╔═══════════════════════════════════════════╗${NC}\n"
-printf "${BLUE}║${NC}   ${BOLD}DeepSeek Studio — Installer v2.3${NC}        ${BLUE}║${NC}\n"
+printf "${BLUE}║${NC}   ${BOLD}DeepSeek Studio — Installer v2.6${NC}        ${BLUE}║${NC}\n"
 printf "${BLUE}╚═══════════════════════════════════════════╝${NC}\n"
 echo ""
 
@@ -173,17 +169,17 @@ disown 2>/dev/null || true
 # Wait for health (up to 20s)
 for i in \$(seq 1 20); do
   sleep 1
-  curl -sf -o /dev/null http://127.0.0.1:${PORT}/api/health 2>/dev/null && break
+  curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null && break
 done
 
-VER=\$(curl -s http://127.0.0.1:${PORT}/api/version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
+VER=\$(curl -s http://127.0.0.1:3001/api/version 2>/dev/null | grep -o '"version":"[^"]*"' | cut -d'"' -f4)
 if [ -n "\$VER" ]; then
-  echo "✅ DeepSeek Studio v\${VER} running — http://127.0.0.1:${PORT}"
+  echo "✅ DeepSeek Studio v\${VER} running — http://127.0.0.1:3001"
 else
   echo "⚠️  Server may not have started. Check: ds-log"
 fi
 
-command -v termux-open-url >/dev/null 2>&1 && termux-open-url "http://127.0.0.1:${PORT}" 2>/dev/null &
+command -v termux-open-url >/dev/null 2>&1 && termux-open-url "http://127.0.0.1:3001" 2>/dev/null &
 exit 0
 EOF
 
@@ -193,7 +189,7 @@ write_script ds-boot <<EOF
 DIR="\${DS_INSTALL_DIR:-$INSTALL_DIR}"
 [ -f "\$DIR/server.js" ] || exit 1
 cd "\$DIR" || exit 1
-curl -sf -o /dev/null http://127.0.0.1:${PORT}/api/health 2>/dev/null && exit 0
+curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null && exit 0
 pkill -f "node server.js" 2>/dev/null || true
 sleep 1
 setsid nohup node server.js > "\$HOME/.ds-studio.log" 2>&1 < /dev/null &
@@ -204,16 +200,16 @@ EOF
 # ds-launch — one-tap: start if needed, then open browser
 write_script ds-launch <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
-curl -sf -o /dev/null http://127.0.0.1:${PORT}/api/health 2>/dev/null || {
+curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null || {
   ds-boot
   for i in $(seq 1 20); do
     sleep 1
-    curl -sf -o /dev/null http://127.0.0.1:${PORT}/api/health 2>/dev/null && break
+    curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null && break
   done
 }
 command -v termux-open-url >/dev/null 2>&1 \
-  && termux-open-url "http://127.0.0.1:${PORT}" 2>/dev/null \
-  || am start -a android.intent.action.VIEW -d "http://127.0.0.1:${PORT}" >/dev/null 2>&1 &
+  && termux-open-url "http://127.0.0.1:3001" 2>/dev/null \
+  || am start -a android.intent.action.VIEW -d "http://127.0.0.1:3001" >/dev/null 2>&1 &
 exit 0
 EOF
 
@@ -237,9 +233,9 @@ write_script ds-status <<'EOF'
 #!/data/data/com.termux/files/usr/bin/bash
 if pgrep -f "node server.js" >/dev/null; then
   echo "✅ DeepSeek Studio running (PID $(pgrep -f 'node server.js' | head -1))"
-  echo "   URL: http://127.0.0.1:${PORT}"
+  echo "   URL: http://127.0.0.1:3001"
   echo "   Log: ~/.ds-studio.log"
-  curl -s http://127.0.0.1:${PORT}/api/version 2>/dev/null | head -c 400; echo
+  curl -s http://127.0.0.1:3001/api/version 2>/dev/null | head -c 400; echo
 else
   echo "🛑 DeepSeek Studio not running — start with: ds-launch"
 fi
@@ -294,13 +290,13 @@ else
 fi
 echo ""
 
-if curl -sf -o /dev/null http://127.0.0.1:${PORT}/api/health 2>/dev/null; then
+if curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null; then
   echo -e "\${GREEN}Server: ✅ running\${NC}"
   echo -n "  "
-  curl -s http://127.0.0.1:${PORT}/api/version 2>/dev/null | head -c 300
+  curl -s http://127.0.0.1:3001/api/version 2>/dev/null | head -c 300
   echo
   echo -n "  Features: "
-  curl -s http://127.0.0.1:${PORT}/api/diagnostics 2>/dev/null | grep -o '"features":{[^}]*}' | head -1
+  curl -s http://127.0.0.1:3001/api/diagnostics 2>/dev/null | grep -o '"features":{[^}]*}' | head -1
   echo
 else
   echo -e "\${RED}Server: 🛑 not running\${NC}"
@@ -355,11 +351,6 @@ fi
 echo "✅ Updated. Run 'ds-restart' to apply."
 EOF
 
-
-# Re-apply scoped-kill fix if it exists locally
-if [ -f "$INSTALL_DIR/scripts/fix-port-conflict.sh" ]; then
-  bash "$INSTALL_DIR/scripts/fix-port-conflict.sh" >/dev/null 2>&1 || true
-fi
 ok "Shortcuts installed: ds-start ds-stop ds-restart ds-status ds-log ds-update ds-launch ds-doctor"
 
 # ─── Widget shortcuts (Termux:Widget) ───
@@ -413,5 +404,5 @@ echo ""
 echo -e "${CYAN}Tip:${NC} add the ${BOLD}🚀 DeepSeek${NC} widget for one-tap launch (Termux:Widget from F-Droid)"
 echo ""
 echo -e "${CYAN}First-time setup:${NC} open the app, tap ${BOLD}Setup${NC} in the sidebar, paste your DeepSeek API key."
-echo -e "${CYAN}What's new in v2.2:${NC} open the ${BOLD}Log${NC} tab in the sidebar to see the changelog + live activity."
+echo -e "${CYAN}What's new in v2.6:${NC} open the ${BOLD}Log${NC} tab in the sidebar to see the changelog + live activity."
 echo ""
