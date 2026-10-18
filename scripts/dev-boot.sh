@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # Boot the sandbox backend on an isolated port for local verification.
 set -euo pipefail
 cd "$(dirname "$0")/.."
