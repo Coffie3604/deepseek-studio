@@ -445,7 +445,7 @@ function getGit(relDir = '') {
     const workdir = resolveInWorkspace(relDir);
     if (!workdir) throw Object.assign(new Error('Forbidden'), { status: 403 });
     const token = ghToken();
-    const g = simpleGitFactory({ baseDir: workdir, binary: 'git', maxConcurrentProcesses: 4, trimmed: true });
+    const g = simpleGitFactory({ baseDir: workdir, binary: 'git', maxConcurrentProcesses: 4, trimmed: true, unsafe: { allowUnsafeAskPass: true } });
     return g.env({
         GIT_TERMINAL_PROMPT: '0',
         GIT_ASKPASS: token ? ASKPASS_HELPER : 'echo',
@@ -1565,7 +1565,7 @@ app.post('/api/git/clone', async (req, res) => {
             // Note: simple-git's .env() returns a *new* instance. The old code
             // called it and threw the result away, so the token never reached
             // the clone. Reassign it.
-            let g = simpleGitFactory({ baseDir: WORKSPACE });
+            let g = simpleGitFactory({ baseDir: WORKSPACE, unsafe: { allowUnsafeAskPass: true } });
             g = opts.token
                 ? g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: ASKPASS_HELPER, GIT_ASKPASS_TOKEN: opts.token, GIT_ASKPASS_USER: 'x-access-token' })
                 : g.env({ GIT_TERMINAL_PROMPT: '0', GIT_ASKPASS: 'echo' });
