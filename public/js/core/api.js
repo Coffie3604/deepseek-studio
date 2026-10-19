@@ -9,7 +9,7 @@
      - AbortController plumbing for the streaming chat endpoint
    ═══════════════════════════════════════════════════════════════════ */
 
-export const API = window.location.origin;
+export const API = window.location.protocol === 'file:' ? 'http://127.0.0.1:3001' : window.location.origin;
 
 /** Normalise a Response into { ok, ...json } without throwing on HTML. */
 async function toJson(res) {

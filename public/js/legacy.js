@@ -31,7 +31,7 @@ import { aiStreamRaw } from './core/api.js';
 /* ═══════════════════════════════════════════════════════════════════
    GLOBAL STATE
    ═══════════════════════════════════════════════════════════════════ */
-var API = window.location.origin;
+var API = window.location.protocol === 'file:' ? 'http://127.0.0.1:3001' : window.location.origin;
 var editor = null;
 var monacoLoaded = false;
 var openFile = null;
