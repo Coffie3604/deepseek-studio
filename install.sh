@@ -102,7 +102,7 @@ ok "Repo at $INSTALL_DIR"
 say "Installing Node dependencies…"
 
 install_deps() {
-  if npm install --no-audit --no-fund --silent 2>/tmp/ds-npm.log; then
+  if npm install --no-audit --no-fund --silent 2>$HOME/.ds-npm.log; then
     return 0
   fi
   warn "Full install failed — retrying without node-pty (native module)…"
@@ -115,11 +115,11 @@ install_deps() {
       fs.writeFileSync("package.json", JSON.stringify(pkg, null, 2) + "\n");
     } catch (_) {}
   ' 2>/dev/null || true
-  if npm install --no-audit --no-fund --silent 2>/tmp/ds-npm-2.log; then
+  if npm install --no-audit --no-fund --silent 2>$HOME/.ds-npm-2.log; then
     warn "Installed without node-pty — terminal will use pipe fallback"
     return 0
   fi
-  fail "npm install failed. See /tmp/ds-npm.log"
+  fail "npm install failed. See $HOME/.ds-npm.log"
   return 1
 }
 
