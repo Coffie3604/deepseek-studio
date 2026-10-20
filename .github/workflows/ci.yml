@@ -19,7 +19,7 @@ jobs:
     name: Lint & syntax
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -38,7 +38,7 @@ jobs:
     name: Security audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: npm ci
@@ -75,7 +75,7 @@ jobs:
     name: Endpoint & route check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: npm ci
@@ -105,7 +105,7 @@ jobs:
       HOST: 127.0.0.1
       DS_WORKSPACE: /home/runner/deepseek-projects
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with: { node-version: '22' }
       - run: npm ci
@@ -153,7 +153,7 @@ jobs:
     name: Frontend sanity check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify assets referenced by index.html exist
         run: |
           node -e "
