@@ -46,9 +46,47 @@ public class DeviceBridge {
     private final WebView webView;
     private TextToSpeech tts;
 
+    /**
+     * Set from the main frame load of a trusted origin before the page's own
+     * scripts run. A remote page reached through a link or an injected iframe
+     * must never be able to drive the device API, so every bridge method
+     * short-circuits while this is false.
+     */
+    private volatile boolean trustedOrigin = false;
+
+    /** Stable id so repeated notify() calls reuse one channel. */
+    private static final String CHANNEL_ID = "deepseek";
+
     public DeviceBridge(Activity activity, WebView webView) {
         this.activity = activity;
         this.webView = webView;
+    }
+
+    /**
+     * Gate the whole bridge on the page that is actually loaded.
+     *
+     * Only the local backend (loopback) and the APK's own asset bundle are
+     * trusted. Everything else - external documentation, a redirect to a
+     * login portal, or a third-party iframe - loses access to clipboard,
+     * SMS-free device APIs, torch, volume and the rest.
+     */
+    static boolean isTrustedOrigin(String url) {
+        if (url == null) return false;
+        String u = url.trim().toLowerCase(Locale.US);
+        return u.startsWith("file:///android_asset/")
+                || u.startsWith("http://127.0.0.1")
+                || u.startsWith("http://localhost")
+                || u.startsWith("http://[::1]");
+    }
+
+    /** Called by the activity once the committed page origin is known. */
+    void setTrustedOrigin(boolean trusted) {
+        this.trustedOrigin = trusted;
+    }
+
+    /** Guard shared by every @JavascriptInterface method. */
+    private boolean blocked() {
+        return !trustedOrigin;
     }
 
     /* ------------------------- helpers ------------------------- */
@@ -88,6 +126,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String notify(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             JSONObject a = parse(json);
             String title = a.optString("title", "DeepSeek Studio");
             String message = a.optString("message", "");
@@ -95,11 +134,23 @@ public class DeviceBridge {
                     (NotificationManager) ctx().getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return err("no notification service");
 
-            String channelId = "deepseek";
+            // Android 13+ needs the runtime grant before anything is shown.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU
+                    && activity.checkSelfPermission(
+                            android.Manifest.permission.POST_NOTIFICATIONS)
+                    != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                return err("notification permission not granted");
+            }
+
+            String channelId = CHANNEL_ID;
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                NotificationChannel ch = new NotificationChannel(
-                        channelId, "DeepSeek Studio", NotificationManager.IMPORTANCE_HIGH);
-                nm.createNotificationChannel(ch);
+                // Idempotent but not free: only create it the first time.
+                if (nm.getNotificationChannel(channelId) == null) {
+                    NotificationChannel ch = new NotificationChannel(
+                            channelId, "DeepSeek Studio", NotificationManager.IMPORTANCE_HIGH);
+                    ch.setDescription("Build and agent status");
+                    nm.createNotificationChannel(ch);
+                }
             }
 
             Notification.Builder b = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -121,6 +172,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String clipboardGet() {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             ClipboardManager cm =
                     (ClipboardManager) ctx().getSystemService(Context.CLIPBOARD_SERVICE);
             if (cm == null || !cm.hasPrimaryClip()) return ok(new JSONObject().put("text", ""));
@@ -137,6 +189,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String clipboardSet(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             String text = parse(json).optString("text", "");
             ClipboardManager cm =
                     (ClipboardManager) ctx().getSystemService(Context.CLIPBOARD_SERVICE);
@@ -153,6 +206,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String batteryStatus() {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             Intent battery = activity.registerReceiver(
                     null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
             if (battery == null) return err("battery unavailable");
@@ -177,6 +231,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String torch(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             boolean on = parse(json).optBoolean("on", false);
             CameraManager cm = (CameraManager) ctx().getSystemService(Context.CAMERA_SERVICE);
             if (cm == null) return err("no camera service");
@@ -199,6 +254,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String vibrate(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             int ms = parse(json).optInt("duration", 300);
             Vibrator v = (Vibrator) ctx().getSystemService(Context.VIBRATOR_SERVICE);
             if (v == null || !v.hasVibrator()) return err("no vibrator");
@@ -218,6 +274,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String volume(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             JSONObject a = parse(json);
             AudioManager am = (AudioManager) ctx().getSystemService(Context.AUDIO_SERVICE);
             if (am == null) return err("no audio service");
@@ -249,13 +306,23 @@ public class DeviceBridge {
     @JavascriptInterface
     public String ttsSpeak(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             final String text = parse(json).optString("text", "");
             if (text.isEmpty()) return err("text required");
-            if (tts == null) {
-                tts = new TextToSpeech(ctx(), status -> { });
-            }
             activity.runOnUiThread(() -> {
-                if (tts != null) tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ds");
+                if (tts == null) {
+                    // On a cold start the engine needs ~100-300ms to initialise.
+                    // Queue the utterance in the init callback instead of
+                    // calling speak() against a not-yet-ready engine, which
+                    // silently drops the first message.
+                    tts = new TextToSpeech(ctx(), status -> {
+                        if (status != TextToSpeech.SUCCESS) return;
+                        tts.setLanguage(Locale.getDefault());
+                        tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ds");
+                    });
+                } else {
+                    tts.speak(text, TextToSpeech.QUEUE_FLUSH, null, "ds");
+                }
             });
             return ok(new JSONObject().put("queued", true));
         } catch (Exception e) {
@@ -268,6 +335,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String openUrl(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             String url = parse(json).optString("url", "");
             if (!url.startsWith("http://") && !url.startsWith("https://"))
                 return err("invalid url");
@@ -281,6 +349,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String share(String json) {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             JSONObject a = parse(json);
             String text = a.optString("text", "");
             String title = a.optString("title", "Share");
@@ -298,6 +367,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String wifiInfo() {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             WifiManager wm = (WifiManager) ctx().getApplicationContext()
                     .getSystemService(Context.WIFI_SERVICE);
             if (wm == null) return err("no wifi service");
@@ -323,6 +393,7 @@ public class DeviceBridge {
     @JavascriptInterface
     public String storageInfo() {
         try {
+            if (blocked()) return err("bridge disabled for this origin");
             StatFs fs = new StatFs(Environment.getDataDirectory().getPath());
             long block = fs.getBlockSizeLong();
             return ok(new JSONObject()
@@ -335,13 +406,21 @@ public class DeviceBridge {
 
     /* ------------------------- capability probe ------------------------- */
 
-    /** Lets the UI know the native bridge is present (so it can skip Termux:API). */
+    /**
+     * Lets the UI know the native bridge is present (so it can skip Termux:API).
+     *
+     * Deliberately the only unguarded method: it touches no device hardware,
+     * and the UI needs it to decide whether to fall back to Termux:API. It
+     * reports the full surface regardless of origin so a remote page cannot
+     * infer the gate state from it.
+     */
     @JavascriptInterface
     public String capabilities() {
         try {
             JSONArray list = new JSONArray();
-            for (String c : new String[]{"notify", "clipboard", "battery", "torch", "vibrate",
-                    "volume", "tts", "openUrl", "share", "wifi", "storage"}) {
+            for (String c : new String[]{"notify", "clipboardGet", "clipboardSet", "battery",
+                    "torch", "vibrate", "volume", "tts", "openUrl", "share", "wifi",
+                    "storage", "capabilities"}) {
                 list.put(c);
             }
             return ok(new JSONObject().put("native", true).put("methods", list));

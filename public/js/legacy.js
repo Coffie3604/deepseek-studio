@@ -25,7 +25,7 @@
    calls; each carve-out replaces those with core/* imports. */
 import { emit } from './core/bus.js';
 import { switchPanel } from './core/lifecycle.js';
-import { aiStreamRaw } from './core/api.js';
+import { aiStreamRaw, aiToolCall, aiChat } from './core/api.js';
 
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1233,10 +1233,22 @@ fetch(API + '/api/ai/tools')
   .then(function(d) { AI_TOOLS = d.tools || []; console.log('[DS] loaded', AI_TOOLS.length, 'AI tools'); })
   .catch(function(e) { console.warn('[DS] failed to load AI tools', e); });
 
-function callTool(name, args) {
-  return fetch(API + '/api/ai/tool-call', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: name, args: args }) })
-    .then(function(r) { return r.json(); })
-    .catch(function(e) { return { ok: false, error: e.message }; });
+/* callTool — runs one agent tool on the server.
+ *
+ * Fixed vs. the old one-liner:
+ *   - it takes an AbortSignal, so pressing Stop actually cancels a running
+ *     tool (run_command, git clone) instead of letting the loop dispatch
+ *     the next tool after the user quit;
+ *   - it forwards `cwd`, which /api/ai/tool-call needs to resolve relative
+ *     paths to the active project (the server only defaults the base when
+ *     told; without it every relative path resolved against WORKSPACE);
+ *   - it no longer turns a non-2xx JSON error body ({ error }) into
+ *     { ok: undefined }, which the agent loop read as success and fed back
+ *     to the model as the tool result;
+ *   - a network/parse failure no longer loses the error message.
+ */
+function callTool(name, args, signal) {
+  return aiToolCall(name, args, { signal: signal || undefined, cwd: currentProject || undefined });
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -1530,12 +1542,20 @@ async function sendChat() {
 
   if (ai.provider === 'gemini') {
     try {
-      var res = await fetch(ai.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: sysPrompt + '\n\nUser: ' + msg }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 4096 } }) });
+      var res = await fetch(ai.url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: sysPrompt + '\n\nUser: ' + msg }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 4096 } }), signal: chatAbortCtrl ? chatAbortCtrl.signal : undefined });
       if (!res.ok) throw new Error('API ' + res.status);
       var data = await res.json();
       hideTypingIndicator();
-      appendMessage('assistant', data.candidates[0].content.parts[0].text);
-    } catch (e) { hideTypingIndicator(); appendMessage('assistant', 'Error: ' + e.message); }
+      var gparts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+      appendMessage('assistant', gparts.map(function(p) { return p.text || ''; }).join('') || '(no response)');
+    } catch (e) {
+      hideTypingIndicator();
+      if (chatAborted || (e && e.name === 'AbortError')) { appendMessage('assistant', '_(stopped)_', true); }
+      else appendMessage('assistant', 'Error: ' + e.message);
+    } finally {
+      setStopVisible(false);
+      chatAbortCtrl = null;
+    }
     return;
   }
 
@@ -1594,21 +1614,31 @@ async function sendChat() {
         messages.push(assistantMsg);
         // continue to the tool-call processing that already follows in the loop
       } else {
-        // Non-streaming happy path
-        var res = await fetch(API + '/api/ai/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ provider: 'deepseek', messages: messages, tools: AI_TOOLS, toolChoice: 'auto', maxTokens: 4096 }),
-          signal: chatAbortCtrl ? chatAbortCtrl.signal : undefined
-        });
-        if (!res.ok) {
-          const errBody = await res.text().catch(function() { return ''; });
+        // Non-streaming happy path — goes through core/api.js so the same
+        // AbortController cancels this request too (it used to keep running
+        // after Stop when streaming was toggled off).
+        var res = await aiChat(
+          { provider: 'deepseek', messages: messages, tools: AI_TOOLS, toolChoice: 'auto', maxTokens: 4096 },
+          { signal: chatAbortCtrl ? chatAbortCtrl.signal : undefined }
+        );
+        if (res.aborted) {
           hideTypingIndicator();
-          appendMessage('assistant', '**DeepSeek ' + res.status + '**\n\n```\n' + errBody + '\n```');
+          appendMessage('assistant', '_(stopped)_', true);
           return;
         }
-        const data = await res.json();
-        assistantMsg = data.choices[0].message;
+        if (!res.ok) {
+          hideTypingIndicator();
+          appendMessage('assistant', '**DeepSeek ' + (res.status || '') + '**\n\n```\n' + String(res.error || '').slice(0, 900) + '\n```');
+          return;
+        }
+        const data = res.data || {};
+        const choice = data.choices && data.choices[0];
+        if (!choice || !choice.message) {
+          hideTypingIndicator();
+          appendMessage('assistant', '**DeepSeek**\n\n```\nUnexpected response: ' + String(res.error || JSON.stringify(data).slice(0, 500)) + '\n```');
+          return;
+        }
+        assistantMsg = choice.message;
         messages.push(assistantMsg);
         if (assistantMsg.content) { hideTypingIndicator(); appendMessage('assistant', assistantMsg.content); }
       }
@@ -1650,7 +1680,20 @@ async function sendChat() {
           // Mirror the AI's command into the pty so the user sees it run.
           if (sendToTerminal(toolArgs.command || '', true)) showTabBadge('terminal', true);
         }
-        var result = await callTool(toolName, toolArgs);
+        var result = await callTool(toolName, toolArgs, chatAbortCtrl ? chatAbortCtrl.signal : undefined);
+        if (result && result.aborted) {
+          // User pressed Stop while the tool was in flight. Record it so the
+          // transcript stays well-formed, then bail out of the loop.
+          bubble.classList.remove('running'); bubble.classList.add('error');
+          var ast = bubble.querySelector('.tool-status');
+          var aic = bubble.querySelector('.tool-icon');
+          if (ast) { ast.textContent = 'stopped'; ast.style.color = 'var(--fg-3)'; }
+          if (aic) aic.innerHTML = '<i class="fas fa-stop-circle"></i>';
+          messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ ok: false, error: 'stopped by user' }) });
+          hideTypingIndicator();
+          appendMessage('assistant', '_(stopped)_', true);
+          return;
+        }
         updateToolBubble(bubble, result);
         messages.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result.result || result) });
         if (toolName === 'write_file') { try { refreshTree(); } catch (e) {} showFileWrittenToast(toolArgs.path); }

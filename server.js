@@ -311,6 +311,40 @@ function safeRealPath(p) {
     try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); }
 }
 
+/* ─── Agent cwd ──────────────────────────────────────────────────────
+   The AI is told "all paths are relative to <project>/" but the browser
+   only posts { name, args } per tool call, so a bare "src/app.js" used to
+   resolve against the *workspace root* and miss the project by one level.
+   The client now sends cwd=<project>; it is cached here so the client can
+   drop it from later calls, and it is only honoured while it still points
+   inside the workspace (a deleted project silently falls back). */
+let agentCwd = '';
+function setAgentCwd(rel) {
+    const raw = rel == null ? '' : String(rel).trim();
+    if (!raw) { agentCwd = ''; return ''; }
+    const abs = resolveInWorkspace(raw);
+    agentCwd = abs || '';
+    return agentCwd;
+}
+
+/* Resolve an AI-supplied path. Tries the project root first, then the
+   workspace root (absolute-ish paths like "other-project/x"), so a slightly
+   wrong path is still repaired instead of failing the whole agent run. */
+function resolveToolPath(rel) {
+    const raw = rel == null ? '' : String(rel).replace(/^\.\//, '');
+    const bases = [];
+    if (agentCwd) bases.push(agentCwd);
+    bases.push(WORKSPACE);
+    for (const base of bases) {
+        const abs = resolveInWorkspace(raw, base);
+        if (!abs) continue;
+        if (fs.existsSync(abs)) return abs;
+        // Not on disk yet: only write-safe when the parent of that base exists.
+        if (!agentCwd || base === agentCwd) return abs;
+    }
+    return resolveInWorkspace(raw, agentCwd || WORKSPACE);
+}
+
 const ALLOWED_EXTERNAL_ROOTS = (() => {
     // Only phone storage — never Termux home, which contains secrets
     const candidates = ['/storage/emulated/0', '/storage/self/primary', '/sdcard'];
@@ -481,13 +515,21 @@ function gitErr(err) {
 async function fetchWithRetry(url, options = {}, conf = {}) {
     const retries = conf.retries == null ? 2 : conf.retries;
     const timeout = conf.timeout || 120000;
+    /* Caller-supplied cancellation (client pressed Stop). Without this the
+       upstream LLM request kept running — and kept billing — after the user
+       aborted, and the socket was held for the full timeout. */
+    const external = options.signal;
     let lastErr;
     for (let attempt = 0; attempt <= retries; attempt++) {
+        if (external && external.aborted) throw Object.assign(new Error('Aborted by client'), { name: 'AbortError' });
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), timeout);
+        const relay = () => { try { controller.abort(); } catch (_) {} };
+        if (external) external.addEventListener('abort', relay, { once: true });
         try {
             const res = await fetch(url, Object.assign({}, options, { signal: controller.signal }));
             clearTimeout(timer);
+            if (external) external.removeEventListener('abort', relay);
             if ([429, 500, 502, 503, 504].includes(res.status) && attempt < retries) {
                 await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
                 continue;
@@ -495,6 +537,8 @@ async function fetchWithRetry(url, options = {}, conf = {}) {
             return res;
         } catch (err) {
             clearTimeout(timer);
+            if (external) external.removeEventListener('abort', relay);
+            if (external && external.aborted) throw Object.assign(new Error('Aborted by client'), { name: 'AbortError' });
             lastErr = err;
             if (attempt < retries) {
                 await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt)));
@@ -1111,14 +1155,18 @@ function applyPatchSmart(original, search, replace, replaceAll) {
 }
 
 app.post('/api/ai/tool-call', async (req, res) => {
-    const { name, args } = req.body || {};
+    const { name, args, cwd } = req.body || {};
     if (!name) return res.status(400).json({ error: 'tool name required' });
-    const a = args || {};
+    const a = Object.assign({}, args || {});
+    // Project-relative resolution (see resolveToolPath). An explicit path/cwd
+    // in args still wins — this only sets the base for relative paths.
+    if (typeof cwd === 'string' && cwd) setAgentCwd(cwd);
+    if (name === 'run_command' && a.cwd) setAgentCwd(a.cwd);
     try {
         switch (name) {
         /* ────────── File operations ────────── */
         case 'write_file': {
-            const target = resolveInWorkspace(a.path);
+            const target = resolveToolPath(a.path);
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             await fsp.mkdir(path.dirname(target), { recursive: true });
             const content = a.content == null ? '' : String(a.content);
@@ -1126,14 +1174,14 @@ app.post('/api/ai/tool-call', async (req, res) => {
             return toolResult(res, true, 'Wrote ' + Buffer.byteLength(content) + ' bytes to ' + a.path, { bytes: Buffer.byteLength(content) });
         }
         case 'read_file': {
-            const target = resolveInWorkspace(a.path);
+            const target = resolveToolPath(a.path);
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             if (!fs.existsSync(target)) return toolResult(res, false, 'Not found: ' + a.path, { error: 'not found' });
             const content = await fsp.readFile(target, 'utf8');
             return toolResult(res, true, 'Read ' + content.length + ' bytes', { content: content.slice(0, 20000), truncated: content.length > 20000 });
         }
         case 'list_files': {
-            const target = resolveInWorkspace(a.path || '');
+            const target = resolveToolPath(a.path || '');
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             if (!fs.existsSync(target)) return toolResult(res, false, 'Not found: ' + a.path, { error: 'not found' });
             const items = (await fsp.readdir(target, { withFileTypes: true }))
@@ -1142,13 +1190,13 @@ app.post('/api/ai/tool-call', async (req, res) => {
             return toolResult(res, true, 'Listed ' + items.length + ' items', { items });
         }
         case 'create_folder': {
-            const target = resolveInWorkspace(a.path);
+            const target = resolveToolPath(a.path);
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             await fsp.mkdir(target, { recursive: true });
             return toolResult(res, true, 'Created: ' + a.path, { ok: true });
         }
         case 'delete_file': {
-            const target = resolveInWorkspace(a.path);
+            const target = resolveToolPath(a.path);
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             if (target === WORKSPACE) return res.status(400).json({ error: 'refusing to delete workspace root' });
             if (!fs.existsSync(target)) return toolResult(res, false, 'Not found', { error: 'not found' });
@@ -1162,8 +1210,8 @@ app.post('/api/ai/tool-call', async (req, res) => {
             return toolResult(res, true, 'Deleted: ' + a.path, { ok: true });
         }
         case 'move_file': {
-            const src = resolveInWorkspace(a.from);
-            const dst = resolveInWorkspace(a.to);
+            const src = resolveToolPath(a.from);
+            const dst = resolveToolPath(a.to);
             if (!src || !dst) return res.status(403).json({ error: 'outside workspace' });
             if (!fs.existsSync(src)) return toolResult(res, false, 'Source not found: ' + a.from, { error: 'not found' });
             await fsp.mkdir(path.dirname(dst), { recursive: true });
@@ -1171,8 +1219,8 @@ app.post('/api/ai/tool-call', async (req, res) => {
             return toolResult(res, true, 'Moved ' + a.from + ' → ' + a.to, { ok: true });
         }
         case 'copy_file': {
-            const src = resolveInWorkspace(a.from);
-            const dst = resolveInWorkspace(a.to);
+            const src = resolveToolPath(a.from);
+            const dst = resolveToolPath(a.to);
             if (!src || !dst) return res.status(403).json({ error: 'outside workspace' });
             if (!fs.existsSync(src)) return toolResult(res, false, 'Source not found: ' + a.from, { error: 'not found' });
             await fsp.mkdir(path.dirname(dst), { recursive: true });
@@ -1181,7 +1229,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
         }
         case 'apply_patch': {
             await editkitReady;
-            const target = resolveInWorkspace(a.path);
+            const target = resolveToolPath(a.path);
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             if (!fs.existsSync(target)) return toolResult(res, false, 'File not found: ' + a.path, { error: 'not found' });
             const search = a.search || '';
@@ -1195,7 +1243,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
             return toolResult(res, true, 'Patched ' + a.path + label + ' (' + r.count + ' replacement' + (r.count === 1 ? '' : 's') + ')', { replacements: r.count, fuzzy: r.fuzzy });
         }
         case 'grep_search': {
-            const base = resolveInWorkspace(a.path || '');
+            const base = resolveToolPath(a.path || '');
             if (!base) return res.status(403).json({ error: 'outside workspace' });
             const pattern = a.pattern || '';
             if (!pattern) return res.status(400).json({ error: 'pattern required' });
@@ -1228,7 +1276,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
             return toolResult(res, matches.length > 0, 'Found ' + matches.length + ' match' + (matches.length === 1 ? '' : 'es'), { matches });
         }
         case 'find_files': {
-            const base = resolveInWorkspace(a.path || '');
+            const base = resolveToolPath(a.path || '');
             if (!base) return res.status(403).json({ error: 'outside workspace' });
             const glob = String(a.pattern || '');
             const rx = new RegExp('^' + glob.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*').replace(/\?/g, '.') + '$', 'i');
@@ -1254,7 +1302,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
             if (!cmd) return res.status(400).json({ error: 'command required' });
             const blocked = isCommandBlocked(cmd);
             if (blocked) return res.status(403).json({ error: 'Blocked: ' + blocked });
-            const cwd = resolveInWorkspace(a.cwd || '');
+            const cwd = resolveToolPath(a.cwd || '');
             if (!cwd) return res.status(403).json({ error: 'outside workspace' });
             const isBg = a.background === true;
             const timeout = isBg ? 3000 : 120000;
@@ -1401,7 +1449,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
         }
         /* ────────── Termux:API — share ────────── */
         case 'termux_share': {
-            const file = a.file ? resolveInWorkspace(a.file) : null;
+            const file = a.file ? resolveToolPath(a.file) : null;
             const text = a.text ? String(a.text) : null;
             const title = String(a.title || 'Share from DeepSeek Studio');
             const argv = ['-t', title];
@@ -1413,7 +1461,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
         }
         /* ────────── Termux:API — camera photo ────────── */
         case 'termux_camera_photo': {
-            const target = resolveInWorkspace(a.path || 'photo-' + Date.now() + '.jpg');
+            const target = resolveToolPath(a.path || 'photo-' + Date.now() + '.jpg');
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             await fsp.mkdir(path.dirname(target), { recursive: true });
             const r = await termuxCli('termux-camera-photo', ['-c', String(a.camera || 0), target], 60000);
@@ -1467,7 +1515,7 @@ app.post('/api/ai/tool-call', async (req, res) => {
         case 'termux_download': {
             const url = String(a.url || '');
             if (!/^https?:\/\//i.test(url)) return toolResult(res, false, 'Invalid URL', { error: 'bad url' });
-            const target = resolveInWorkspace(a.path || 'download-' + Date.now());
+            const target = resolveToolPath(a.path || 'download-' + Date.now());
             if (!target) return res.status(403).json({ error: 'outside workspace' });
             await fsp.mkdir(path.dirname(target), { recursive: true });
             const r = await termuxCli('termux-download', ['-t', target, url], 300000);
@@ -2940,7 +2988,11 @@ app.post('/api/ai/stream', async (req, res) => {
     const payload = { model: model || p.cfg.model, messages: Array.isArray(messages) ? messages : [], temperature: typeof temperature === 'number' ? temperature : 0.3, max_tokens: typeof maxTokens === 'number' ? maxTokens : 4096, stream: true };
     if (Array.isArray(tools) && tools.length && p.cfg.supportsTools) { payload.tools = tools; payload.tool_choice = toolChoice || 'auto'; }
     let upstream;
-    try { upstream = await fetchWithRetry(p.cfg.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key }, body: JSON.stringify(payload) }, { retries: 1, timeout: 180000 }); }
+    /* Kill the upstream request when the browser presses Stop — otherwise the
+       provider keeps streaming (and billing) into a dead socket. */
+    const clientGone = new AbortController();
+    res.on('close', () => { if (!res.writableEnded) clientGone.abort(); });
+    try { upstream = await fetchWithRetry(p.cfg.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + p.key }, body: JSON.stringify(payload), signal: clientGone.signal }, { retries: 1, timeout: 180000 }); }
     catch (err) { return res.status(502).json({ error: redact(err.message) }); }
     if (!upstream.ok) {
         const text = await upstream.text().catch(() => '');
@@ -2959,20 +3011,22 @@ app.post('/api/ai/stream', async (req, res) => {
         try { res.write(': ping\n\n'); } catch (_) {}
     }, 15000);
     if (typeof keepAlive.unref === 'function') keepAlive.unref();
-    // If the client goes away (tab closed, navigation), stop pulling upstream
-    let clientGone = false;
-    req.on('close', () => { clientGone = true; });
+    // If the client goes away (tab closed, Stop pressed, navigation), stop
+    // pulling upstream and cancel the HTTP request so the provider stops
+    // generating — a backgrounded phone was burning tokens for nothing.
     try {
         for await (const chunk of upstream.body) {
-            if (clientGone) break;
+            if (res.destroyed || res.writableEnded) { clientGone.abort(); break; }
             res.write(chunk);
         }
     } catch (err) {
-        if (!clientGone) res.write('data: ' + JSON.stringify({ error: redact(err.message) }) + '\n\n');
+        if (!res.destroyed && !res.writableEnded && !clientGone.signal.aborted) {
+            res.write('data: ' + JSON.stringify({ error: redact(err.message) }) + '\n\n');
+        }
     } finally {
         clearInterval(keepAlive);
+        if (!res.writableEnded) res.end();
     }
-    res.end();
 });
 
 app.post('/api/ai/test-key', async (req, res) => {

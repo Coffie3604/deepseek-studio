@@ -84,6 +84,79 @@ export const aiProviders = () => request('/api/ai/providers');
 export const aiKeys = (name, value) => jsonPost('/api/ai/keys', { name, value });
 
 /**
+ * Non-streaming chat completion (the /api/ai/chat endpoint).
+ *
+ * Takes an optional AbortSignal so the Stop button can cancel the fetch
+ * itself — before this, only the streaming path was cancellable and the
+ * non-streaming branch kept a tool loop alive after the user hit Stop.
+ * An aborted call resolves to { ok:false, aborted:true } rather than
+ * throwing, so callers can treat it like any other soft failure.
+ *
+ * @param {object} payload { provider, messages, tools, toolChoice, maxTokens, model, temperature }
+ * @param {{signal?:AbortSignal}} [opts]
+ * @returns {Promise<{ok:boolean, aborted?:boolean, data?:object, error?:string}>}
+ */
+export async function aiChat(payload, opts) {
+  const signal = opts && opts.signal;
+  let res;
+  try {
+    res = await fetch(API + '/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload || {}),
+      signal: signal || undefined,
+    });
+  } catch (err) {
+    if (err && err.name === 'AbortError') return { ok: false, aborted: true, error: 'aborted' };
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+  if (!res.ok) {
+    const body = await res.text().catch(() => '');
+    const err = { status: res.status, body };
+    return { ok: false, status: res.status, error: body || ('HTTP ' + res.status), data: err };
+  }
+  const data = await toJson(res);
+  if (data && data.ok === false) return { ok: false, error: data.error || 'chat failed', data };
+  // Server returns a raw OpenAI-shaped body; normalise under .data.
+  return { ok: true, data };
+}
+
+/**
+ * POST /api/ai/tool-call.
+ *
+ * Returns { ok, aborted?, ... }. Accepts a Signal so a Stop press kills a
+ * long tool (run_command, git clone) instead of letting the agent loop
+ * keep firing tools after the user asked it to quit.
+ *
+ * @param {string} name
+ * @param {object} args
+ * @param {{signal?:AbortSignal, cwd?:string}} [opts]
+ */
+export async function aiToolCall(name, args, opts) {
+  const o = opts || {};
+  const body = { name, args: args || {} };
+  if (o.cwd) body.cwd = o.cwd;
+  let res;
+  try {
+    res = await fetch(API + '/api/ai/tool-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: o.signal || undefined,
+    });
+  } catch (err) {
+    if (err && err.name === 'AbortError') return { ok: false, aborted: true, error: 'aborted' };
+    return { ok: false, error: String((err && err.message) || err) };
+  }
+  const data = await toJson(res);
+  if (!res.ok && (data.ok === undefined || data.ok === true)) {
+    // Server sends { error } (no `ok`) with 4xx/5xx — normalise.
+    return { ok: false, status: res.status, error: data.error || ('HTTP ' + res.status), ...data };
+  }
+  return data;
+}
+
+/**
  * Streaming chat. Returns an object with .abort() so the UI can offer
  * a Stop button — the old sendChat() had no way to cancel a runaway
  * stream, which on mobile drains battery and data.
