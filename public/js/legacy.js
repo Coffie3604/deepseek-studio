@@ -26,6 +26,8 @@
 import { emit } from './core/bus.js';
 import { switchPanel } from './core/lifecycle.js';
 import { aiStreamRaw, aiToolCall, aiChat } from './core/api.js';
+/* Frame-batched rendering + memoised lookups (see core/perf.js). */
+import { schedule, memo1 } from './core/perf.js';
 
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -567,15 +569,35 @@ function refreshTree() {
   });
 }
 function loadTreeLevel(parentPath) { fsList(parentPath).then(function(items) { treeCache[parentPath] = items; renderTree(); }); }
+/* Install the delegated tree listeners as soon as the body exists. */
+if (document.getElementById('ftBody')) setupTreeDelegation();
+else document.addEventListener('DOMContentLoaded', function() { setupTreeDelegation(); }, { once: true });
+
+/* Coalesce tree renders into one animation frame. Expanding five folders
+   in quick succession used to trigger five full innerHTML teardowns of
+   #ftBody in the same tick; now it triggers exactly one. */
 function renderTree() {
+  return schedule('tree', renderTreeNow);
+}
+
+function renderTreeNow() {
   var body = document.getElementById('ftBody');
-  body.innerHTML = '';
+  if (!body || !body.isConnected) return;
   var rootItems = treeCache[''] || [];
   if (!rootItems.length) {
-    body.innerHTML = '<div class="ft-empty">Empty workspace<br><br>Use <b>Templates</b>, <b>Generate</b>, or click the <b>🔗</b> button above to link a folder from your phone</div>';
+    body.textContent = '';
+    var empty = document.createElement('div');
+    empty.className = 'ft-empty';
+    empty.innerHTML = 'Empty workspace<br><br>Use <b>Templates</b>, <b>Generate</b>, or click the <b>🔗</b> button above to link a folder from your phone';
+    body.appendChild(empty);
     return;
   }
-  renderItems(rootItems, 0, body);
+  // Build into a fragment, swap in one go: a single reflow instead of
+  // one per appended row.
+  var frag = document.createDocumentFragment();
+  renderItems(rootItems, 0, frag);
+  body.textContent = '';
+  body.appendChild(frag);
 }
 function renderItems(items, depth, container) {
   items.forEach(function(it) {
@@ -604,24 +626,69 @@ function renderItems(items, depth, container) {
     div.innerHTML = chevronHtml + '<i class="fas ' + iconClass + ' tree-icon" style="' + iconColor + '"></i>' +
                     '<span class="tree-name">' + escAttr(it.name) + '</span>' + linkBadge + modBadge;
 
-    div.onclick = function() {
-      if (it.isDir) {
-        if (expandedFolders[it.path]) { delete expandedFolders[it.path]; renderTree(); }
-        else { expandedFolders[it.path] = true; if (!treeCache[it.path]) loadTreeLevel(it.path); else renderTree(); }
-      } else { openFileFromTree(it.path); if (isMobile) closeDrawers(); }
-    };
-    var pressTimer = null;
-    div.addEventListener('touchstart', function(e) {
-      pressTimer = setTimeout(function() { showContextMenu(it, e); if (navigator.vibrate) navigator.vibrate(30); }, 550);
-    }, { passive: true });
-    div.addEventListener('touchend', function() { clearTimeout(pressTimer); });
-    div.addEventListener('touchmove', function() { clearTimeout(pressTimer); });
-    div.addEventListener('contextmenu', function(e) { e.preventDefault(); showContextMenu(it, e); });
+    // Row metadata rides on the element; the single delegated listener
+    // installed by setupTreeDelegation() reads it back. Previously every
+    // row registered 5 listeners (click + 3 touch + contextmenu), so a
+    // 200-file folder meant 1000 live listeners.
+    div.__item = it;
     container.appendChild(div);
     if (it.isDir && isExpanded && treeCache[it.path]) renderItems(treeCache[it.path], depth + 1, container);
   });
 }
-function getFileIcon(name) {
+
+/* One listener set for the whole tree, installed once. */
+var treeDelegated = false;
+function setupTreeDelegation() {
+  if (treeDelegated) return;
+  var body = document.getElementById('ftBody');
+  if (!body) return;
+  treeDelegated = true;
+  var pressTimer = null;
+  var pressItem = null;
+
+  function itemFrom(e) {
+    var row = e.target && e.target.closest ? e.target.closest('.tree-item') : null;
+    return row ? row.__item : null;
+  }
+
+  body.addEventListener('click', function(e) {
+    var it = itemFrom(e);
+    if (!it) return;
+    if (it.isDir) {
+      if (expandedFolders[it.path]) { delete expandedFolders[it.path]; renderTree(); }
+      else { expandedFolders[it.path] = true; if (!treeCache[it.path]) loadTreeLevel(it.path); else renderTree(); }
+    } else { openFileFromTree(it.path); if (isMobile) closeDrawers(); }
+  });
+
+  // Long-press → context menu. Passive so it never blocks scrolling.
+  body.addEventListener('touchstart', function(e) {
+    var it = itemFrom(e);
+    if (!it) return;
+    pressItem = it;
+    var touch = e.touches[0];
+    pressTimer = setTimeout(function() {
+      if (!pressItem) return;
+      var fake = { clientX: touch.clientX, clientY: touch.clientY, preventDefault: function() {} };
+      showContextMenu(pressItem, fake);
+      if (navigator.vibrate) navigator.vibrate(30);
+      pressItem = null;
+    }, 550);
+  }, { passive: true });
+
+  var cancelPress = function() { clearTimeout(pressTimer); pressItem = null; };
+  body.addEventListener('touchend', cancelPress, { passive: true });
+  body.addEventListener('touchmove', cancelPress, { passive: true });
+  body.addEventListener('touchcancel', cancelPress, { passive: true });
+  body.addEventListener('contextmenu', function(e) {
+    var it = itemFrom(e);
+    if (!it) return;
+    e.preventDefault();
+    showContextMenu(it, e);
+  });
+}
+/* Memoised: a tree of 500 files hits this ~500 times per render, and the
+   body does up to 20 array scans. Keyed by extension, so ~20 entries. */
+var getFileIcon = memo1(function(name) {
   var ext = name.split('.').pop().toLowerCase();
   if (['kt','kts','java','py','js','ts','jsx','tsx','dart','rs','go','swift','c','cpp','h','html','htm','css','scss','sass','json','xml','yaml','yml','sh','bash','toml','ini','conf','gradle'].includes(ext)) return 'fa-file-code';
   if (['md','markdown','txt','rst'].includes(ext)) return 'fa-file-alt';
@@ -633,10 +700,24 @@ function getFileIcon(name) {
   if (['csv','xls','xlsx'].includes(ext)) return 'fa-file-excel';
   if (['doc','docx','odt'].includes(ext)) return 'fa-file-word';
   return 'fa-file';
-}
-function fileIconColor(name, isDir) {
-  if (isDir) return 'color:var(--blue)';
-  var ext = name.split('.').pop().toLowerCase();
+}, 200);
+
+/* Memoised on "isDir|ext" — same rationale as getFileIcon. memo1 keys on
+   its first argument only, so we normalise the pair into one key. */
+var fileIconColor = (function() {
+  var memo = memo1(function(key) {
+    var parts = key.split('|');
+    var isDir = parts[0] === '1';
+    var ext = parts[1];
+    if (isDir) return 'color:var(--blue)';
+    return __fileIconColorForExt(ext);
+  }, 200);
+  return function(name, isDir) {
+    var ext = isDir ? '' : String(name).split('.').pop().toLowerCase();
+    return memo((isDir ? '1' : '0') + '|' + ext);
+  };
+})();
+function __fileIconColorForExt(ext) {
   if (['py'].includes(ext)) return 'color:#3572A5';
   if (['js','jsx','mjs','cjs'].includes(ext)) return 'color:#f1e05a';
   if (['ts','tsx'].includes(ext)) return 'color:#3178c6';
@@ -917,13 +998,13 @@ function openFileFromTree(path) {
     fileModified = false;
     if (!monacoLoaded) {
       switchPrimaryPanel('editor');
-      var iv = setInterval(function() {
-        if (monacoLoaded && editor) {
-          clearInterval(iv);
-          editor.setValue(fileContent);
-          monaco.editor.setModelLanguage(editor.getModel(), detectLangForPath(path));
-        }
-      }, 100);
+      // No timer, no poll: loadMonaco() dedupes the in-flight load and
+      // resolves with the editor instance once it is ready.
+      loadMonaco().then(function(ed) {
+        if (!ed || !window.monaco) return;
+        ed.setValue(fileContent);
+        monaco.editor.setModelLanguage(ed.getModel(), detectLangForPath(path));
+      }).catch(function(e) { console.warn('[editor] monaco load failed', e); });
     } else if (editor && window.monaco) {
       editor.setValue(fileContent);
       monaco.editor.setModelLanguage(editor.getModel(), detectLangForPath(path));
@@ -934,11 +1015,15 @@ function openFileFromTree(path) {
     refreshTree();
   });
 }
-function renderEditorTabs() {
+/* Batched: saveFile / open / close each used to rebuild the strip, so a
+   single save fired several identical renders in one tick. */
+function renderEditorTabs() { return schedule('tabs', renderEditorTabsNow); }
+function renderEditorTabsNow() {
   var bar = document.getElementById('editorTabsBar');
-  bar.innerHTML = '';
-  if (!openTabs.length) { bar.style.display = 'none'; return; }
+  if (!bar || !bar.isConnected) return;
+  if (!openTabs.length) { bar.textContent = ''; bar.style.display = 'none'; return; }
   bar.style.display = 'flex';
+  var frag = document.createDocumentFragment();
   openTabs.forEach(function(p) {
     var tab = document.createElement('div');
     tab.className = 'editor-tab' + (p === activeTabPath ? ' active' : '');
@@ -958,8 +1043,10 @@ function renderEditorTabs() {
       }
       if (p !== activeTabPath) openFileFromTree(p);
     };
-    bar.appendChild(tab);
+    frag.appendChild(tab);
   });
+  bar.textContent = '';
+  bar.appendChild(frag);
 }
 function saveFile() {
   if (!openFile) { toast('No file open', 'error'); return Promise.resolve(); }
@@ -1758,55 +1845,98 @@ function quickPrompt(text) {
 }
 function insertCodeToEditor(code) {
   switchPrimaryPanel('editor');
-  var iv = setInterval(function() {
-    if (monacoLoaded && editor) {
-      clearInterval(iv);
-      var sel = editor.getSelection();
-      editor.executeEdits('ai-insert', [{ range: sel, text: code, forceMoveMarkers: true }]);
-      editor.focus();
-      toast('Code inserted', 'success');
-    }
-  }, 100);
+  /* Promise instead of a 100ms poll (which leaked a timer forever if
+     Monaco never loaded). Safe to call concurrently — loadMonaco dedupes. */
+  loadMonaco().then(function(ed) {
+    if (!ed) return;
+    var sel = ed.getSelection() || { startLineNumber: 1, startColumn: 1, endLineNumber: 1, endColumn: 1 };
+    ed.executeEdits('ai-insert', [{ range: sel, text: code, forceMoveMarkers: true }]);
+    ed.focus();
+    toast('Code inserted', 'success');
+  }).catch(function(e) { console.warn('[editor] monaco load failed', e); });
 }
 
 /* ═══════════════════════════════════════════════════════════════════
    MONACO
    ═══════════════════════════════════════════════════════════════════ */
+/* Promise-based + in-flight deduped: several callers (openFileFromTree,
+   the editor tab handler, insertCodeToEditor) all want Monaco. Each call
+   now returns the SAME promise, so concurrent callers share one loader
+   <script> and one editor.create(). Resolves with the editor instance.
+   A failed load clears the cache so a retry can succeed. */
+var monacoLoadPromise = null;
 function loadMonaco() {
-  if (monacoLoaded) return;
-  var loader = document.createElement('script');
-  loader.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js';
-  loader.onload = function() {
-    require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
-    require(['vs/editor/editor.main'], function() {
-      monacoLoaded = true;
-      var target = document.getElementById('monaco');
-      var empty = document.getElementById('editorEmpty');
-      if (empty) empty.remove();
-      editor = monaco.editor.create(target, {
-        value: fileContent || '',
-        language: openFile ? detectLangForPath(openFile) : 'plaintext',
-        theme: 'vs-dark',
-        automaticLayout: true,
-        fontSize: editorFontSize,
-        minimap: { enabled: editorMinimap },
-        tabSize: 4,
-        wordWrap: editorWordWrap ? 'on' : 'off',
-        padding: { top: 12, bottom: 12 }
-      });
-      editor.onDidChangeModelContent(function() {
-        fileContent = editor.getValue();
-        if (!fileModified) {
-          fileModified = true;
-          if (openFile) modifiedFiles[openFile] = true;
-          updateCtxIndicator();
-          renderEditorTabs();
-        }
-      });
-      if (openFile) editor.setValue(fileContent);
-    });
-  };
-  document.head.appendChild(loader);
+  /* Already created — resolve with the live instance, synchronously-settled. */
+  if (monacoLoaded && editor) return Promise.resolve(editor);
+  /* A load is already in flight (or already finished): join it. */
+  if (monacoLoadPromise) return monacoLoadPromise;
+
+  monacoLoadPromise = new Promise(function(resolve, reject) {
+    var target = document.getElementById('monaco');
+    if (!target) return reject(new Error('Monaco container #monaco not found'));
+
+    var createEditor = function() {
+      /* Idempotent: if another path already made the editor, reuse it. */
+      if (monacoLoaded && editor) return resolve(editor);
+      try {
+        monacoLoaded = true;
+        var empty = document.getElementById('editorEmpty');
+        if (empty && empty.parentNode) empty.parentNode.removeChild(empty);
+        editor = monaco.editor.create(target, {
+          value: fileContent || '',
+          language: openFile ? detectLangForPath(openFile) : 'plaintext',
+          theme: 'vs-dark',
+          automaticLayout: true,
+          fontSize: editorFontSize,
+          minimap: { enabled: editorMinimap },
+          tabSize: 4,
+          wordWrap: editorWordWrap ? 'on' : 'off',
+          padding: { top: 12, bottom: 12 }
+        });
+        editor.onDidChangeModelContent(function() {
+          fileContent = editor.getValue();
+          if (!fileModified) {
+            fileModified = true;
+            if (openFile) modifiedFiles[openFile] = true;
+            updateCtxIndicator();
+            renderEditorTabs();
+          }
+        });
+        if (openFile) editor.setValue(fileContent);
+        resolve(editor);
+      } catch (e) {
+        monacoLoaded = false;
+        reject(e);
+      }
+    };
+
+    /* `require` may already be present (loader.min.js cached/loaded earlier). */
+    var start = function() {
+      try {
+        require.config({ paths: { vs: 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs' } });
+        require(['vs/editor/editor.main'], createEditor);
+      } catch (e) {
+        reject(e);
+      }
+    };
+
+    if (window.require && window.require.config) return start();
+
+    var loader = document.createElement('script');
+    loader.src = 'https://cdnjs.cloudflare.com/ajax/libs/monaco-editor/0.39.0/min/vs/loader.min.js';
+    loader.onload = start;
+    loader.onerror = function() {
+      /* Drop the dead <script> so a retry re-injects it. */
+      if (loader.parentNode) loader.parentNode.removeChild(loader);
+      reject(new Error('Failed to load Monaco loader'));
+    };
+    document.head.appendChild(loader);
+  });
+
+  /* On failure, clear the cache so the next call can retry. */
+  monacoLoadPromise.catch(function() { monacoLoadPromise = null; });
+
+  return monacoLoadPromise;
 }
 
 /* ═══════════════════════════════════════════════════════════════════

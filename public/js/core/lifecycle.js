@@ -22,6 +22,10 @@ import { emit } from './bus.js';
 const registry = new Map();
 
 let activePanel = null;
+/* In-flight switch promise, and the most recent name requested while one
+   was running. See switchPanel(). */
+let switching = null;
+let pendingSwitch = null;
 
 /**
  * @param {string} name
@@ -37,9 +41,17 @@ export function register(name, mod, opts) {
   });
 }
 
-/** Init every registered feature. Failures are isolated per feature. */
+/**
+ * Init every registered feature. Failures are isolated per feature.
+ *
+ * Heavy features are SKIPPED: they are only meaningful once their panel is
+ * visible, and initialising them behind `display:none` gives them a 0×0 host
+ * (xterm's fit addon then computes a 1×1 grid, Monaco never lays out). They
+ * are initialised by switchPanel() the first time the user opens the panel.
+ */
 export async function initAll() {
   for (const [name, entry] of registry) {
+    if (entry.heavy) continue;
     try {
       if (typeof entry.mod.init === 'function') await entry.mod.init();
       entry.inited = true;
@@ -69,8 +81,24 @@ export async function destroyAll() {
  * @param {string} name
  */
 export async function switchPanel(name) {
+  // Re-entrancy guard. switchPanel awaits between phases, so a second call
+  // (rapid tab taps, or terminal:run emitting panel:switch from inside a
+  // bus dispatch) could start tearing down the panel we are mid-mounting.
+  // Serialize instead of dropping: dropping loses a legitimate switch.
+  if (switching) { pendingSwitch = name; return switching; }
   if (name === activePanel) return;
-  const prev = activePanel ? registry.get(activePanel) : null;
+  switching = runSwitch(name).finally(() => {
+    switching = null;
+    const queued = pendingSwitch;
+    pendingSwitch = null;
+    if (queued && queued !== name) switchPanel(queued);
+  });
+  return switching;
+}
+
+async function runSwitch(name) {
+  const prevName = activePanel;
+  const prev = prevName ? registry.get(prevName) : null;
   const next = registry.get(name);
 
   if (prev) {
@@ -82,7 +110,7 @@ export async function switchPanel(name) {
       }
       prev.mounted = false;
     } catch (err) {
-      console.error('[lifecycle] unmount failed for "' + activePanel + '"', err);
+      console.error('[lifecycle] unmount failed for "' + prevName + '"', err);
     }
   }
 
@@ -101,7 +129,7 @@ export async function switchPanel(name) {
     }
   }
 
-  emit('panel:switch', { name, prev: prev ? activePanel : null });
+  emit('panel:switch', { name, prev: prevName });
 }
 
 export function getActivePanel() {

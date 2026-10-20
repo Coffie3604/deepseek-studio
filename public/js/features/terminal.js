@@ -57,6 +57,9 @@ let unsubs = [];
 let resizeHandler = null;
 let resizeTimer = null;
 let ctrlArmed = false;
+/* A `terminal:run` that arrived before we finished mounting. Flushed at the
+   end of doInit(), once the socket exists. */
+let pendingRun = null;
 
 const KEY_ROW = [
   { label: 'Esc', data: '\x1b' },
@@ -113,10 +116,16 @@ export async function destroy() {
 
 export function mount() {
   // The panel just became visible: the host has real dimensions now.
-  // If we were destroyed on the previous switch, bring xterm back up.
-  if (!inited) { init().catch((e) => console.error('[term] re-init failed', e)); return; }
-  setTimeout(() => { try { addons.fit && addons.fit.fit(); } catch (e) { /* ignore */ } }, 60);
-  setTimeout(() => { try { term && term.focus(); } catch (e) { /* ignore */ } }, 120);
+  // init() is idempotent, so this both covers a fresh mount (heavy features
+  // are skipped by initAll) and a re-mount after a teardown.
+  const ready = inited ? Promise.resolve() : init();
+  return ready
+    .then(() => new Promise((r) => setTimeout(r, 60)))
+    .then(() => {
+      // Fit only once the panel has a size, otherwise xterm locks onto 1x1.
+      try { addons.fit && addons.fit.fit(); } catch (e) { /* ignore */ }
+    })
+    .catch((e) => console.error('[term] mount failed', e));
 }
 
 /** Open the find bar (used by the quick-command palette via the bus). */
@@ -238,6 +247,10 @@ async function doInit() {
     resizeTimer = setTimeout(() => { try { addons.fit && addons.fit.fit(); } catch (e) { /* ignore */ } }, 150);
   };
   window.addEventListener('resize', resizeHandler);
+
+  // Focus after the panel has laid out, so the soft keyboard opens on the
+  // terminal instead of the address bar.
+  setTimeout(() => { try { term && term.focus(); } catch (e) { /* ignore */ } }, 120);
 
   inited = true;
 }
@@ -429,10 +442,22 @@ function bindKeyRow() {
 function bindBus() {
   unsubs.push(on('terminal:run', (p) => {
     if (!p || !p.cmd) return;
-    emit('panel:switch', { name: 'terminal' });
-    // The panel switch may re-init us; retry briefly until the socket is up.
+    // Ask the host to reveal our panel. The lifecycle (not terminal:run)
+    // decides whether that tears down and re-creates us — which also
+    // unsubscribes this listener — so no retry loop is needed or safe.
+    // Waiting for a socket here could never succeed after a teardown.
+    emit('terminal:run:request', { name: 'terminal' });
+    // If we are already mounted and connected, run immediately. If we are
+    // mid-mount, queue the command and flush it once init() finishes so it
+    // is not silently dropped.
+    if (!inited) {
+      pendingRun = { cmd: p.cmd, silent: p.silent };
+      init().catch((e) => { pendingRun = null; console.error('[term] init for run failed', e); });
+      return;
+    }
     let tries = 0;
     const attempt = () => {
+      if (!inited) return;              // destroyed by a teardown
       if (run(p.cmd, p.silent)) return;
       if (++tries > 20) { toast('Terminal not ready', 'error'); return; }
       setTimeout(attempt, 150);

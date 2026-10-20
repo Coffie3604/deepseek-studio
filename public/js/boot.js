@@ -13,7 +13,7 @@
    ═══════════════════════════════════════════════════════════════════ */
 
 import * as state from './core/state.js';
-import { emit } from './core/bus.js';
+import { emit, on } from './core/bus.js';
 import { register, initAll, switchPanel } from './core/lifecycle.js';
 import { setupConfirmModal, setupContextMenu } from './core/ui.js';
 
@@ -66,15 +66,28 @@ function wirePanels() {
     tab.onclick = () => {
       const name = tab.getAttribute('data-panel');
       if (!name) return;
-      state.set('activePanel', name);
-      document.querySelectorAll('.ptab').forEach((t) => t.classList.remove('active'));
-      document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
-      tab.classList.add('active');
-      const panel = document.getElementById('panel-' + name);
-      if (panel) panel.classList.add('active');
-      switchPanel(name);
+      activatePanel(name);
     };
   });
+
+  // Programmatic switches (e.g. a feature asking for the terminal). Keep the
+  // tab strip and panel visibility in step with the lifecycle, otherwise the
+  // lifecycle thinks "terminal" is active while the chat panel is showing.
+  on('terminal:run:request', (p) => activatePanel(p && p.name ? p.name : 'terminal'));
+  on('panel:request', (p) => activatePanel(p && p.name ? p.name : 'chat'));
+}
+
+/** Make `name` the visible panel. Safe to call repeatedly. */
+function activatePanel(name) {
+  const tab = document.querySelector('.ptab[data-panel="' + name + '"]');
+  if (!tab) return;
+  state.set('activePanel', name);
+  document.querySelectorAll('.ptab').forEach((t) => t.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
+  tab.classList.add('active');
+  const panel = document.getElementById('panel-' + name);
+  if (panel) panel.classList.add('active');
+  switchPanel(name);
 }
 
 /* ── inline handlers ──────────────────────────────────────────────── */
@@ -112,10 +125,11 @@ async function start() {
 
   await initAll();
 
-  // The chat panel is the default; terminal is heavy and stays dormant
-  // until the user actually opens it.
-  state.set('activePanel', 'chat');
-  emit('panel:switch', { name: 'chat' });
+  // The chat panel is the default. Report it through the lifecycle so its
+  // internal `activePanel` matches the DOM; earlier this only set the state
+  // key and emitted an event, leaving the lifecycle on `null`, so the first
+  // tap on the already-visible Chat tab was treated as "no change".
+  activatePanel('chat');
 }
 
 if (document.readyState === 'loading') {
