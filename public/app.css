@@ -463,6 +463,61 @@ body {
   background:var(--yellow); flex-shrink:0;
 }
 
+/* ═══════════ EDITOR TOOLBAR / EDIT MENU ═══════════ */
+.editor-toolbar {
+  display:flex; align-items:center; gap:4px;
+  padding:6px 8px; background:var(--bg-2);
+  border-bottom:1px solid var(--border);
+  flex-shrink:0; overflow:visible; position:relative; z-index:60;
+}
+.etb-btn {
+  display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  padding:6px 9px; min-height:30px; min-width:30px;
+  background:transparent; color:var(--fg-2);
+  border:1px solid transparent; border-radius:6px;
+  font-size:12px; font-family:inherit; cursor:pointer;
+  -webkit-tap-highlight-color:transparent; transition:all .13s ease;
+}
+.etb-btn:hover, .etb-btn:active { background:var(--bg-3); color:var(--fg-0); border-color:var(--border-2); }
+.etb-btn.on { background:rgba(88,166,255,.16); color:var(--blue); border-color:rgba(88,166,255,.5); }
+.etb-btn i { pointer-events:none; }
+.editor-menu-wrap { position:relative; }
+.editor-menu-btn { font-weight:600; }
+.editor-menu {
+  display:none; position:absolute; top:calc(100% + 6px); left:0;
+  min-width:238px; max-height:min(70vh,460px); overflow-y:auto;
+  background:var(--bg-1, #161b22); border:1px solid var(--border-2);
+  border-radius:8px; padding:5px;
+  box-shadow:0 12px 34px rgba(0,0,0,.6); z-index:200;
+}
+.editor-menu.open { display:block; animation:menuIn .12s ease; }
+.em-item {
+  display:flex; align-items:center; gap:9px; width:100%;
+  padding:9px 10px; background:transparent; border:none;
+  color:var(--fg-2); font-size:12.5px; font-family:inherit;
+  border-radius:5px; cursor:pointer; text-align:left;
+  -webkit-tap-highlight-color:transparent; transition:background .1s;
+}
+.em-item:hover, .em-item:active { background:var(--bg-3); color:var(--fg-0); }
+.em-item i { width:15px; text-align:center; color:var(--fg-3); flex-shrink:0; }
+.em-item:hover i { color:var(--blue); }
+.em-item .em-key {
+  margin-left:auto; font-size:10px; font-family:monospace;
+  color:var(--fg-4); white-space:nowrap;
+}
+.em-sep { height:1px; background:var(--border-2); margin:5px 6px; }
+.em-item.em-flash { background:rgba(63,185,80,.2); color:var(--green); }
+.ed-spacer { flex:1; }
+.ed-sel-info {
+  font-size:10.5px; font-family:monospace; color:var(--fg-4);
+  white-space:nowrap; padding-right:4px;
+}
+@media (max-width:520px) {
+  .etb-btn { padding:6px 7px; min-width:28px; }
+  .etb-btn span { display:none; }
+  .editor-menu { min-width:210px; }
+}
+
 #monaco { flex:1; min-height:0; background:#1e1e1e; position:relative; }
 .editor-tabs-bar:empty { display:none !important; }
 .editor-empty {
@@ -500,6 +555,9 @@ body {
 .terminal-toolbar .tbtn:hover { background:var(--bg-3); border-color:var(--blue); color:var(--blue); }
 .terminal-toolbar .tbtn.danger { border-color:var(--red-2); color:var(--red); }
 .terminal-toolbar .tbtn.danger:hover { background:#da363322; }
+.terminal-toolbar .tbtn.active { background:var(--bg-3); border-color:var(--blue); color:var(--blue); }
+.terminal-toolbar .tbtn:focus-visible { outline:2px solid var(--blue); outline-offset:1px; }
+.terminal-toolbar .tbtn.copied { border-color:var(--green); color:var(--green); }
 .terminal-toolbar .sep {
   width:1px; height:22px; background:var(--border);
   margin:0 5px; flex-shrink:0;
@@ -513,6 +571,13 @@ body {
 }
 .term-info .pulse { width:6px; height:6px; border-radius:50%; background:var(--green); animation:pulse 2s infinite; }
 #terminal { flex:1; padding:8px; overflow:hidden; min-height:0; }
+#terminal .xterm { height:100%; }
+/* Phones: bigger tap targets, drop text labels so the bar never wraps */
+@media (max-width:640px) {
+  .terminal-toolbar { padding:6px 8px; gap:4px; }
+  .terminal-toolbar .tbtn { min-height:38px; padding:6px 9px; }
+  .terminal-toolbar .tbtn-label { display:none; }
+}
 
 /* ═══════════ TERMINAL MOBILE KEY ROW ═══════════ */
 /* xterm on Android is nearly unusable without Esc/Tab/Ctrl/arrows.
@@ -564,6 +629,11 @@ body {
   font-size:11px;
 }
 .term-search-bar .tsb-btn:hover { background:var(--bg-3); color:var(--blue); border-color:var(--border); }
+.term-search-bar .tsb-count {
+  font-size:10px; font-variant-numeric:tabular-nums;
+  color:var(--fg-3); padding:0 4px; min-width:38px; text-align:center;
+}
+.term-search-bar .tsb-count.none { color:var(--red); }
 .term-search-bar .tsb-opt {
   display:inline-flex; align-items:center; gap:3px;
   font-size:10px; color:var(--fg-3);

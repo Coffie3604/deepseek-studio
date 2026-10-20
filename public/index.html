@@ -147,6 +147,40 @@
     <!-- EDITOR PANEL -->
     <div class="tab-panel" id="panel-editor">
       <div class="editor-tabs-bar" id="editorTabsBar" style="display:none"></div>
+
+      <!-- EDITOR TOOLBAR / EDIT MENU -->
+      <div class="editor-toolbar" id="editorToolbar">
+        <div class="editor-menu-wrap">
+          <button class="etb-btn editor-menu-btn" id="editorEditMenuBtn" title="Edit menu">
+            <i class="fas fa-pen-to-square"></i> <span>Edit</span> <i class="fas fa-caret-down"></i>
+          </button>
+          <div class="editor-menu" id="editorEditMenu">
+            <button class="em-item" id="emUndo"><i class="fas fa-rotate-left"></i> Undo <span class="em-key">Ctrl+Z</span></button>
+            <button class="em-item" id="emRedo"><i class="fas fa-rotate-right"></i> Redo <span class="em-key">Ctrl+Y</span></button>
+            <div class="em-sep"></div>
+            <button class="em-item" id="emCopy"><i class="fas fa-copy"></i> Copy <span class="em-key">Ctrl+C</span></button>
+            <button class="em-item" id="emCut"><i class="fas fa-scissors"></i> Cut <span class="em-key">Ctrl+X</span></button>
+            <button class="em-item" id="emPaste"><i class="fas fa-paste"></i> Paste <span class="em-key">Ctrl+V</span></button>
+            <div class="em-sep"></div>
+            <button class="em-item" id="emSelectAll"><i class="fas fa-object-group"></i> Select All <span class="em-key">Ctrl+A</span></button>
+            <button class="em-item" id="emSelectLine"><i class="fas fa-align-left"></i> Select Current Line</button>
+            <div class="em-sep"></div>
+            <button class="em-item" id="emCutLine"><i class="fas fa-eraser"></i> Delete Current Line <span class="em-key">Ctrl+Shift+K</span></button>
+            <button class="em-item" id="emDuplicate"><i class="fas fa-clone"></i> Duplicate Line <span class="em-key">Shift+Alt+↓</span></button>
+            <button class="em-item" id="emTrim"><i class="fas fa-broom"></i> Trim Trailing Spaces</button>
+            <button class="em-item" id="emSortLines"><i class="fas fa-sort-alpha-down"></i> Sort Selected Lines</button>
+            <div class="em-sep"></div>
+            <button class="em-item" id="emFind"><i class="fas fa-search"></i> Find <span class="em-key">Ctrl+F</span></button>
+            <button class="em-item" id="emReplace"><i class="fas fa-exchange-alt"></i> Find &amp; Replace</button>
+          </div>
+        </div>
+        <button class="etb-btn" id="edCopyBtn" title="Copy selection (or whole file)"><i class="fas fa-copy"></i></button>
+        <button class="etb-btn" id="edPasteBtn" title="Paste from clipboard"><i class="fas fa-paste"></i></button>
+        <button class="etb-btn" id="edSelectAllBtn" title="Select all (highlights the whole file)"><i class="fas fa-object-group"></i></button>
+        <div class="ed-spacer"></div>
+        <span class="ed-sel-info" id="edSelInfo">0 sel</span>
+      </div>
+
       <div id="monaco">
         <div class="editor-empty" id="editorEmpty">
           <i class="fas fa-file-code"></i>
@@ -168,7 +202,7 @@
     <div class="tab-panel" id="panel-terminal">
       <div id="terminal-container">
         <div class="terminal-toolbar">
-          <button class="tbtn" id="termClearBtn" title="Clear screen"><i class="fas fa-eraser"></i> Clear</button>
+          <button class="tbtn" id="termClearBtn" title="Clear screen (Ctrl+K)"><i class="fas fa-eraser"></i> <span class="tbtn-label">Clear</span></button>
           <button class="tbtn" id="termRunBtn" title="Run a one-shot command (no PTY)"><i class="fas fa-bolt"></i> Run</button>
           <button class="tbtn" id="termCopyBtn" title="Copy all"><i class="fas fa-copy"></i></button>
           <button class="tbtn" id="termPasteBtn" title="Paste"><i class="fas fa-paste"></i></button>
@@ -178,6 +212,7 @@
             <input id="termSearchInput" type="text" placeholder="Find…" autocomplete="off" spellcheck="false" />
             <button class="tsb-btn" id="termSearchPrev" title="Previous (Shift+Enter)"><i class="fas fa-chevron-up"></i></button>
             <button class="tsb-btn" id="termSearchNext" title="Next (Enter)"><i class="fas fa-chevron-down"></i></button>
+            <span class="tsb-count" id="termSearchCount" title="Matches">0/0</span>
             <label class="tsb-opt" title="Case sensitive">
               <input type="checkbox" id="termSearchCase" /> Aa
             </label>
@@ -193,7 +228,7 @@
           <button class="tbtn" id="termTopBtn" title="Top"><i class="fas fa-arrow-up"></i></button>
           <button class="tbtn" id="termBottomBtn" title="Bottom"><i class="fas fa-arrow-down"></i></button>
           <div class="sep"></div>
-          <button class="tbtn danger" id="termKillBtn" title="Kill current process"><i class="fas fa-skull"></i></button>
+          <button class="tbtn danger" id="termKillBtn" title="Restart terminal session"><i class="fas fa-skull"></i></button>
           <span class="term-info" id="termInfo">
             <span class="pulse" id="termPulse"></span>
             <span id="termInfoText">Ready</span>

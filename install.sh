@@ -247,24 +247,105 @@ tail -f "$HOME/.ds-studio.log"
 EOF
 
 # ds-doctor — full self-diagnostic
+#
+# NOTE (Termux fix): this script must work when launched from places that do
+# NOT have a terminal CWD or a sane $PWD — Termux:Widget (.shortcuts/), the
+# Termux:Boot hook, or `am startservice`. Previously it did a bare `cd "$DIR"`
+# and then ran `node -e require.resolve(...)`, so if $DIR was wrong/unset (or
+# the cd failed) every dependency was reported ✗ even when it was installed.
+# Fixes applied below:
+#   1. Resolve $DIR forwards-compatibly and *verify* it; fall back to probing.
+#   2. Never `exit` on a failed cd — fall back to an explicit NODE_PATH.
+#   3. Use require.resolve({paths:[DIR]}) so resolution does not depend on CWD.
+#   4. Cross-check against the server's own /api/diagnostics when it is up.
 write_script ds-doctor <<EOF
 #!/data/data/com.termux/files/usr/bin/bash
+# Resolve install dir: explicit env > argv --dir > hardcoded default
 DIR="\${DS_INSTALL_DIR:-$INSTALL_DIR}"
+while [ \$# -gt 0 ]; do
+  case "\$1" in
+    --dir) DIR="\$2"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+# If the resolved dir is not a real install, probe the known locations.
+if [ ! -f "\$DIR/server.js" ]; then
+  for cand in "\$HOME/projects/deepseek-editor" "\$HOME/deepseek-studio" "\$HOME/deepseek-editor"; do
+    [ -f "\$cand/server.js" ] && { DIR="\$cand"; break; }
+  done
+fi
+
 BLUE='\033[0;34m'; GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; NC='\033[0m'
 
 echo ""
 echo "\${BLUE}🩺 DeepSeek Studio — Diagnostics\${NC}"
 echo "\${BLUE}──────────────────────────────────\${NC}"
+echo "CWD:      \$(pwd 2>/dev/null || echo '?')"
 echo "Install:  \$DIR"
+if [ -f "\$DIR/server.js" ]; then
+  printf "  \${GREEN}✓\${NC} server.js found\n"
+else
+  printf "  \${RED}✗\${NC} server.js NOT found — set DS_INSTALL_DIR=/path/to/install\n"
+fi
 echo "Node:     \$(node -v 2>/dev/null || echo 'missing')"
 echo "npm:      \$(npm -v 2>/dev/null || echo 'missing')"
 echo "Git:      \$(git --version 2>/dev/null | head -1 || echo 'missing')"
+echo "Termux:   \$( [ -d /data/data/com.termux/files/usr ] && echo yes || echo 'no (proot/other)' )"
 echo ""
 
+# Resolve modules against DIR regardless of CWD (Termux:Widget has no usable PWD).
+# NODE_PATH keeps the old lookup style working for native addons too.
+export NODE_PATH="\$DIR/node_modules\${NODE_PATH:+:\$NODE_PATH}"
+
 echo "Dependencies:"
-cd "\$DIR" 2>/dev/null || exit 1
+# A package counts as usable if EITHER resolution path works:
+#   • CJS: require.resolve(pkg)            — express, cors, ws, simple-git, ...
+#   • ESM: import(pkg)                     — editkit is "type":"module",
+#                                            so require.resolve() throws
+#                                            ERR_PACKAGE_PATH_NOT_EXPORTED on it.
+# The old check was CJS-only, which is why editkit was falsely reported ✗ while
+# the server (which uses `await import('editkit')`) loaded it fine.
+probe_dep() {
+  node -e '
+    const path = require("path");
+    const { createRequire } = require("module");
+    const { pathToFileURL } = require("url");
+    const pkg = process.argv[1];
+    const dir = process.argv[2];
+
+    // Anchor resolution at the install dir, not at this -e script (which lives
+    // in a temp dir and would never see the project node_modules).
+    const anchor = createRequire(path.join(dir, "server.js"));
+
+    // 1) CommonJS: express, cors, ws, simple-git, @octokit/rest, node-pty
+    try { anchor.resolve(pkg); process.exit(0); } catch (_) {}
+
+    // 2) ESM-only packages (editkit is "type":"module" and has an exports map
+    //    that omits a CJS entry, so require.resolve throws even when present).
+    const pj = path.join(dir, "node_modules", pkg, "package.json");
+    let entry = null;
+    try {
+      const p = JSON.parse(require("fs").readFileSync(pj, "utf8"));
+      const ex = p.exports;
+      if (typeof ex === "string") entry = ex;
+      else if (ex && typeof ex === "object") {
+        const root = ex["."] ?? ex;
+        entry = typeof root === "string" ? root
+              : (root && (root.import ?? root.default ?? root.require)) || null;
+      }
+      entry = entry || p.main || "index.js";
+      if (!entry.endsWith(".js") && !entry.endsWith(".mjs")) entry = null;
+    } catch (_) {}
+
+    if (!entry) process.exit(1);
+    const file = path.resolve(dir, "node_modules", pkg, entry);
+    import(pathToFileURL(file).href)
+      .then(() => process.exit(0))
+      .catch(() => process.exit(1));
+  ' "\$pkg" "\$DIR" >/dev/null 2>&1
+}
 for pkg in express cors ws simple-git @octokit/rest node-pty editkit; do
-  if node -e "require.resolve('\$pkg')" 2>/dev/null; then
+  if probe_dep "\$pkg"; then
     printf "  \${GREEN}✓\${NC} %s\n" "\$pkg"
   else
     printf "  \${RED}✗\${NC} %s\n" "\$pkg"
@@ -290,18 +371,32 @@ else
 fi
 echo ""
 
-if curl -sf -o /dev/null http://127.0.0.1:3001/api/health 2>/dev/null; then
+if curl -sf -o /dev/null --max-time 5 http://127.0.0.1:3001/api/health 2>/dev/null; then
   echo -e "\${GREEN}Server: ✅ running\${NC}"
   echo -n "  "
-  curl -s http://127.0.0.1:3001/api/version 2>/dev/null | head -c 300
+  curl -s --max-time 5 http://127.0.0.1:3001/api/version 2>/dev/null | head -c 300
   echo
-  echo -n "  Features: "
-  curl -s http://127.0.0.1:3001/api/diagnostics 2>/dev/null | grep -o '"features":{[^}]*}' | head -1
-  echo
+  # Authoritative answer: ask the running server what it actually loaded.
+  # The server reports feature flags from its own real require() calls, so
+  # this section can never contradict the app ("doctor says ✗ but it works").
+  echo "  Server-reported capabilities:"
+  CAPS=\$(curl -s --max-time 5 http://127.0.0.1:3001/api/diagnostics 2>/dev/null | grep -o '"features":{[^}]*}' | head -1)
+  if [ -n "\$CAPS" ]; then
+    echo "    \$CAPS"
+  else
+    echo "    (endpoint not available on this version)"
+  fi
 else
   echo -e "\${RED}Server: 🛑 not running\${NC}"
   echo "  Start with: ds-launch"
 fi
+
+echo ""
+echo "Notes:"
+echo "  • node-pty is optional — ✗ means the pipe fallback is used (still works)."
+echo "  • If a dep shows ✗ above but the app works, trust the server section."
+echo "  • Launching from Termux:Widget is supported (no CWD needed). From a bare"
+echo "    shell with a custom install: ds-doctor --dir /path/to/deepseek-editor"
 echo ""
 EOF
 

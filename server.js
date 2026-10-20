@@ -35,6 +35,7 @@ const path = require('path');
 const http = require('http');
 const WebSocket = require('ws');
 const cors = require('cors');
+const { isAllowedHost, isAllowedOrigin } = require('./lib/origin-guard');
 
 /* ─── Optional libraries ─── */
 let simpleGitFactory = null;
@@ -350,16 +351,27 @@ function resolveInWorkspace(rel, base = WORKSPACE) {
 
 /* ─── Express baseline ─── */
 app.disable('x-powered-by');
+const BIND_ALL = HOST === '0.0.0.0' || HOST === '::';
 app.use(cors({
     origin: (origin, cb) => {
-        // No Origin header = same-origin or curl → allow
-        if (!origin) return cb(null, true);
-        // Loopback origins only
-        if (/^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$/.test(origin)) return cb(null, true);
-        return cb(null, false);
+        // Origin sharing is only ever granted to loopback (plus DS_ALLOWED_HOSTS).
+        if (!origin) return cb(null, true); // non-browser client (curl, tests)
+        return cb(null, isAllowedOrigin(origin, null));
     },
     credentials: false,
 }));
+/* Host-header guard (DNS-rebinding protection).
+   A malicious page can point evil.example at 127.0.0.1; the browser then
+   sends "Host: evil.example" and treats our responses as same-origin.
+   Reject any Host that is not loopback / explicitly allow-listed. */
+app.use((req, res, next) => {
+    if (!isAllowedHost(req.headers.host, { bindAll: BIND_ALL })) {
+        return res.status(421).json({ error: 'Misdirected request: host not allowed' });
+    }
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Referrer-Policy', 'no-referrer');
+    next();
+});
 app.use(express.json({ limit: '25mb' }));
 app.use((req, res, next) => {
     if (req.body && typeof req.body === 'object') {
@@ -664,32 +676,105 @@ app.post('/api/processes/kill', (req, res) => {
 /* ═══════════════════════════════════════════════════════════════════
    Filesystem
    ═══════════════════════════════════════════════════════════════════ */
+/* Small async fs cache used to keep the file tree off the event loop.
+   realpath()/realpathSync() on Android is expensive; results are memoised
+   for a short TTL so repeated tree expansions are near-instant. */
+const fslCache = new Map();
+const FSL_CACHE_TTL = 2000;
+const FSL_CACHE_MAX = 512;
+function fslRemember(key, value) {
+    if (fslCache.size >= FSL_CACHE_MAX) fslCache.clear();
+    fslCache.set(key, { value, exp: Date.now() + FSL_CACHE_TTL });
+}
+function fslRecall(key) {
+    const hit = fslCache.get(key);
+    if (!hit) return undefined;
+    if (hit.exp < Date.now()) { fslCache.delete(key); return undefined; }
+    return hit.value;
+}
+
+/* Cache of realpath(WORKSPACE) — it can only change if the workspace moves. */
+let workspaceRealCache = null;
+function workspaceReal() {
+    if (!workspaceRealCache) workspaceRealCache = safeRealPath(WORKSPACE);
+    return workspaceRealCache;
+}
+function clearFsListCache() { fslCache.clear(); workspaceRealCache = null; }
+
 app.get('/api/fs/list', async (req, res) => {
     const target = resolveInWorkspace(req.query.path);
     if (!target) return res.status(403).json({ error: 'Forbidden' });
     try {
+        const cached = fslRecall(target);
+        if (cached) {
+            res.setHeader('X-DeepSeek-Cache', 'hit');
+            return res.json(cached);
+        }
+
         const raw = await fsp.readdir(target, { withFileTypes: true });
-        const items = [];
+        const wsReal = workspaceReal();
+        const entries = [];
+        const linkChecks = [];
+
         for (const d of raw) {
             if (d.name === '.gitkeep') continue;
-            const isLinked = !!links[d.name];
-            if (d.name === '.git' && !isLinked) continue;
-            const full = path.join(target, d.name);
-            let isExternal = false;
-            try {
-                const real = fs.realpathSync(full);
-                if (!withinBase(WORKSPACE, real) && isAllowedExternal(real)) isExternal = true;
-            } catch (_) {}
-            items.push({
+            if (d.name === '.git' && !links[d.name]) continue;
+
+            const isLink = d.isSymbolicLink();
+            let isDir = d.isDirectory();
+            if (isLink) {
+                // realpath() only matters for symlinks (linked external folders).
+                // It is deferred and de-duplicated below instead of being run
+                // once per entry, which stalled the event loop on the phone.
+                linkChecks.push(d.name);
+            }
+            entries.push({
                 name: d.name,
-                isDir: d.isDirectory() || (d.isSymbolicLink() && fs.existsSync(full) && fs.statSync(full).isDirectory()),
-                isLink: d.isSymbolicLink(),
-                external: isExternal,
-                path: path.relative(WORKSPACE, full).replace(/\\/g, '/'),
+                isDir,
+                isLink,
+                external: false,
+                path: path.relative(WORKSPACE, path.join(target, d.name)).replace(/\\/g, '/'),
             });
         }
-        items.sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
-        res.json(items);
+
+        // Resolve symlinks in parallel, with a per-target short TTL cache.
+        if (linkChecks.length) {
+            const results = await Promise.all(linkChecks.map(async (name) => {
+                const full = path.join(target, name);
+                const key = 'rp:' + full;
+                let real = fslRecall(key);
+                if (real === undefined) {
+                    try { real = await fsp.realpath(full); } catch (_) { real = null; }
+                    fslRemember(key, real);
+                }
+                return { name, real };
+            }));
+            const byName = new Map(results.map((r) => [r.name, r]));
+            for (const item of entries) {
+                if (!item.isLink) continue;
+                const r = byName.get(item.name);
+                if (!r || !r.real) continue;
+                if (!withinBase(wsReal, r.real)) {
+                    item.external = isAllowedExternal(r.real);
+                    if (!item.external) { item.isDir = false; continue; }
+                }
+                // stat() only when the Dirent could not tell us the type.
+                if (!item.isDir) {
+                    const stKey = 'st:' + r.real;
+                    let st = fslRecall(stKey);
+                    if (st === undefined) {
+                        try { st = await fsp.stat(r.real); } catch (_) { st = null; }
+                        fslRemember(stKey, st);
+                    }
+                    item.isDir = !!(st && st.isDirectory());
+                }
+            }
+        }
+
+        entries.sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
+        fslRemember(target, entries);
+        res.setHeader('X-DeepSeek-Cache', 'miss');
+        res.json(entries);
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -711,6 +796,7 @@ app.post('/api/fs/write', async (req, res) => {
         await fsp.mkdir(path.dirname(target), { recursive: true });
         const content = req.body.content == null ? '' : String(req.body.content);
         await fsp.writeFile(target, content, 'utf8');
+        clearFsListCache();
         res.json({ ok: true, bytes: Buffer.byteLength(content) });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -728,8 +814,11 @@ app.delete('/api/fs/delete', async (req, res) => {
             });
         }
     } catch (_) {}
-    try { await fsp.rm(target, { recursive: true, force: true }); res.json({ ok: true }); }
-    catch (err) { res.status(500).json({ error: err.message }); }
+    try {
+        await fsp.rm(target, { recursive: true, force: true });
+        clearFsListCache();
+        res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/fs/rename', async (req, res) => {
@@ -741,6 +830,7 @@ app.post('/api/fs/rename', async (req, res) => {
     try {
         await fsp.mkdir(path.dirname(dst), { recursive: true });
         await fsp.rename(src, dst);
+        clearFsListCache();
         res.json({ ok: true });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -802,6 +892,7 @@ app.post('/api/fs/link', async (req, res) => {
         await fsp.symlink(realTarget, linkPath, 'dir');
         links[name] = { target: realTarget, createdAt: new Date().toISOString() };
         saveLinks();
+        clearFsListCache();
         console.log('[links] created ' + name + ' → ' + realTarget);
         res.json({ ok: true, link: { name, target: realTarget } });
     } catch (err) {
@@ -822,6 +913,7 @@ app.delete('/api/fs/link', async (req, res) => {
             else return res.status(400).json({ error: 'Refusing to delete: entry is not a symlink.' });
         }
         if (links[name]) { delete links[name]; saveLinks(); }
+        clearFsListCache();
         console.log('[links] removed ' + name);
         res.json({ ok: true, removed });
     } catch (err) {
@@ -3320,7 +3412,13 @@ function resolveShell() {
 
 wss.on('connection', (ws, req) => {
     const ip = (req.socket.remoteAddress || '').replace('::ffff:', '');
-    if (!['127.0.0.1', '::1', 'localhost'].includes(ip)) { try { ws.close(1008, 'Forbidden'); } catch (_) {} return; }
+    const loopback = ['127.0.0.1', '::1', 'localhost'].includes(ip);
+    // A websocket is a raw shell: require loopback unless the server was
+    // deliberately bound to the LAN, and always validate Host + Origin so a
+    // DNS-rebound page (Host: evil.example) cannot open a shell.
+    if (!loopback && !BIND_ALL) { try { ws.close(1008, 'Forbidden'); } catch (_) {} return; }
+    if (!isAllowedHost(req.headers.host, { bindAll: BIND_ALL })) { try { ws.close(1008, 'Bad host'); } catch (_) {} return; }
+    if (!isAllowedOrigin(req.headers.origin, req.headers.host)) { try { ws.close(1008, 'Bad origin'); } catch (_) {} return; }
     const shellBin = resolveShell();
     const shellEnv = { ...process.env, TERM: 'xterm-256color', DS_WORKSPACE: WORKSPACE };
     if (ptyLib) {
