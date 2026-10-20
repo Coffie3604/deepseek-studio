@@ -1,261 +1,65 @@
-/* ═══════════════════════════════════════════════════════════════════
-   core/api.js — every fetch to the backend lives here
+export const API = window.location.protocol === 'file:'
+  ? 'http://127.0.0.1:3001'
+  : window.location.origin;
 
-   Features never call fetch() directly. That gives us one place for:
-     - the base URL (window.location.origin)
-     - JSON error normalisation ({ ok:false, error })
-     - retry/backoff on transient failures (the server already has
-       fetchWithRetry; the client had none)
-     - AbortController plumbing for the streaming chat endpoint
-   ═══════════════════════════════════════════════════════════════════ */
-
-export const API = window.location.protocol === 'file:' ? 'http://127.0.0.1:3001' : window.location.origin;
-
-/** Normalise a Response into { ok, ...json } without throwing on HTML. */
 async function toJson(res) {
   const text = await res.text();
-  let data;
+  try { return text ? JSON.parse(text) : {}; }
+  catch { return { ok: false, error: 'bad json (' + res.status + ')' }; }
+}
+
+export async function request(path, opts = {}) {
   try {
-    data = text ? JSON.parse(text) : {};
+    const res = await fetch(API + path, opts);
+    const data = await toJson(res);
+    if (!res.ok && data.ok === undefined) data.ok = false;
+    if (!res.ok && !data.error) data.error = 'HTTP ' + res.status;
+    return data;
   } catch (err) {
-    return { ok: false, error: 'Bad JSON from ' + res.url + ' (' + res.status + ')' };
+    return { ok: false, error: String(err.message || err) };
   }
-  if (!res.ok && data && data.ok === undefined) data.ok = false;
-  return data;
 }
 
-/**
- * fetch + JSON + optional retry.
- * @param {string} path  e.g. '/api/fs/list?path=...'
- * @param {RequestInit & {retries?:number, retryDelay?:number}} [opts]
- */
-export async function request(path, opts) {
-  const o = opts || {};
-  const retries = o.retries === undefined ? 0 : o.retries;
-  const retryDelay = o.retryDelay === undefined ? 400 : o.retryDelay;
-  let lastErr;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    try {
-      const res = await fetch(API + path, o);
-      // Retry only on gateway/network-ish statuses.
-      if (retries > 0 && (res.status === 502 || res.status === 503 || res.status === 504) && attempt < retries) {
-        await sleep(retryDelay * Math.pow(2, attempt));
-        continue;
-      }
-      return await toJson(res);
-    } catch (err) {
-      lastErr = err;
-      if (attempt < retries) {
-        await sleep(retryDelay * Math.pow(2, attempt));
-        continue;
-      }
-    }
-  }
-  return { ok: false, error: String((lastErr && lastErr.message) || lastErr || 'network error') };
-}
+const jsonPost = (path, body) => request(path, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body || {}),
+});
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-const jsonPost = (path, body, extra) =>
-  request(path, Object.assign({
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body || {}),
-  }, extra || {}));
-
-/* ── filesystem ─────────────────────────────────────────────────── */
-export const fsList = (p) => request('/api/fs/list?path=' + encodeURIComponent(p || ''));
-export const fsRead = (p) => request('/api/fs/read?path=' + encodeURIComponent(p));
-export const fsWrite = (p, content) => jsonPost('/api/fs/write', { path: p, content });
+export const fsList   = (p) => request('/api/fs/list?path=' + encodeURIComponent(p || ''));
+export const fsRead   = (p) => request('/api/fs/read?path=' + encodeURIComponent(p));
+export const fsWrite  = (p, content) => jsonPost('/api/fs/write', { path: p, content });
 export const fsDelete = (p) => request('/api/fs/delete?path=' + encodeURIComponent(p), { method: 'DELETE' });
 export const fsRename = (oldPath, newPath) => jsonPost('/api/fs/rename', { oldPath, newPath });
-export const fsMkdir = (p) => jsonPost('/api/fs/mkdir', { path: p });
+export const fsMkdir  = (p) => jsonPost('/api/fs/mkdir', { path: p });
 
-/* ── system ─────────────────────────────────────────────────────── */
-export const health = () => request('/api/health', { retries: 1, retryDelay: 250 });
+export const health  = () => request('/api/health');
 export const version = () => request('/api/version');
-export const diagnostics = () => request('/api/diagnostics');
-export const changelog = () => request('/api/changelog');
 
-/* ── ai ─────────────────────────────────────────────────────────── */
-export const aiProviders = () => request('/api/ai/providers');
-export const aiKeys = (name, value) => jsonPost('/api/ai/keys', { name, value });
+export const secretsList = () => request('/api/secrets');
+export const secretsSave = (name, value) => jsonPost('/api/secrets', { name, value });
 
-/**
- * Non-streaming chat completion (the /api/ai/chat endpoint).
- *
- * Takes an optional AbortSignal so the Stop button can cancel the fetch
- * itself — before this, only the streaming path was cancellable and the
- * non-streaming branch kept a tool loop alive after the user hit Stop.
- * An aborted call resolves to { ok:false, aborted:true } rather than
- * throwing, so callers can treat it like any other soft failure.
- *
- * @param {object} payload { provider, messages, tools, toolChoice, maxTokens, model, temperature }
- * @param {{signal?:AbortSignal}} [opts]
- * @returns {Promise<{ok:boolean, aborted?:boolean, data?:object, error?:string}>}
- */
-export async function aiChat(payload, opts) {
-  const signal = opts && opts.signal;
-  let res;
-  try {
-    res = await fetch(API + '/api/ai/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload || {}),
-      signal: signal || undefined,
-    });
-  } catch (err) {
-    if (err && err.name === 'AbortError') return { ok: false, aborted: true, error: 'aborted' };
-    return { ok: false, error: String((err && err.message) || err) };
-  }
-  if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    const err = { status: res.status, body };
-    return { ok: false, status: res.status, error: body || ('HTTP ' + res.status), data: err };
-  }
-  const data = await toJson(res);
-  if (data && data.ok === false) return { ok: false, error: data.error || 'chat failed', data };
-  // Server returns a raw OpenAI-shaped body; normalise under .data.
-  return { ok: true, data };
-}
+export const aiTools = () => request('/api/ai/tools');
 
-/**
- * POST /api/ai/tool-call.
- *
- * Returns { ok, aborted?, ... }. Accepts a Signal so a Stop press kills a
- * long tool (run_command, git clone) instead of letting the agent loop
- * keep firing tools after the user asked it to quit.
- *
- * @param {string} name
- * @param {object} args
- * @param {{signal?:AbortSignal, cwd?:string}} [opts]
- */
-export async function aiToolCall(name, args, opts) {
-  const o = opts || {};
-  const body = { name, args: args || {} };
-  if (o.cwd) body.cwd = o.cwd;
-  let res;
-  try {
-    res = await fetch(API + '/api/ai/tool-call', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      signal: o.signal || undefined,
-    });
-  } catch (err) {
-    if (err && err.name === 'AbortError') return { ok: false, aborted: true, error: 'aborted' };
-    return { ok: false, error: String((err && err.message) || err) };
-  }
-  const data = await toJson(res);
-  if (!res.ok && (data.ok === undefined || data.ok === true)) {
-    // Server sends { error } (no `ok`) with 4xx/5xx — normalise.
-    return { ok: false, status: res.status, error: data.error || ('HTTP ' + res.status), ...data };
-  }
-  return data;
-}
-
-/**
- * Streaming chat. Returns an object with .abort() so the UI can offer
- * a Stop button — the old sendChat() had no way to cancel a runaway
- * stream, which on mobile drains battery and data.
- *
- * @param {object} payload
- * @param {(chunk:string)=>void} onChunk
- * @param {(err:Error)=>void} [onError]
- * @returns {{abort:()=>void, done:Promise<void>}}
- */
-export function aiStream(payload, onChunk, onError) {
-  const ctrl = new AbortController();
-  const done = (async () => {
-    try {
-      const res = await fetch(API + '/api/ai/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
-        signal: ctrl.signal,
-      });
-      if (!res.ok || !res.body) {
-        throw new Error('stream failed: HTTP ' + res.status);
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      for (;;) {
-        const { value, done: finished } = await reader.read();
-        if (finished) break;
-        buf += decoder.decode(value, { stream: true });
-        // Server sends SSE-ish "data: {...}\n\n" frames.
-        let idx;
-        while ((idx = buf.indexOf('\n\n')) !== -1) {
-          const frame = buf.slice(0, idx);
-          buf = buf.slice(idx + 2);
-          const line = frame.split('\n').find((l) => l.startsWith('data:'));
-          if (!line) continue;
-          const raw = line.slice(5).trim();
-          if (!raw || raw === '[DONE]') continue;
-          try {
-            const parsed = JSON.parse(raw);
-            const text = parsed.delta || parsed.content || parsed.text || '';
-            if (text) onChunk(text);
-          } catch (err) {
-            // Non-JSON frame — pass it through verbatim.
-            onChunk(raw);
-          }
-        }
-      }
-    } catch (err) {
-      if (err && err.name === 'AbortError') return; // user pressed Stop
-      if (onError) onError(err);
-      else console.error('[api] stream error', err);
-    }
-  })();
-  return { abort: () => ctrl.abort(), done };
-}
-
-/**
- * Streaming chat, provider-native passthrough.
- *
- * `aiStream()` above flattens frames to text, which is fine for a plain
- * answer but throws away `tool_calls` — so it could never drive the agent
- * loop. This variant hands the caller the raw upstream delta object
- * (`choices[0].delta`) and keeps the AbortController, so the Stop button
- * works and tool calls survive.
- *
- * @param {object} payload  { provider, messages, tools, toolChoice, maxTokens }
- * @param {(delta:object)=>void} onDelta
- * @param {(err:Error)=>void} [onError]
- * @returns {{abort:()=>void, done:Promise<void>}}
- */
-export function aiStreamRaw(payload, onDelta, onError) {
+export function aiChatStream(payload, onDelta, onError) {
   const ctrl = new AbortController();
   const done = (async () => {
     let res;
     try {
-      res = await fetch(API + '/api/ai/stream', {
+      res = await fetch(API + '/api/ai/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(Object.assign({ stream: true }, payload)),
         signal: ctrl.signal,
       });
     } catch (err) {
-      if (err && err.name === 'AbortError') return;
-      if (onError) onError(err); else console.error('[api] stream error', err);
+      if (err.name === 'AbortError') return;
+      onError && onError(err);
       return;
     }
     if (!res.ok) {
-      // The server returns JSON ({ error, detail }) on provider rejection.
       const body = await res.text().catch(() => '');
-      const err = new Error('HTTP ' + res.status + (body ? ': ' + body.slice(0, 800) : ''));
-      err.status = res.status;
-      err.body = body;
-      if (onError) onError(err); else console.error('[api] stream error', err);
-      return;
-    }
-    if (!res.body) {
-      const err = new Error('stream failed: no body');
-      if (onError) onError(err); else console.error('[api] stream error', err);
+      onError && onError(new Error(body || ('HTTP ' + res.status)));
       return;
     }
     const reader = res.body.getReader();
@@ -271,47 +75,89 @@ export function aiStreamRaw(payload, onDelta, onError) {
           const frame = buf.slice(0, idx);
           buf = buf.slice(idx + 2);
           for (const line of frame.split('\n')) {
-            if (!line.startsWith('data:')) continue; // skips ': ping' keep-alives
+            if (!line.startsWith('data:')) continue;
             const raw = line.slice(5).trim();
             if (!raw || raw === '[DONE]') continue;
             let parsed;
-            try {
-              parsed = JSON.parse(raw);
-            } catch (err) {
-              continue; // partial/garbled frame — drop it
-            }
-            if (parsed && parsed.error) {
-              const err = new Error(String(parsed.error));
-              if (onError) onError(err); else console.error('[api] stream error', err);
-              continue;
-            }
-            const choice = parsed && parsed.choices && parsed.choices[0];
+            try { parsed = JSON.parse(raw); } catch { continue; }
+            if (parsed.error) { onError && onError(new Error(parsed.error)); continue; }
+            const choice = parsed.choices && parsed.choices[0];
             if (choice && choice.delta) onDelta(choice.delta);
           }
         }
       }
     } catch (err) {
-      if (err && err.name === 'AbortError') return; // user pressed Stop
-      if (onError) onError(err); else console.error('[api] stream error', err);
+      if (err.name !== 'AbortError') onError && onError(err);
     }
   })();
   return { abort: () => ctrl.abort(), done };
 }
 
-/* ── git ────────────────────────────────────────────────────────── */
-export const gitStatus = (project) => request('/api/git/status?project=' + encodeURIComponent(project || ''));
-export const gitAction = (action, body) => jsonPost('/api/git/' + action, body);
-export const ghCall = (endpoint, body) => jsonPost(endpoint, body);
+export async function aiToolCall(name, args, opts = {}) {
+  const body = { name, args: args || {} };
+  if (opts.cwd) body.cwd = opts.cwd;
+  try {
+    const res = await fetch(API + '/api/ai/tool-call', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: opts.signal,
+    });
+    const data = await toJson(res);
+    if (!res.ok && data.ok === undefined) data.ok = false;
+    return data;
+  } catch (err) {
+    if (err.name === 'AbortError') return { ok: false, aborted: true };
+    return { ok: false, error: String(err.message || err) };
+  }
+}
 
-/* ── exec ───────────────────────────────────────────────────────── */
+export async function aiPreview(name, args, opts = {}) {
+  const body = { name, args: args || {} };
+  if (opts.cwd) body.cwd = opts.cwd;
+  try {
+    const res = await fetch(API + '/api/ai/preview', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal: opts.signal,
+    });
+    return await toJson(res);
+  } catch (err) {
+    if (err.name === 'AbortError') return { ok: false, aborted: true };
+    return { ok: false, error: String(err.message || err) };
+  }
+}
+
+export async function aiRepoMap(path, limit) {
+  try {
+    const qs = new URLSearchParams();
+    if (path) qs.set('path', path);
+    if (limit) qs.set('limit', String(limit));
+    const res = await fetch(API + '/api/ai/repomap?' + qs.toString());
+    return await toJson(res);
+  } catch (err) { return { ok: false, error: String(err.message || err) }; }
+}
+
+export const gitStatus    = (cwd) => jsonPost('/api/git/status', { cwd });
+export const gitLog       = (cwd, limit) => jsonPost('/api/git/log', { cwd, limit });
+export const gitDiff      = (cwd, file) => jsonPost('/api/git/diff', { cwd, file });
+export const gitInit      = (cwd) => jsonPost('/api/git/init', { cwd });
+export const gitClone     = (url, dir) => jsonPost('/api/git/clone', { url, dir });
+export const gitAdd       = (cwd, paths) => jsonPost('/api/git/add', { cwd, paths });
+export const gitCommit    = (cwd, message) => jsonPost('/api/git/commit', { cwd, message });
+export const gitPush      = (cwd) => jsonPost('/api/git/push', { cwd });
+export const gitPull      = (cwd) => jsonPost('/api/git/pull', { cwd });
+export const gitFetch     = (cwd) => jsonPost('/api/git/fetch', { cwd });
+export const gitBranches  = (cwd) => jsonPost('/api/git/branches', { cwd });
+export const gitCheckout  = (cwd, branch) => jsonPost('/api/git/checkout', { cwd, branch });
+export const gitSetRemote = (cwd, url) => jsonPost('/api/git/set-remote', { cwd, url });
+
+export const ghStatus      = () => request('/api/github/status');
+export const ghRepos       = () => request('/api/github/repos?per_page=50');
+export const ghDeviceStart = (scope) => jsonPost('/api/github/device/start', { scope });
+export const ghDevicePoll  = (deviceCode) => jsonPost('/api/github/device/poll', { deviceCode });
+export const ghSignOut     = () => jsonPost('/api/github/signout', {});
+export const ghCreateRepo  = (body) => jsonPost('/api/github/create-repo', body);
+
 export const exec = (cmd, cwd) => jsonPost('/api/exec', { cmd, cwd });
-export const compile = (body) => jsonPost('/api/compile', body);
-export const processes = () => request('/api/processes');
-
-export default {
-  API, request, fsList, fsRead, fsWrite, fsDelete, fsRename, fsMkdir,
-  health, version, diagnostics, changelog,
-  aiProviders, aiKeys, aiStream, aiStreamRaw,
-  gitStatus, gitAction, ghCall,
-  exec, compile, processes,
-};

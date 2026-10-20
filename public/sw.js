@@ -1,75 +1,46 @@
-/* DeepSeek Studio Service Worker */
-/* Bump this whenever the module graph changes — the activate handler
-   deletes every cache whose name differs, so a stale v5 would keep serving
-   the pre-split index.html against the new js/ modules. */
-const CACHE_NAME = 'deepseek-studio-v8';
+const CACHE_NAME = 'deepseek-studio-v12';
 const PRECACHE_URLS = [
-  '/',
-  '/index.html',
-  '/app.css',
-  '/guide.html',
-  '/manifest.json',
-  '/icon-v2.svg',
-  // The ES module graph. index.html loads only boot.js; the rest are
-  // static imports, so they must be cached or offline boot dies on the
-  // first import. Keep this list in sync with public/js/**.
+  '/', '/index.html', '/app.css', '/manifest.json', '/icon-v2.svg',
   '/js/boot.js',
-  '/js/legacy.js',
-  '/js/core/state.js',
-  '/js/core/bus.js',
-  '/js/core/api.js',
-  '/js/core/ui.js',
-  '/js/core/lifecycle.js',
-  '/js/features/terminal.js',
-  '/js/features/chat.js'
+  '/js/core/state.js', '/js/core/bus.js', '/js/core/api.js',
+  '/js/core/ui.js', '/js/core/lifecycle.js',
+  '/js/features/chat.js', '/js/features/editor.js',
+  '/js/features/files.js', '/js/features/git.js',
+  '/js/features/settings.js', '/js/features/terminal.js',
 ];
 
-self.addEventListener('install', function(event) {
+self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
-    caches.open(CACHE_NAME).then(function(cache) {
-      return cache.addAll(PRECACHE_URLS).catch(function() {});
-    })
+    caches.open(CACHE_NAME).then((cache) => cache.addAll(PRECACHE_URLS).catch(() => {}))
   );
 });
 
-self.addEventListener('activate', function(event) {
+self.addEventListener('activate', (event) => {
   event.waitUntil(
-    caches.keys().then(function(keys) {
-      return Promise.all(
-        keys.filter(function(k) { return k !== CACHE_NAME; })
-            .map(function(k) { return caches.delete(k); })
-      );
-    })
+    caches.keys().then((keys) =>
+      Promise.all(keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k)))
+    )
   );
   self.clients.claim();
 });
 
-self.addEventListener('fetch', function(event) {
-  var url = new URL(event.request.url);
-  // Never intercept API calls (localhost backend)
-  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/pty')) {
-    return;
-  }
-  // Network-first for HTML, cache-first for assets
+self.addEventListener('fetch', (event) => {
+  const url = new URL(event.request.url);
+  if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/pty')) return;
   if (event.request.mode === 'navigate') {
-    event.respondWith(
-      fetch(event.request).catch(function() {
-        return caches.match('/');
-      })
-    );
+    event.respondWith(fetch(event.request).catch(() => caches.match('/')));
     return;
   }
-  // Stale-while-revalidate for everything else
   event.respondWith(
-    caches.match(event.request).then(function(cached) {
-      var network = fetch(event.request).then(function(response) {
+    caches.match(event.request).then((cached) => {
+      const network = fetch(event.request).then((response) => {
         if (response.ok && event.request.method === 'GET') {
-          var clone = response.clone();
-          caches.open(CACHE_NAME).then(function(c) { c.put(event.request, clone); });
+          const clone = response.clone();
+          caches.open(CACHE_NAME).then((c) => c.put(event.request, clone));
         }
         return response;
-      }).catch(function() { return cached; });
+      }).catch(() => cached);
       return cached || network;
     })
   );

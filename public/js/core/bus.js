@@ -16,11 +16,18 @@
      chat:send        { text }            inject a prompt into chat
      chat:stop        {}
      panel:switch     { name }            chat|editor|terminal|files
+     panel:show       { name }            request the UI to reveal a panel
      project:change   { name }            currentProject changed
      backend:status   { online }
    ═══════════════════════════════════════════════════════════════════ */
 
 const listeners = new Map();
+
+/* Sticky events: emitted before any listener existed (e.g. "editor:open"
+   fired while the editor was torn down) are replayed to the first
+   subscriber, so a request is never silently dropped. */
+const STICKY = new Set(['editor:open']);
+const stickyPayloads = new Map();
 
 /**
  * Subscribe to an event.
@@ -31,6 +38,11 @@ const listeners = new Map();
 export function on(event, fn) {
   if (!listeners.has(event)) listeners.set(event, new Set());
   listeners.get(event).add(fn);
+  if (STICKY.has(event) && stickyPayloads.has(event)) {
+    const payload = stickyPayloads.get(event);
+    stickyPayloads.delete(event);
+    try { fn(payload); } catch (err) { console.error('[bus] sticky replay for "' + event + '" threw:', err); }
+  }
   return () => off(event, fn);
 }
 
@@ -52,7 +64,10 @@ export function off(event, fn) {
  */
 export function emit(event, payload) {
   const set = listeners.get(event);
-  if (!set || set.size === 0) return;
+  if (!set || set.size === 0) {
+    if (STICKY.has(event)) stickyPayloads.set(event, payload);
+    return;
+  }
   // Copy so a handler that unsubscribes mid-dispatch doesn't skip others.
   for (const fn of Array.from(set)) {
     try {
@@ -66,6 +81,7 @@ export function emit(event, payload) {
 /** Remove every listener (used by tests / full teardown). */
 export function clear() {
   listeners.clear();
+  stickyPayloads.clear();
 }
 
 /** Debug helper: list registered event names and counts. */

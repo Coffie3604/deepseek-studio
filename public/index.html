@@ -13,991 +13,216 @@
 <link rel="apple-touch-icon" href="/icon-v2.svg" />
 <title>DeepSeek Studio</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 <link rel="stylesheet" href="/app.css" />
-
-<!-- ═══════════ v2.3 additions (copy everywhere + log + chat search + git records) ═══════════ -->
 </head>
 <body>
 
-<!-- ═══════════ HEADER ═══════════ -->
 <div class="header">
   <div class="header-left">
-    <button class="btn icon-only menu-btn" id="menuLeftBtn" style="display:none" title="Files">
-      <i class="fas fa-bars"></i>
-    </button>
-    <div class="logo">
-      <i class="fas fa-brain"></i><b>DeepSeek</b><span class="hide-mobile">&nbsp;Studio</span>
-    </div>
+    <button class="btn icon-only menu-btn" id="menuLeftBtn" title="Files" aria-label="Files"><span class="icon">☰</span></button>
+    <div class="logo"><span class="logo-mark">◆</span><b>DeepSeek</b><span class="hide-mobile">&nbsp;Studio</span></div>
   </div>
   <div class="header-right">
-    <div class="status" title="Backend status">
-      <span class="dot checking" id="statusDot"></span>
-      <span id="statusText" class="label">...</span>
-    </div>
-    <span id="langBadge" class="lang-badge" style="display:none"></span>
-    <span id="envBadge" class="env-badge" style="display:none" title="This is the staging instance (port 3002)">STAGING</span>
-    <button class="btn primary icon-only" id="saveBtn" title="Save (Ctrl+S)">
-      <i class="fas fa-save"></i>
-    </button>
-    <button class="btn icon-only" id="compileBtn" title="Compile current file" style="color:var(--green)">
-      <i class="fas fa-bolt"></i>
-    </button>
-    <button class="btn icon-only menu-btn" id="menuRightBtn" style="display:none" title="Panels">
-      <i class="fas fa-sliders-h"></i>
-    </button>
+    <div class="status" title="Backend status"><span class="dot checking" id="statusDot"></span><span class="status-label" id="statusText">…</span></div>
+    <button class="btn primary icon-only" id="saveBtn" title="Save (Ctrl+S)" aria-label="Save" disabled><span class="icon">💾</span></button>
+    <button class="btn icon-only menu-btn" id="menuRightBtn" title="Panels" aria-label="Panels"><span class="icon">⚙</span></button>
   </div>
-</div>
-
-<div class="offline-banner" id="offlineBanner">
-  <i class="fas fa-wifi"></i> You're offline — backend not reachable
 </div>
 
 <div class="backdrop" id="backdrop"></div>
 
-<!-- ═══════════ MAIN ═══════════ -->
 <div class="main">
-
-  <div class="file-tree" id="fileTree">
+  <aside class="file-tree" id="fileTree">
     <div class="ft-head">
-      <span>Projects</span>
-      <div style="display:flex;gap:4px">
-        <button class="btn icon-only" id="linkFolderBtn" title="Link external folder" style="min-width:32px;min-height:32px;padding:6px">
-          <i class="fas fa-link"></i>
-        </button>
-        <button class="btn icon-only" id="refreshTreeBtn" title="Refresh" style="min-width:32px;min-height:32px;padding:6px">
-          <i class="fas fa-sync"></i>
-        </button>
-        <button class="btn icon-only" id="newFileBtn" title="New file" style="min-width:32px;min-height:32px;padding:6px">
-          <i class="fas fa-plus"></i>
-        </button>
+      <span class="ft-title">Files</span>
+      <div class="ft-head-actions">
+        <button class="btn icon-only" id="newFileBtn" title="New file" aria-label="New file"><span class="icon">＋</span></button>
+        <button class="btn icon-only" id="refreshTreeBtn" title="Refresh" aria-label="Refresh"><span class="icon">↻</span></button>
       </div>
     </div>
-    <div class="ft-body" id="ftBody"></div>
-  </div>
+    <div class="ft-body" id="ftBody"><div class="ft-empty">Loading…</div></div>
+  </aside>
 
   <div class="content-area">
-
     <div class="primary-tabs">
-      <div class="ptab active" data-panel="chat"><i class="fas fa-comments"></i> Chat</div>
-      <div class="ptab" data-panel="editor"><i class="fas fa-code"></i> Editor <span class="tab-badge" id="editorBadge"></span></div>
-      <div class="ptab" data-panel="terminal"><i class="fas fa-terminal"></i> Terminal <span class="tab-badge" id="terminalBadge"></span></div>
+      <div class="ptab active" data-panel="chat">Chat</div>
+      <div class="ptab" data-panel="editor">Editor</div>
+      <div class="ptab" data-panel="terminal">Terminal</div>
     </div>
 
-    <!-- CHAT PANEL -->
     <div class="tab-panel active" id="panel-chat">
       <div class="chat-header">
-        <label><i class="fas fa-folder-open"></i> Working in:</label>
-        <select id="workspaceSelector">
-          <option value="">-- select a project --</option>
-        </select>
-        <span class="context-badge" id="contextBadge" style="display:none"><b>~</b> <span id="contextInfo"></span></span>
-        <span class="warn-badge" id="chatWarnBadge"></span>
-        <div class="chat-header-actions">
-          <button class="btn icon-only" id="chatSearchBtn" title="Search chat (Ctrl+Shift+F)">
-            <i class="fas fa-search"></i>
-          </button>
-          <button class="btn icon-only" id="chatCopyAllBtn" title="Copy entire chat as markdown">
-            <i class="fas fa-copy"></i>
-          </button>
-          <button class="btn icon-only" id="chatExportBtn" title="Export chat as JSON">
-            <i class="fas fa-download"></i>
-          </button>
-        </div>
-      </div>
-      <div class="chat-search-bar" id="chatSearchBar">
-        <input type="text" id="chatSearchInput" placeholder="Search messages…" autocomplete="off" spellcheck="false" />
-        <span class="result-count" id="chatSearchCount">0/0</span>
-        <button class="tsb-btn" id="chatSearchPrev" title="Previous (Shift+Enter)"><i class="fas fa-chevron-up"></i></button>
-        <button class="tsb-btn" id="chatSearchNext" title="Next (Enter)"><i class="fas fa-chevron-down"></i></button>
-        <button class="tsb-btn" id="chatSearchClose" title="Close (Esc)"><i class="fas fa-times"></i></button>
+        <select id="projectSelector"><option value="">— select project —</option></select>
+        <button class="btn icon-only" id="clearChatBtn" title="Clear chat" aria-label="Clear chat"><span class="icon">🗑</span></button>
       </div>
       <div class="chat-messages" id="chatMessages">
         <div class="chat-msg assistant">
           <p>👋 Welcome to <b>DeepSeek Studio</b>.</p>
-          <p>Pick a project above, then tell me what to build. I can create files, run commands, and deploy.</p>
-          <p style="margin-top:12px">
-            <button class="welcome-cta" onclick="openDrawer('right'); document.querySelector('[data-tab=settings]').click();">
-              <span class="welcome-cta-icon">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-                </svg>
-              </span>
-              <span>Set up your DeepSeek API key</span>
-              <svg class="welcome-cta-arrow" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-            </button>
-          </p>
-          <p style="font-size:12px;color:var(--fg-3);margin-top:8px">Free to install. You only pay DeepSeek for what you use.</p>
-          <p style="font-size:12px;color:var(--fg-3);margin-top:6px">💡 Tip: click the <b>🔗</b> button in the file tree header to link any folder from your phone storage.</p>
+          <p>Pick a project above, then tell me what to build. I can read files, write code, run commands, and push to GitHub.</p>
+          <p class="chat-hint">Need an API key? Open <b>Settings</b> in the sidebar →</p>
         </div>
       </div>
       <div class="ai-input-bar">
-        <div class="snippet-dropdown" id="snippetDropdown"></div>
-        <label class="ai-toggle" id="autoRunLabel" title="Auto-run tool calls without confirmation">
-          <input type="checkbox" id="autoRunToggle" style="width:auto" />
+        <label class="ai-toggle" title="Auto-run tool calls">
+          <input type="checkbox" id="autoRunToggle" />
           <span>Auto</span>
         </label>
-        <span class="ctx-indicator" id="ctxIndicator" title="Current file context">📄 No file</span>
-        <textarea id="aiInput" placeholder="Tell the AI what to do… (type / for snippets)" rows="1"></textarea>
-        <button type="submit" id="aiSendBtn" title="Send"><i class="fas fa-paper-plane"></i></button>
-        <button type="button" id="aiStopBtn" title="Stop generating" style="display:none"><i class="fas fa-stop"></i></button>
+        <textarea id="aiInput" placeholder="Tell the AI what to do…" rows="1" spellcheck="false"></textarea>
+        <button id="aiSendBtn" type="button" title="Send">Send</button>
+        <button id="aiStopBtn" type="button" title="Stop" hidden>Stop</button>
       </div>
     </div>
 
-    <!-- EDITOR PANEL -->
     <div class="tab-panel" id="panel-editor">
-      <div class="editor-tabs-bar" id="editorTabsBar" style="display:none"></div>
-
-      <!-- EDITOR TOOLBAR / EDIT MENU -->
-      <div class="editor-toolbar" id="editorToolbar">
-        <div class="editor-menu-wrap">
-          <button class="etb-btn editor-menu-btn" id="editorEditMenuBtn" title="Edit menu">
-            <i class="fas fa-pen-to-square"></i> <span>Edit</span> <i class="fas fa-caret-down"></i>
-          </button>
-          <div class="editor-menu" id="editorEditMenu">
-            <button class="em-item" id="emUndo"><i class="fas fa-rotate-left"></i> Undo <span class="em-key">Ctrl+Z</span></button>
-            <button class="em-item" id="emRedo"><i class="fas fa-rotate-right"></i> Redo <span class="em-key">Ctrl+Y</span></button>
-            <div class="em-sep"></div>
-            <button class="em-item" id="emCopy"><i class="fas fa-copy"></i> Copy <span class="em-key">Ctrl+C</span></button>
-            <button class="em-item" id="emCut"><i class="fas fa-scissors"></i> Cut <span class="em-key">Ctrl+X</span></button>
-            <button class="em-item" id="emPaste"><i class="fas fa-paste"></i> Paste <span class="em-key">Ctrl+V</span></button>
-            <div class="em-sep"></div>
-            <button class="em-item" id="emSelectAll"><i class="fas fa-object-group"></i> Select All <span class="em-key">Ctrl+A</span></button>
-            <button class="em-item" id="emSelectLine"><i class="fas fa-align-left"></i> Select Current Line</button>
-            <div class="em-sep"></div>
-            <button class="em-item" id="emCutLine"><i class="fas fa-eraser"></i> Delete Current Line <span class="em-key">Ctrl+Shift+K</span></button>
-            <button class="em-item" id="emDuplicate"><i class="fas fa-clone"></i> Duplicate Line <span class="em-key">Shift+Alt+↓</span></button>
-            <button class="em-item" id="emTrim"><i class="fas fa-broom"></i> Trim Trailing Spaces</button>
-            <button class="em-item" id="emSortLines"><i class="fas fa-sort-alpha-down"></i> Sort Selected Lines</button>
-            <div class="em-sep"></div>
-            <button class="em-item" id="emFind"><i class="fas fa-search"></i> Find <span class="em-key">Ctrl+F</span></button>
-            <button class="em-item" id="emReplace"><i class="fas fa-exchange-alt"></i> Find &amp; Replace</button>
-          </div>
-        </div>
-        <button class="etb-btn" id="edCopyBtn" title="Copy selection (or whole file)"><i class="fas fa-copy"></i></button>
-        <button class="etb-btn" id="edPasteBtn" title="Paste from clipboard"><i class="fas fa-paste"></i></button>
-        <button class="etb-btn" id="edSelectAllBtn" title="Select all (highlights the whole file)"><i class="fas fa-object-group"></i></button>
-        <div class="ed-spacer"></div>
-        <span class="ed-sel-info" id="edSelInfo">0 sel</span>
-      </div>
-
+      <div class="editor-tabs-bar" id="editorTabsBar"></div>
       <div id="monaco">
         <div class="editor-empty" id="editorEmpty">
-          <i class="fas fa-file-code"></i>
-          <div class="title">No file open</div>
-          <div class="hint">Tap a file in the tree to open it here</div>
-          <div class="hint" style="margin-top:8px">or type <code> / </code> in chat for AI snippets</div>
-          <div class="hint" style="margin-top:16px;font-size:11px;line-height:1.8">
-            <b>Shortcuts:</b><br>
-            <code>Ctrl+S</code> Save · <code>Ctrl+Shift+S</code> Save As<br>
-            <code>Ctrl+W</code> Close tab · <code>Ctrl+F</code> Find in terminal<br>
-            <code>Ctrl+K</code> Clear terminal · <code>F5</code> Refresh status<br>
-            <code>Ctrl+Shift+F</code> Search chat
-          </div>
+          <div class="editor-empty-title">No file open</div>
+          <div class="editor-empty-hint">Tap a file in the tree to open it here</div>
         </div>
       </div>
     </div>
 
-    <!-- TERMINAL PANEL -->
     <div class="tab-panel" id="panel-terminal">
-      <div id="terminal-container">
-        <div class="terminal-toolbar">
-          <button class="tbtn" id="termClearBtn" title="Clear screen (Ctrl+K)"><i class="fas fa-eraser"></i> <span class="tbtn-label">Clear</span></button>
-          <button class="tbtn" id="termRunBtn" title="Run a one-shot command (no PTY)"><i class="fas fa-bolt"></i> Run</button>
-          <button class="tbtn" id="termCopyBtn" title="Copy all"><i class="fas fa-copy"></i></button>
-          <button class="tbtn" id="termPasteBtn" title="Paste"><i class="fas fa-paste"></i></button>
-          <div class="sep"></div>
-          <button class="tbtn" id="termSearchBtn" title="Find (Ctrl+F)"><i class="fas fa-search"></i></button>
-          <div class="term-search-bar" id="termSearchBar">
-            <input id="termSearchInput" type="text" placeholder="Find…" autocomplete="off" spellcheck="false" />
-            <button class="tsb-btn" id="termSearchPrev" title="Previous (Shift+Enter)"><i class="fas fa-chevron-up"></i></button>
-            <button class="tsb-btn" id="termSearchNext" title="Next (Enter)"><i class="fas fa-chevron-down"></i></button>
-            <span class="tsb-count" id="termSearchCount" title="Matches">0/0</span>
-            <label class="tsb-opt" title="Case sensitive">
-              <input type="checkbox" id="termSearchCase" /> Aa
-            </label>
-            <label class="tsb-opt" title="Regex">
-              <input type="checkbox" id="termSearchRegex" /> .*
-            </label>
-            <button class="tsb-btn" id="termSearchClose" title="Close (Esc)"><i class="fas fa-times"></i></button>
-          </div>
-          <div class="sep"></div>
-          <button class="tbtn" id="termCtrlCBtn" title="Send Ctrl+C"><i class="fas fa-stop-circle"></i></button>
-          <button class="tbtn" id="termCtrlDBtn" title="Send Ctrl+D"><i class="fas fa-sign-out-alt"></i></button>
-          <div class="sep"></div>
-          <button class="tbtn" id="termTopBtn" title="Top"><i class="fas fa-arrow-up"></i></button>
-          <button class="tbtn" id="termBottomBtn" title="Bottom"><i class="fas fa-arrow-down"></i></button>
-          <div class="sep"></div>
-          <button class="tbtn danger" id="termKillBtn" title="Restart terminal session"><i class="fas fa-skull"></i></button>
-          <span class="term-info" id="termInfo">
-            <span class="pulse" id="termPulse"></span>
-            <span id="termInfoText">Ready</span>
-          </span>
-        </div>
-        <div id="terminal"></div>
-        <!-- Mobile key row: the Android soft keyboard has no Esc/Tab/Ctrl/arrows.
-             Populated by features/terminal.js, hidden on pointer:fine devices. -->
-        <div class="term-key-row" id="termKeyRow"></div>
+      <div class="terminal-toolbar">
+        <button class="tbtn" id="termClearBtn" title="Clear screen">Clear</button>
+        <button class="tbtn" id="termKillBtn" title="Restart session">Restart</button>
+        <span class="term-status" id="termStatus"><span class="pulse" id="termPulse"></span><span id="termStatusText">connecting…</span></span>
       </div>
+      <div id="terminal"></div>
+      <div class="term-key-row" id="termKeyRow"></div>
     </div>
-
   </div>
 
-  <!-- SIDEBAR -->
-  <div class="sidebar" id="sidebar">
+  <aside class="sidebar" id="sidebar">
     <div class="side-tabs">
-      <div class="stab active" data-tab="ai"><i class="fas fa-robot"></i><span>AI</span></div>
-      <div class="stab" data-tab="templates"><i class="fas fa-cubes"></i><span>Tpl</span></div>
-      <div class="stab" data-tab="generate"><i class="fas fa-magic"></i><span>Gen</span></div>
-      <div class="stab" data-tab="term"><i class="fas fa-terminal"></i><span>Term</span></div>
-      <div class="stab" data-tab="github"><i class="fab fa-github"></i><span>Git</span></div>
-      <div class="stab" data-tab="deploy"><i class="fas fa-rocket"></i><span>Build</span></div>
-      <div class="stab" data-tab="backup"><i class="fas fa-hdd"></i><span>Backup</span></div>
-      <div class="stab" data-tab="log"><i class="fas fa-history"></i><span>Log</span></div>
-      <div class="stab" data-tab="settings"><i class="fas fa-cog"></i><span>Setup</span></div>
+      <div class="stab active" data-tab="github">GitHub</div>
+      <div class="stab" data-tab="settings">Settings</div>
     </div>
     <div class="side-content">
 
-      <!-- AI PANEL -->
-      <div class="panel active" id="panel-ai">
-        <div class="auto-toggle">
-          <input type="checkbox" id="autoRunToggle2" />
-          <label for="autoRunToggle2">Auto-run tool calls</label>
-          <span class="hint" id="autoRunHint">(off = confirm)</span>
-        </div>
-        <div class="auto-toggle">
-          <input type="checkbox" id="streamToggle" checked />
-          <label for="streamToggle">Stream responses</label>
-          <span class="hint">(beta)</span>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-file-code"></i> Editor Actions</h3>
-          <button class="btn action-btn" id="actSaveAs"><i class="fas fa-copy"></i> Save As…</button>
-          <button class="btn action-btn" id="actReload"><i class="fas fa-sync"></i> Reload from disk</button>
-          <button class="btn action-btn" id="actClose"><i class="fas fa-times"></i> Close current tab</button>
-          <button class="btn action-btn" id="actFind"><i class="fas fa-search"></i> Find</button>
-          <button class="btn action-btn" id="actReplace"><i class="fas fa-exchange-alt"></i> Find &amp; Replace</button>
-          <button class="btn action-btn" id="actFormat"><i class="fas fa-align-left"></i> Format document</button>
-          <button class="btn action-btn" id="actWordWrap"><i class="fas fa-text-width"></i> Toggle word wrap</button>
-          <button class="btn action-btn" id="actMinimap"><i class="fas fa-map"></i> Toggle minimap</button>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-bolt"></i> Quick Prompts</h3>
-          <button class="btn action-btn" onclick="quickPrompt('Explain the code in the currently open file')">📖 Explain current file</button>
-          <button class="btn action-btn" onclick="quickPrompt('Find and fix bugs in the currently open file')">🐛 Find bugs</button>
-          <button class="btn action-btn" onclick="quickPrompt('Add comments and documentation to the currently open file')">📝 Add docs</button>
-          <button class="btn action-btn" onclick="quickPrompt('Write unit tests for the currently open file')">🧪 Write tests</button>
-          <button class="btn action-btn" onclick="quickPrompt('Optimize and refactor the currently open file for performance')">⚡ Optimize</button>
-          <button class="btn action-btn" onclick="quickPrompt('Review my project structure and suggest improvements')">🔍 Review project</button>
-          <button class="btn action-btn" onclick="quickPrompt('Add error handling and logging to the currently open file')">🛡️ Add error handling</button>
-          <button class="btn action-btn" onclick="quickPrompt('Convert the currently open file to use best practices for its language')">✨ Modernize code</button>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-history"></i> Chat History</h3>
-          <button class="btn action-btn" id="clearChatBtn"><i class="fas fa-trash"></i> Clear chat history</button>
-          <button class="btn action-btn" id="exportChatBtn"><i class="fas fa-download"></i> Export chat as JSON</button>
-        </div>
-
-        <button class="btn primary" id="goToChatBtn" style="width:100%;justify-content:center;padding:12px">
-          <i class="fas fa-comments"></i> Open Chat
-        </button>
-      </div>
-
-      <!-- TEMPLATES -->
-      <div class="panel" id="panel-templates">
-        <h3 style="font-size:14px;margin-bottom:12px;color:var(--fg-0)">Project Templates</h3>
-        <p style="font-size:12px;color:var(--fg-3);margin-bottom:14px">Tap to scaffold a starter project.</p>
-        <div id="templatesList"></div>
-      </div>
-
-      <!-- GENERATE -->
-      <div class="panel" id="panel-generate">
-        <h3 style="font-size:14px;margin-bottom:12px;color:var(--fg-0)">AI Project Generator</h3>
-        <p style="font-size:12px;color:var(--fg-3);margin-bottom:14px">Describe your app — AI will scaffold it.</p>
-        <textarea id="genPrompt" placeholder="A Flutter counter app with dark theme…" style="min-height:110px;margin-bottom:10px"></textarea>
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px">
-          <select id="genLanguage">
-            <option value="flutter">Flutter</option>
-            <option value="kotlin">Kotlin JVM</option>
-            <option value="android">Android</option>
-            <option value="python">Python</option>
-            <option value="node">Node.js</option>
-            <option value="react">React</option>
-            <option value="html">HTML</option>
-            <option value="rust">Rust</option>
-            <option value="go">Go</option>
-          </select>
-          <input id="genProjectName" placeholder="project-name" />
-        </div>
-        <button class="btn primary" id="genBtn" style="width:100%;justify-content:center;padding:12px">
-          <i class="fas fa-magic"></i> Generate Project
-        </button>
-        <div class="progress-bar" id="genProgressBar" style="display:none"><div class="fill" style="width:0%"></div></div>
-        <div id="genProgress" style="margin-top:12px;font-size:12px;color:var(--fg-3);line-height:1.6"></div>
-      </div>
-
-      <!-- TERMINAL SIDEBAR -->
-      <div class="panel" id="panel-term">
-        <h3 style="font-size:14px;margin-bottom:12px;color:var(--fg-0)">
-          <i class="fas fa-bolt"></i> Quick Commands
-        </h3>
-        <div id="quickCommandsList"></div>
-
-        <div class="settings-section" style="margin-top:20px">
-          <h3><i class="fas fa-box"></i> Package Managers</h3>
-          <div class="pkg-grid">
-            <button class="pkg-btn" data-cmd="pkg update && pkg upgrade -y"><i class="fas fa-cube"></i> pkg update</button>
-            <button class="pkg-btn" data-cmd="pkg list-installed | head -50"><i class="fas fa-list"></i> List pkgs</button>
-            <button class="pkg-btn" data-cmd="pip list"><i class="fab fa-python"></i> pip list</button>
-            <button class="pkg-btn" data-cmd="npm list -g --depth=0"><i class="fab fa-node-js"></i> npm global</button>
-          </div>
-          <input type="text" id="pkgSearchInput" placeholder="Package name…" style="margin-bottom:8px" />
-          <button class="btn" id="pkgInstallBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:10px">
-            <i class="fas fa-download"></i> Install Package
-          </button>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-key"></i> Environment Variables</h3>
-          <div id="envVarsList"></div>
-          <div class="env-row">
-            <input type="text" id="envKey" placeholder="KEY" />
-            <input type="text" id="envVal" placeholder="value" />
-            <button class="btn" id="envAddBtn" title="Add">+</button>
-          </div>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-history"></i> Command History</h3>
-          <div id="cmdHistoryList" style="max-height:220px;overflow-y:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-sm);padding:6px"></div>
-          <button class="btn" id="clearHistoryBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
-            <i class="fas fa-trash"></i> Clear history
-          </button>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-server"></i> Running Processes</h3>
-          <button class="btn" id="refreshProcessesBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:10px">
-            <i class="fas fa-sync"></i> Refresh
-          </button>
-          <div id="processesList" style="font-size:11px;max-height:220px;overflow-y:auto"></div>
-        </div>
-      </div>
-
-      <!-- GITHUB PANEL -->
-      <div class="panel" id="panel-github">
-        <div class="settings-section" id="ghAccountSection">
-          <h3><i class="fab fa-github"></i> GitHub Account</h3>
-          <div id="ghAccountStatus" style="font-size:12px;color:var(--fg-3);margin-bottom:10px">Checking…</div>
+      <div class="panel active" id="panel-github">
+        <div class="section" id="ghAccountSection">
+          <h3>Account</h3>
           <div id="ghSignedOutUI">
-            <button class="btn primary" id="ghSignInBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:8px">
-              <i class="fab fa-github"></i> Sign in / Sign up with GitHub
-            </button>
-            <p style="font-size:11px;color:var(--fg-3);line-height:1.5">
-              <i class="fas fa-shield-halved" style="color:var(--green)"></i>
-              Uses GitHub OAuth Device Flow — no password is ever typed here.
-              New accounts are created on GitHub during the same flow.
-            </p>
+            <button class="btn primary full-width" id="ghSignInBtn">Sign in with GitHub</button>
+            <p class="hint">Uses OAuth device flow — no password is typed here.</p>
           </div>
-          <div id="ghDeviceUI" style="display:none">
-            <p style="font-size:12px;color:var(--fg-2);margin-bottom:6px">1. Open GitHub and enter this code:</p>
-            <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-              <code id="ghDeviceCode" style="font-size:20px;letter-spacing:3px;font-weight:700;color:var(--yellow);background:var(--bg-2);padding:8px 12px;border-radius:8px;flex:1;text-align:center">--------</code>
-              <button class="btn" id="ghCopyCodeBtn" style="padding:8px"><i class="fas fa-copy"></i></button>
+          <div id="ghDeviceUI" hidden>
+            <p class="hint">Open <b>github.com/login/device</b> and enter:</p>
+            <div class="device-code-row">
+              <code id="ghDeviceCode">--------</code>
+              <button class="btn icon-only" id="ghCopyCodeBtn" title="Copy" aria-label="Copy code"><span class="icon">📋</span></button>
             </div>
-            <button class="btn primary" id="ghOpenDeviceBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:8px">
-              <i class="fas fa-external-link-alt"></i> Open github.com/login/device
-            </button>
-            <div id="ghDeviceHint" style="font-size:11px;color:var(--fg-3)">Waiting for authorization…</div>
-            <button class="btn danger" id="ghCancelDeviceBtn" style="width:100%;justify-content:center;padding:8px;margin-top:8px">Cancel</button>
+            <button class="btn primary full-width" id="ghOpenDeviceBtn">Open GitHub</button>
+            <p class="hint" id="ghDeviceHint">Waiting for authorization…</p>
+            <button class="btn full-width" id="ghCancelDeviceBtn">Cancel</button>
           </div>
-          <div id="ghSignedInUI" style="display:none">
-            <div id="ghUserBadge" style="display:flex;gap:10px;align-items:center;margin-bottom:10px"></div>
-            <button class="btn" id="ghSignOutBtn" style="width:100%;justify-content:center;padding:10px">
-              <i class="fas fa-right-from-bracket"></i> Sign out
-            </button>
+          <div id="ghSignedInUI" hidden>
+            <div class="gh-user-badge" id="ghUserBadge"></div>
+            <button class="btn full-width" id="ghSignOutBtn">Sign out</button>
           </div>
         </div>
-        <div class="settings-section">
-          <h3><i class="fab fa-github"></i> Git Identity</h3>
-          <input type="text" id="ghName" placeholder="Your Name" style="margin-bottom:8px" />
-          <input type="email" id="ghEmail" placeholder="you@example.com" style="margin-bottom:10px" />
-          <button class="btn primary" id="ghSaveIdentity" style="width:100%;justify-content:center;padding:10px">Save Identity</button>
+
+        <div class="section">
+          <h3>Repository</h3>
+          <div class="mono muted" id="ghRepoInfo">Not connected</div>
+          <div class="mono muted" id="ghBranchInfo">Branch: —</div>
         </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-key"></i> GitHub Token</h3>
-          <input type="password" id="ghToken" placeholder="ghp_..." style="margin-bottom:10px" />
-          <button class="btn" id="ghSaveToken" style="width:100%;justify-content:center;padding:10px">Save Token</button>
-          <p style="font-size:11px;color:var(--fg-3);margin-top:8px;line-height:1.5">
-            <i class="fas fa-lock" style="color:var(--green)"></i>
-            Token stored server-side in <code>~/.deepseek-secrets.json</code> (mode 0600). Never appears in git config or process args.
-          </p>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-code-branch"></i> Repository</h3>
-          <p id="ghRepoInfo" style="font-size:11px;color:var(--fg-3);font-family:monospace;word-break:break-all">Not connected</p>
-          <p id="ghBranchInfo" style="font-size:11px;color:var(--fg-3);font-family:monospace">Branch: -</p>
-        </div>
-        <div class="settings-section" id="ghSyncSection">
-          <h3><i class="fas fa-arrows-rotate"></i> Sync Status</h3>
-          <div id="ghSyncState" class="gh-sync-state">Not checked</div>
-          <div id="ghRemoteInfo" class="gh-remote-info">—</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-            <button class="btn" id="ghSyncRefreshBtn" style="justify-content:center;padding:10px"><i class="fas fa-sync"></i> Check</button>
-            <button class="btn primary" id="ghSyncNowBtn" style="justify-content:center;padding:10px"><i class="fas fa-cloud"></i> Sync Now</button>
+
+        <div class="section">
+          <h3>Clone</h3>
+          <div id="ghRepoPickerWrap" hidden>
+            <select id="ghRepoPicker"><option value="">— pick one of your repositories —</option></select>
           </div>
-          <div id="ghSyncStrategyWrap" style="display:none;margin-top:8px">
-            <p style="font-size:11px;color:var(--yellow);margin:0 0 8px 0">Branches have diverged. Choose how to reconcile:</p>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-              <button class="btn warn" id="ghSyncRebaseBtn" style="justify-content:center;padding:10px">Rebase</button>
-              <button class="btn warn" id="ghSyncMergeBtn" style="justify-content:center;padding:10px">Merge</button>
-            </div>
+          <input type="text" id="ghCloneUrl" placeholder="https://github.com/user/repo.git" />
+          <button class="btn primary full-width" id="ghCloneBtn">Clone</button>
+        </div>
+
+        <div class="section">
+          <h3>Changes</h3>
+          <div class="git-changes-list mono muted" id="ghChangesList">No changes</div>
+          <div class="button-row"><button class="btn" id="ghAddAllBtn">Stage all</button></div>
+        </div>
+
+        <div class="section">
+          <h3>Commit &amp; push</h3>
+          <input type="text" id="ghCommitMsg" placeholder="Commit message" />
+          <div class="button-row">
+            <button class="btn" id="ghCommitBtn">Commit</button>
+            <button class="btn primary" id="ghPushBtn">Commit + Push</button>
+          </div>
+          <div class="button-row">
+            <button class="btn" id="ghPullBtn">Pull</button>
+            <button class="btn" id="ghFetchBtn">Fetch</button>
           </div>
         </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-cloud-download-alt"></i> Clone</h3>
-          <div id="ghRepoPickerWrap" style="display:none;margin-bottom:8px">
-            <select id="ghRepoPicker" style="width:100%;padding:10px;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px">
-              <option value="">— pick one of your repositories —</option>
-            </select>
-          </div>
-          <input type="text" id="ghCloneUrl" placeholder="https://github.com/user/repo.git" style="margin-bottom:10px" />
-          <button class="btn primary" id="ghCloneBtn" style="width:100%;justify-content:center;padding:10px">Clone Repository</button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-code-branch"></i> Branches</h3>
-          <div id="ghBranchList" style="font-size:11px;margin-bottom:10px">—</div>
-          <input type="text" id="ghNewBranchName" placeholder="new-branch-name" style="margin-bottom:8px" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-            <button class="btn" id="ghCreateBranchBtn" style="justify-content:center;padding:10px">+ Create</button>
-            <button class="btn" id="ghCheckoutBranchBtn" style="justify-content:center;padding:10px">Checkout</button>
-          </div>
-          <input type="text" id="ghMergeSource" placeholder="branch to merge" style="margin-bottom:8px" />
-          <button class="btn primary" id="ghMergeBtn" style="width:100%;justify-content:center;padding:10px">Merge</button>
-          <button class="btn" id="ghAbortMergeBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px;display:none">Abort Merge</button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-edit"></i> Changes</h3>
-          <div id="ghChangesList" class="git-changes-list">No changes</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <button class="btn" id="ghAddAllBtn" style="justify-content:center;padding:10px">Stage All</button>
-            <button class="btn" id="ghResetAllBtn" style="justify-content:center;padding:10px">Unstage All</button>
+
+        <div class="section">
+          <h3>Branches</h3>
+          <div class="git-branch-list mono" id="ghBranchList">—</div>
+          <div class="button-row">
+            <input type="text" id="ghBranchName" placeholder="branch name" />
+            <button class="btn" id="ghCheckoutBtn">Checkout</button>
           </div>
         </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-upload"></i> Commit &amp; Push</h3>
-          <input type="text" id="ghCommitMsg" placeholder="Commit message" style="margin-bottom:8px" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-            <button class="btn" id="ghCommitOnlyBtn" style="justify-content:center;padding:10px">Commit</button>
-            <button class="btn primary" id="ghPushBtn" style="justify-content:center;padding:10px">Commit + Push</button>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <button class="btn" id="ghPullBtn" style="justify-content:center;padding:10px">Pull</button>
-            <button class="btn" id="ghPullRebaseBtn" style="justify-content:center;padding:10px">Pull --rebase</button>
-          </div>
-          <button class="btn" id="ghFetchBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
-            <i class="fas fa-sync"></i> Fetch
-          </button>
+
+        <div class="section">
+          <h3>Create repository</h3>
+          <input type="text" id="ghNewRepoName" placeholder="repo-name" />
+          <input type="text" id="ghNewRepoDesc" placeholder="Description (optional)" />
+          <label class="checkbox-row"><input type="checkbox" id="ghNewRepoPrivate" checked /><span>Private</span></label>
+          <button class="btn primary full-width" id="ghCreateRepoBtn">Create repo</button>
         </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-box"></i> Stash</h3>
-          <input type="text" id="ghStashMsg" placeholder="Stash message (optional)" style="margin-bottom:8px" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-            <button class="btn" id="ghStashPushBtn" style="justify-content:center;padding:10px">Stash</button>
-            <button class="btn" id="ghStashPopBtn" style="justify-content:center;padding:10px">Pop</button>
-          </div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <button class="btn" id="ghStashListBtn" style="justify-content:center;padding:10px">List</button>
-            <button class="btn danger" id="ghStashClearBtn" style="justify-content:center;padding:10px">Clear All</button>
-          </div>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-history"></i> History</h3>
-          <div id="ghLogList" style="font-size:11px;max-height:280px;overflow-y:auto">—</div>
-          <button class="btn" id="ghLogBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
-            <i class="fas fa-sync"></i> Refresh Log
-          </button>
-          <button class="btn" id="ghRawLogBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
-            <i class="fas fa-list"></i> Raw Log
-          </button>
-          <input type="text" id="ghShowCommitRef" placeholder="commit ref (hash / HEAD~1)" style="margin-top:8px;margin-bottom:8px" />
-          <button class="btn" id="ghShowCommitBtn" style="width:100%;justify-content:center;padding:10px">Show Commit</button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-tag"></i> Tags</h3>
-          <div id="ghTagList" style="font-size:11px;margin-bottom:10px">—</div>
-          <input type="text" id="ghTagName" placeholder="v1.0.0" style="margin-bottom:8px" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <button class="btn" id="ghTagCreateBtn" style="justify-content:center;padding:10px">Create Tag</button>
-            <button class="btn" id="ghTagPushBtn" style="justify-content:center;padding:10px">Push Tags</button>
-          </div>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-plus-circle"></i> New GitHub Repository</h3>
-          <input type="text" id="ghNewRepoName" placeholder="repo-name" style="margin-bottom:8px" />
-          <input type="text" id="ghNewRepoDesc" placeholder="Description (optional)" style="margin-bottom:8px" />
-          <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--fg-3);margin-bottom:10px"><input type="checkbox" id="ghNewRepoPrivate" checked /> Private repository</label>
-          <button class="btn primary" id="ghCreateRepoBtn" style="width:100%;justify-content:center;padding:10px"><i class="fas fa-cloud"></i> Create and Set Origin</button>
-          <h3 style="margin-top:18px"><i class="fas fa-code-branch"></i> Pull Requests</h3>
-          <input type="text" id="ghPrTitle" placeholder="PR title" style="margin-bottom:8px" />
-          <input type="text" id="ghPrBase" placeholder="base branch (default: main)" style="margin-bottom:8px" />
-          <textarea id="ghPrBody" placeholder="Description (optional)" style="width:100%;min-height:56px;margin-bottom:10px;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px;padding:8px;font-family:inherit;font-size:12px"></textarea>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <button class="btn primary" id="ghOpenPrBtn" style="justify-content:center;padding:10px">Open PR</button>
-            <button class="btn" id="ghListPrsBtn" style="justify-content:center;padding:10px">List PRs</button>
-          </div>
-          <div id="ghPrList" style="font-size:11px;margin-top:10px;max-height:200px;overflow-y:auto"></div>
-          <h3 style="margin-top:18px"><i class="fas fa-tag"></i> Create Release</h3>
-          <input type="text" id="ghReleaseTag" placeholder="v1.0.0" style="margin-bottom:8px" />
-          <input type="text" id="ghReleaseName" placeholder="Release title (optional)" style="margin-bottom:8px" />
-          <textarea id="ghReleaseNotes" placeholder="Release notes (optional)" style="width:100%;min-height:56px;margin-bottom:10px;background:var(--bg-2);color:var(--fg-1);border:1px solid var(--border-1);border-radius:8px;padding:8px;font-family:inherit;font-size:12px"></textarea>
-          <button class="btn primary" id="ghCreateReleaseBtn" style="width:100%;justify-content:center;padding:10px">Publish GitHub Release</button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-code-branch"></i> Advanced Git</h3>
-          <button class="btn" id="ghInitBtn" style="width:100%;justify-content:center;padding:10px">Init Repo Here</button>
-          <button class="btn primary" id="ghAutoRepoBtn" style="width:100%;justify-content:center;padding:10px;margin-top:6px" title="Init + .gitignore + identity + first commit in one tap">⚡ Auto-Setup Repo</button>
-          <button class="btn" id="ghRemotesBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">Show Remotes</button>
-          <button class="btn" id="ghDiffBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">View Diff</button>
-          <button class="btn warn" id="ghConflictsBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">Show Conflicts</button>
-          <input type="text" id="ghRebaseOnto" placeholder="rebase onto (e.g. origin/main)" style="margin-top:8px;margin-bottom:8px" />
-          <button class="btn warn" id="ghRebaseBtn" style="width:100%;justify-content:center;padding:10px">Rebase Onto</button>
-          <input type="text" id="ghRemoteUrl" placeholder="new origin url (https://...)" style="margin-top:8px;margin-bottom:8px" />
-          <button class="btn" id="ghSetRemoteBtn" style="width:100%;justify-content:center;padding:10px">Set Origin Remote</button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-code-branch"></i> Rewrite History</h3>
-          <input type="text" id="ghBranchDeleteName" placeholder="branch to delete" style="margin-bottom:8px" />
-          <button class="btn danger" id="ghBranchDeleteBtn" style="width:100%;justify-content:center;padding:10px">Delete Branch</button>
-          <input type="text" id="ghCherryPickRef" placeholder="commit ref to cherry-pick" style="margin-top:8px;margin-bottom:8px" />
-          <button class="btn" id="ghCherryPickBtn" style="width:100%;justify-content:center;padding:10px">Cherry-Pick</button>
-          <input type="text" id="ghRevertRef" placeholder="commit ref to revert (default: HEAD)" style="margin-top:8px;margin-bottom:8px" />
-          <button class="btn warn" id="ghRevertBtn" style="width:100%;justify-content:center;padding:10px">Revert Commit</button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-undo"></i> Recovery</h3>
-          <button class="btn warn" id="ghUndoBtn" style="width:100%;justify-content:center;padding:10px">
-            <i class="fas fa-undo"></i> Revert Last Commit
-          </button>
-          <button class="btn danger" id="ghHardResetBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
-            <i class="fas fa-exclamation-triangle"></i> Hard Reset
-          </button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-terminal"></i> Output</h3>
-          <pre id="ghOutput" style="background:var(--bg-0);border:1px solid var(--border-2);border-radius:var(--radius-sm);padding:12px;font-size:10px;max-height:280px;overflow:auto;color:var(--fg-2);white-space:pre-wrap;display:none"></pre>
+
+        <div class="section">
+          <h3>Output</h3>
+          <pre class="gh-output" id="ghOutput" hidden></pre>
         </div>
       </div>
 
-      <!-- DEPLOY PANEL -->
-      <div class="panel" id="panel-deploy">
-        <div class="settings-section">
-          <h3><i class="fas fa-rocket"></i> Build Android App</h3>
-          <p>Signed Android App Bundle (.aab) for Google Play.</p>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-tools"></i> 1. Toolchain Check</h3>
-          <div id="toolchainStatus" style="font-size:12px;color:var(--fg-3);line-height:1.8">Checking…</div>
-          <button class="btn primary" id="installToolsBtn" style="width:100%;justify-content:center;padding:10px;margin-top:10px;display:none">
-            <i class="fas fa-download"></i> Install Missing Tools
-          </button>
-          <button class="btn" id="checkToolsBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
-            <i class="fas fa-sync"></i> Re-check
-          </button>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-key"></i> 2. Signing Key</h3>
-          <p style="font-size:11px;line-height:1.6">Keystore signs your release. Keep it safe — never share.</p>
-          <input type="text" id="ksProjectName" placeholder="Project name" style="margin-bottom:8px" />
-          <input type="password" id="ksPassword" placeholder="Keystore password" style="margin-bottom:8px" />
-          <input type="text" id="ksAlias" placeholder="Key alias (optional)" style="margin-bottom:10px" />
-          <button class="btn primary" id="createKeystoreBtn" style="width:100%;justify-content:center;padding:10px">
-            <i class="fas fa-plus"></i> Create Keystore
-          </button>
-          <div id="keystoreList" style="margin-top:12px;font-size:11px"></div>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-cube"></i> 3. Build Bundle</h3>
-          <select id="deployProject" class="modal-input" style="margin-bottom:8px"></select>
-          <select id="deployOutput" class="modal-input" style="margin-bottom:8px">
-            <option value="aab">AAB — Google Play Store</option>
-            <option value="apk">APK — Direct install / testing</option>
-          </select>
-          <select id="deployKeystore" class="modal-input" style="margin-bottom:8px">
-            <option value="">-- no signing (debug) --</option>
-          </select>
-          <input type="password" id="deployPassword" placeholder="Keystore password" style="margin-bottom:10px" />
-          <button class="btn primary" id="buildDeployBtn" style="width:100%;justify-content:center;padding:12px;font-size:14px">
-            <i class="fas fa-hammer"></i> Build
-          </button>
-          <pre id="buildOutput" style="margin-top:12px;background:var(--bg-0);border:1px solid var(--border-2);border-radius:var(--radius-sm);padding:12px;font-size:10px;max-height:220px;overflow:auto;color:var(--fg-2);white-space:pre-wrap;display:none"></pre>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-archive"></i> 4. Recent Artifacts</h3>
-          <div id="artifactList" style="font-size:11px"></div>
-          <button class="btn" id="refreshArtifactsBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">
-            <i class="fas fa-sync"></i> Refresh
-          </button>
-        </div>
-      </div>
-
-      <!-- BACKUP PANEL -->
-      <div class="panel" id="panel-backup">
-        <div class="settings-section">
-          <h3><i class="fas fa-hdd"></i> SD Card Backup</h3>
-          <p>Snapshot your workspace. Keeps last 5 backups.</p>
-          <p style="color:var(--blue);font-size:11px;font-family:monospace;word-break:break-all" id="backupDest">~/storage/external-1/DeepSeekBackups/</p>
-          <p id="backupStatus" style="color:var(--fg-3);font-size:11px"></p>
-        </div>
-        <button class="btn primary" id="backupNowBtn" style="width:100%;justify-content:center;padding:14px;font-size:14px;margin-bottom:12px">
-          <i class="fas fa-save"></i> Back Up Now
-        </button>
-        <div class="settings-section">
-          <h3 style="margin-bottom:10px">Recent Backups</h3>
-          <div id="backupList"></div>
-        </div>
-      </div>
-
-      <!-- LOG PANEL: Updates & Activity + Git Records -->
-      <div class="panel" id="panel-log">
-        <h3 style="font-size:14px;margin-bottom:12px;color:var(--fg-0)">
-          <i class="fas fa-history"></i> Updates &amp; Activity
-        </h3>
-
-        <!-- Git & GitHub Records -->
-        <div class="settings-section">
-          <h3><i class="fab fa-github"></i> Git &amp; GitHub Records</h3>
-          <div id="gitRecordsList" style="max-height:280px;overflow-y:auto"></div>
-          <button class="btn" id="clearGitRecordsBtn" style="width:100%;justify-content:center;padding:8px;margin-top:8px;font-size:11px">
-            <i class="fas fa-trash"></i> Clear records
-          </button>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-tag"></i> Current Version</h3>
-          <p id="logCurrentVersion" style="font-family:monospace;color:var(--blue);font-size:12px">loading…</p>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-satellite-dish"></i> Recent Activity</h3>
-          <div id="activityList" style="max-height:220px;overflow-y:auto"></div>
-          <button class="btn" id="clearActivityBtn" style="width:100%;justify-content:center;padding:8px;margin-top:8px;font-size:11px">
-            <i class="fas fa-trash"></i> Clear activity
-          </button>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-stream"></i> Changelog</h3>
-          <div id="changelogList"></div>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-heart-pulse"></i> System Health</h3>
-          <p id="sysHealthStatus" style="font-family:monospace;color:var(--fg-3);font-size:12px;margin-bottom:8px">unknown</p>
-          <button class="btn" id="sysPingBtn" style="width:100%;justify-content:center;padding:10px">Ping /health</button>
-          <pre id="sysDiagnostics" style="background:var(--bg-0);border:1px solid var(--border-2);border-radius:var(--radius-sm);padding:12px;font-size:10px;max-height:220px;overflow:auto;color:var(--fg-2);white-space:pre-wrap;margin-top:8px;display:none"></pre>
-          <button class="btn" id="sysDiagnosticsBtn" style="width:100%;justify-content:center;padding:10px;margin-top:8px">Run Diagnostics</button>
-        </div>
-      </div>
-
-      <!-- SETTINGS PANEL -->
       <div class="panel" id="panel-settings">
-        <div class="settings-section">
-          <h3>AI Provider</h3>
-          <select id="aiProvider">
-            <option value="deepseek">DeepSeek (paid, cheapest)</option>
-            <option value="gemini">Google Gemini (free tier)</option>
-          </select>
+        <div class="section">
+          <h3>DeepSeek API key</h3>
+          <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" />
+          <button class="btn primary full-width" id="apiKeyTestBtn">Test &amp; Save</button>
+          <p class="hint" id="apiKeyStatus">Not verified</p>
+          <p class="hint"><a href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">Get a key →</a></p>
         </div>
-        <div class="settings-section" id="deepseekKeySection">
-          <h3><i class="fas fa-key" style="color:var(--yellow)"></i> DeepSeek API Key</h3>
-
-          <div class="ds-hero">
-            <div class="ds-hero-icon">
-              <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-              </svg>
-            </div>
-            <div class="ds-hero-body">
-              <div class="ds-hero-title">Bring your own DeepSeek key</div>
-              <div class="ds-hero-sub">Pay-as-you-go · ~$0.14 per million tokens · No subscription</div>
-            </div>
-          </div>
-
-          <div class="ds-steps">
-            <a class="ds-step" href="https://platform.deepseek.com/sign_up" target="_blank" rel="noopener">
-              <span class="ds-step-num">1</span>
-              <span class="ds-step-body">
-                <span class="ds-step-title">Create account</span>
-                <span class="ds-step-sub">Free sign-up · email only</span>
-              </span>
-              <svg class="ds-step-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
-            </a>
-            <a class="ds-step" href="https://platform.deepseek.com/top_up" target="_blank" rel="noopener">
-              <span class="ds-step-num">2</span>
-              <span class="ds-step-body">
-                <span class="ds-step-title">Add credits</span>
-                <span class="ds-step-sub">$5 ≈ weeks of coding</span>
-              </span>
-              <svg class="ds-step-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
-            </a>
-            <a class="ds-step" href="https://platform.deepseek.com/api_keys" target="_blank" rel="noopener">
-              <span class="ds-step-num">3</span>
-              <span class="ds-step-body">
-                <span class="ds-step-title">Create API key</span>
-                <span class="ds-step-sub">Copy the sk-… key</span>
-              </span>
-              <svg class="ds-step-arrow" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 17L17 7M7 7h10v10"/></svg>
-            </a>
-          </div>
-
-          <label class="ds-input-label">Paste your key</label>
-          <div class="ds-input-wrap">
-            <input type="password" id="apiKeyInput" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" />
-            <button type="button" class="ds-input-btn" id="apiKeyPasteBtn" title="Paste from clipboard">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-                <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
-              </svg>
-            </button>
-            <button type="button" class="ds-input-btn" id="apiKeyRevealBtn" title="Show/hide key">
-              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
-              </svg>
-            </button>
-          </div>
-
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
-            <button class="btn primary" id="apiKeyWizardBtn" style="justify-content:center;padding:10px"><i class="fas fa-magic"></i> Step-by-step</button>
-            <button class="btn" id="apiKeyTestBtn" style="justify-content:center;padding:10px"><i class="fas fa-vial"></i> Test key</button>
-          </div>
-
-          <p id="apiKeyStatus" style="font-size:11px;margin-top:10px;color:var(--fg-3)">Not verified</p>
-
-          <p style="font-size:11px;color:var(--fg-3);margin-top:12px;line-height:1.5">
-            <i class="fas fa-lock" style="color:var(--green)"></i>
-            Your key is stored in this browser's localStorage <b>and</b> on your local backend
-            (<code>~/.deepseek-secrets.json</code>, mode 0600), because the streaming chat path
-            runs through the backend. It is never sent anywhere except <code>api.deepseek.com</code>.
-          </p>
-
-          <p style="font-size:11px;color:var(--fg-3);margin-top:8px">
-            <a href="https://api-docs.deepseek.com/quick_start/pricing" target="_blank" rel="noopener" style="color:var(--blue)">
-              <i class="fas fa-external-link-alt"></i> Current pricing &amp; models
-            </a>
-          </p>
+        <div class="section">
+          <h3>GitHub token</h3>
+          <input type="password" id="githubTokenInput" placeholder="ghp_..." autocomplete="off" spellcheck="false" />
+          <button class="btn full-width" id="githubTokenSaveBtn">Save token</button>
+          <p class="hint">Fallback if OAuth isn't working. Stored server-side (mode 0600).</p>
         </div>
-        <div class="settings-section" id="geminiKeySection" style="display:none">
-          <h3>Google Gemini API Key</h3>
-          <input type="password" id="geminiKeyInput" placeholder="AIza..." style="margin-bottom:8px" />
-          <button class="btn primary" id="geminiKeyTestBtn" style="width:100%;justify-content:center;padding:10px">
-            <i class="fas fa-vial"></i> Test &amp; Save
-          </button>
-          <p id="geminiKeyStatus" style="font-size:11px;margin-top:10px;color:var(--fg-3)">Not verified</p>
+        <div class="section">
+          <h3>GitHub OAuth client ID</h3>
+          <input type="text" id="githubClientIdInput" placeholder="Ov23li..." autocomplete="off" spellcheck="false" />
+          <button class="btn full-width" id="githubClientIdSaveBtn">Save client ID</button>
+          <p class="hint">Register at <a href="https://github.com/settings/developers" target="_blank" rel="noopener">github.com/settings/developers</a> → OAuth Apps → enable Device Flow.</p>
         </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-crown" style="color:var(--yellow)"></i> Pro License</h3>
-          <input type="text" id="licenseKeyInput" placeholder="DS-PRO-XXXX-XXXX-XXXX" style="margin-bottom:8px" />
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <button class="btn primary" id="licenseSaveBtn" style="justify-content:center;padding:10px"><i class="fas fa-check"></i> Activate</button>
-            <button class="btn" id="licenseRemoveBtn" style="justify-content:center;padding:10px"><i class="fas fa-times"></i> Remove</button>
-          </div>
-          <p id="licenseStatus" style="font-size:11px;margin-top:10px;color:var(--fg-3)">Checking…</p>
-        </div>
-        <div class="settings-section">
-          <h3><i class="fas fa-server"></i> Backend</h3>
-          <p id="backendStatus" style="color:var(--red)">Checking…</p>
-          <p id="backendVersion" style="color:var(--fg-3);font-size:11px;margin-top:4px"></p>
-          <div id="libsStatus" class="libs-status"></div>
-        </div>
-
-        <div class="settings-section">
-          <h3><i class="fas fa-link"></i> External Folders</h3>
-          <p style="font-size:11px;color:var(--fg-3);line-height:1.5">
-            Link folders from your phone storage into the workspace. Everything (editor, git, AI) treats them like normal subfolders. The original folder is never modified or moved.
-          </p>
-          <button class="btn primary" id="settingsLinkFolderBtn" style="width:100%;justify-content:center;padding:10px;margin-bottom:10px">
-            <i class="fas fa-plus"></i> Link a Folder
-          </button>
-          <div id="linksList" style="font-size:11px"></div>
-        </div>
-
-        <div class="settings-section">
-          <h3>Terminal</h3>
-          <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
-            <input type="checkbox" id="termAutoScrollToggle" style="width:auto" checked />
-            Auto-scroll to bottom
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
-            <input type="checkbox" id="termWebglToggle" style="width:auto" checked />
-            Use GPU renderer (WebGL)
-          </label>
-        </div>
-        <div class="settings-section">
-          <h3>Auto-Git</h3>
-          <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
-            <input type="checkbox" id="autoGitToggle" style="width:auto" checked />
-            Auto-commit on save
-          </label>
-        </div>
-        <div class="settings-section">
-          <h3>Editor</h3>
-          <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
-            <input type="checkbox" id="editorWordWrapToggle" style="width:auto" checked />
-            Word wrap
-          </label>
-          <label style="display:flex;align-items:center;gap:10px;font-size:12px;color:var(--fg-2);margin-top:10px;min-height:36px">
-            <input type="checkbox" id="editorMinimapToggle" style="width:auto" />
-            Show minimap
-          </label>
-          <div style="margin-top:12px">
-            <label class="modal-label">Font size</label>
-            <input type="number" id="editorFontSize" value="13" min="10" max="24" />
-          </div>
-        </div>
-        <div class="settings-section">
-          <h3>Install App</h3>
-          <button class="btn" id="installPwaBtn" style="width:100%;justify-content:center;padding:10px;margin-top:10px;display:none">
-            <i class="fas fa-download"></i> Install to Home Screen
-          </button>
-          <p id="pwaStatus" style="font-size:11px;color:var(--fg-3);margin-top:10px"></p>
+        <div class="section">
+          <h3>Backend</h3>
+          <p class="mono" id="backendVersion">Checking…</p>
+          <p class="mono muted" id="backendStatus"></p>
         </div>
       </div>
 
     </div>
-  </div>
+  </aside>
 </div>
 
-<!-- ═══════════ MODALS ═══════════ -->
-
-<!-- New File Modal -->
 <div class="modal-overlay" id="newFileModal">
   <div class="modal-box">
-    <div class="modal-title">Create new file</div>
-    <label class="modal-label" id="newFilePrefixLabel">Folder</label>
-    <input type="text" class="modal-input" id="newFilePath" placeholder="e.g. src/utils/helper.py" autocomplete="off" autocapitalize="off" spellcheck="false" />
-    <p style="font-size:11px;color:var(--fg-3);margin:-8px 0 12px">Nested paths auto-create folders.</p>
+    <div class="modal-title">New file</div>
+    <input type="text" class="modal-input" id="newFileName" placeholder="src/utils/helper.py" autocomplete="off" autocapitalize="off" spellcheck="false" />
     <div class="modal-buttons">
-      <button class="btn" id="modalCancel">Cancel</button>
-      <button class="btn primary" id="modalCreate">Create</button>
+      <button class="btn" id="newFileCancel">Cancel</button>
+      <button class="btn primary" id="newFileCreate">Create</button>
     </div>
   </div>
 </div>
 
-<!-- Link External Folder Modal -->
-<div class="modal-overlay" id="linkFolderModal">
-  <div class="modal-box">
-    <div class="modal-title">
-      <i class="fas fa-link" style="color:var(--blue)"></i>
-      Link an External Folder
-    </div>
-    <p style="font-size:12px;color:var(--fg-3);line-height:1.5;margin-bottom:12px">
-      Browse to any folder on your phone. A link will be created inside the workspace — <b style="color:var(--fg-1)">the original folder is not modified</b>.
-    </p>
-    <div id="lfBreadcrumb" style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:11px;font-family:monospace;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-sm);padding:8px 10px;margin-bottom:8px;min-height:36px">
-      <span style="color:var(--fg-3)">/</span>
-    </div>
-    <div id="lfList" style="max-height:280px;overflow-y:auto;background:var(--bg-1);border:1px solid var(--border);border-radius:var(--radius-sm);padding:4px;margin-bottom:10px">
-      <div style="padding:16px;text-align:center;color:var(--fg-3);font-size:12px">Loading…</div>
-    </div>
-    <label class="modal-label" style="margin-top:6px">Link name (optional)</label>
-    <input type="text" class="modal-input" id="lfNameInput" placeholder="Defaults to the folder name" style="margin-bottom:12px" />
-    <div style="display:flex;gap:8px">
-      <button class="btn" id="lfCancelBtn" style="flex:1;justify-content:center;padding:10px">Cancel</button>
-      <button class="btn primary" id="lfLinkBtn" style="flex:2;justify-content:center;padding:10px" disabled>
-        <i class="fas fa-link"></i> Link this folder
-      </button>
-    </div>
-    <p id="lfStatus" style="font-size:11px;color:var(--fg-3);margin-top:10px;line-height:1.5"></p>
-  </div>
-</div>
-
-<!-- API Key Wizard -->
-<div class="modal-overlay" id="apiKeyWizardModal">
-  <div class="modal-box">
-    <div class="modal-title">
-      <i class="fas fa-key" style="color:var(--yellow)"></i>
-      Get a DeepSeek API Key
-    </div>
-    <p style="font-size:12px;color:var(--fg-3);margin-bottom:16px;line-height:1.5">
-      DeepSeek charges per token used — no subscription. <strong style="color:var(--fg-1)">$5 typically covers weeks of coding.</strong>
-    </p>
-    <div class="wizard-step" id="wizStep1">
-      <div class="wizard-num">1</div>
-      <div class="wizard-body">
-        <div class="wizard-title">Create a DeepSeek account</div>
-        <div class="wizard-desc">Free sign-up with email. Takes 30 seconds.</div>
-        <button class="wizard-btn primary" onclick="openWizardLink('https://platform.deepseek.com/sign_up')">
-          <i class="fas fa-external-link-alt"></i> Open sign-up page
-        </button>
-      </div>
-    </div>
-    <div class="wizard-step" id="wizStep2">
-      <div class="wizard-num">2</div>
-      <div class="wizard-body">
-        <div class="wizard-title">Add credits ($5 recommended)</div>
-        <div class="wizard-desc">Card or PayPal. $5 is ~35M tokens of deepseek-chat.</div>
-        <button class="wizard-btn primary" onclick="openWizardLink('https://platform.deepseek.com/top_up')">
-          <i class="fas fa-external-link-alt"></i> Open top-up page
-        </button>
-      </div>
-    </div>
-    <div class="wizard-step" id="wizStep3">
-      <div class="wizard-num">3</div>
-      <div class="wizard-body">
-        <div class="wizard-title">Create your API key</div>
-        <div class="wizard-desc">Click <em>Create new API key</em>, name it "DeepSeek Studio", then copy the <code>sk-…</code> value.</div>
-        <button class="wizard-btn primary" onclick="openWizardLink('https://platform.deepseek.com/api_keys')">
-          <i class="fas fa-external-link-alt"></i> Open API keys page
-        </button>
-      </div>
-    </div>
-    <div class="wizard-step" id="wizStep4">
-      <div class="wizard-num">4</div>
-      <div class="wizard-body">
-        <div class="wizard-title">Paste your key here</div>
-        <div class="wizard-desc">It will be verified against DeepSeek before saving.</div>
-        <div class="ds-input-wrap" style="margin-top:8px">
-          <input type="password" class="modal-input" id="wizKeyInput" placeholder="sk-..." autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-bottom:0" />
-          <button type="button" class="ds-input-btn" id="wizPasteBtn" title="Paste from clipboard">
-            <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
-              <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
-            </svg>
-          </button>
-        </div>
-        <button class="wizard-btn primary" style="width:100%;margin-top:8px;justify-content:center" onclick="verifyAndSaveWizardKey()">
-          <i class="fas fa-check"></i> Verify &amp; Save
-        </button>
-        <div class="wizard-status" id="wizStatus"></div>
-      </div>
-    </div>
-    <div class="modal-buttons" style="margin-top:14px">
-      <button class="btn" onclick="closeApiKeyWizard()">Cancel</button>
-      <button class="btn primary" onclick="closeApiKeyWizard()">Done</button>
-    </div>
-  </div>
-</div>
-
-<!-- Context Menu -->
-<div class="ctx-menu" id="ctxMenu">
-  <div class="ctx-title" id="ctxTitle">item</div>
-  <div class="ctx-item" id="ctxOpen"><i class="fas fa-folder-open"></i> Open in Editor</div>
-  <div class="ctx-item" id="ctxNewFileHere"><i class="fas fa-plus"></i> New file here…</div>
-  <div class="ctx-item" id="ctxNewFolderHere"><i class="fas fa-folder-plus"></i> New folder here…</div>
-  <div class="ctx-item" id="ctxReload"><i class="fas fa-sync"></i> Reload from disk</div>
-  <div class="ctx-item" id="ctxBookmark"><i class="far fa-star"></i> Bookmark</div>
-  <div class="ctx-item" id="ctxRename"><i class="fas fa-edit"></i> Rename</div>
-  <div class="ctx-item" id="ctxCopyPath"><i class="fas fa-copy"></i> Copy path</div>
-  <div class="ctx-item" id="ctxTerminalHere"><i class="fas fa-terminal"></i> Open terminal here</div>
-  <div class="ctx-item" id="ctxUnlink" style="display:none"><i class="fas fa-unlink"></i> Unlink external folder</div>
-  <div class="ctx-item danger" id="ctxDelete"><i class="fas fa-trash"></i> Delete</div>
-</div>
-
-<!-- Confirm -->
 <div class="confirm-overlay" id="confirmModal">
   <div class="confirm-box">
     <div class="confirm-title" id="confirmTitle">Are you sure?</div>
@@ -1009,10 +234,12 @@
   </div>
 </div>
 
-<!-- Modular boot. boot.js is the only file that knows about every
-     feature; it declares shared state, registers features with the
-     lifecycle, and starts them. Loaded as a module so the core/* and
-     features/* imports resolve natively — no bundler. -->
+<div class="ctx-menu" id="ctxMenu">
+  <div class="ctx-item" data-action="open">Open</div>
+  <div class="ctx-item" data-action="rename">Rename</div>
+  <div class="ctx-item danger" data-action="delete">Delete</div>
+</div>
+
 <script type="module" src="/js/boot.js"></script>
 </body>
 </html>
