@@ -108,10 +108,18 @@ jobs:
           path: ${{ steps.meta.outputs.apk }}
           if-no-files-found: error
 
+      # 🟢 FIX: Force update the 'latest' tag before releasing
+      - name: Force update latest tag
+        if: steps.meta.outputs.tag == 'latest'
+        run: |
+          git tag -f latest
+          git push -f origin latest
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
           name: DeepSeek Studio ${{ steps.meta.outputs.version }}
           prerelease: false
           make_latest: true
