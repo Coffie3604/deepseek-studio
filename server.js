@@ -111,13 +111,30 @@ function remoteKind(url) {
 }
 
 // Convert an SSH remote to its HTTPS equivalent so token auth can be used.
+// Handles both scp-style (git@host:owner/repo) and ssh:// URL forms.
 function normalizeRemote(url) {
     let s = String(url || '').trim();
     if (!s) return s;
     const scp = s.match(/^git@([^:]+):(.+)$/);
     if (scp) s = `https://${scp[1]}/${scp[2]}`;
-    s = s.replace(/^ssh:\/\/git@/i, 'https://');
+    // ssh://git@github.com/owner/repo(.git)  →  https://github.com/owner/repo
+    s = s.replace(/^ssh:\/\/(?:git@)?([^/]+)\//i, 'https://$1/');
+    // git://github.com/owner/repo → https://github.com/owner/repo
+    s = s.replace(/^git:\/\/(?:git@)?([^/]+)\//i, 'https://$1/');
     return s.replace(/\.git$/, '');
+}
+
+// Extract "owner/repo" from any GitHub remote form, or null if not GitHub.
+function githubRepoSlug(url) {
+    const https = normalizeRemote(url);
+    const m = String(https || '').match(/^https:\/\/(?:[^@/]+@)?github\.com\/([^/]+)\/([^/]+?)(?:\.git)?\/?$/i);
+    return m ? `${m[1]}/${m[2]}` : null;
+}
+
+// True when the remote points at github.com in any form.
+function isGithubRemote(url) {
+    const s = String(url || '').trim();
+    return /(^|@|\/\/)github\.com[:/]/i.test(s);
 }
 
 function redact(input) {
@@ -238,7 +255,7 @@ app.get('/api/secrets', (_req, res) => {
     }
     res.json(out);
 });
-app.post('/api/secrets', (req, res) => {
+app.post('/api/secrets', async (req, res) => {
     const { name, value } = req.body || {};
     if (!SECRET_NAMES.includes(name)) return res.status(400).json({ error: 'Unknown secret' });
     if (value == null || value === '') {
@@ -251,9 +268,72 @@ app.post('/api/secrets', (req, res) => {
     if (name === 'github_token' && !/^(ghp_|gho_|ghu_|ghs_|github_pat_)/.test(v)) return res.status(400).json({ error: 'GitHub tokens start with ghp_ or github_pat_' });
     secrets[name] = v;
     saveSecrets();
+    // Validate a GitHub token immediately so a typo/expired PAT is caught at
+    // save time instead of surfacing later as a confusing push failure.
+    if (name === 'github_token') {
+        try {
+            const r = await fetch('https://api.github.com/user', {
+                headers: { Authorization: 'Bearer ' + v, Accept: 'application/vnd.github+json', 'User-Agent': 'deepseek-editor' },
+            });
+            if (r.ok) {
+                const u = await r.json();
+                const scopes = String(r.headers.get('x-oauth-scopes') || '');
+                return res.json({ ok: true, name, verified: true, login: u.login, scopes });
+            }
+            const body = await r.json().catch(() => ({}));
+            return res.json({
+                ok: true, name, verified: false,
+                warning: 'Saved, but GitHub rejected this token: ' + (body.message || ('HTTP ' + r.status)),
+            });
+        } catch (err) {
+            return res.json({ ok: true, name, verified: false, warning: 'Saved, but could not reach GitHub to verify: ' + err.message });
+        }
+    }
     res.json({ ok: true, name });
 });
 
+// Re-check the currently stored token without changing it.
+app.get('/api/github/verify', async (_req, res) => {
+    const found = resolveGhToken();
+    if (!found.token) return res.json({ ok: false, verdict: 'no-token', error: 'No GitHub token configured.' });
+    try {
+        const r = await fetch('https://api.github.com/user', {
+            headers: { Authorization: 'Bearer ' + found.token, Accept: 'application/vnd.github+json', 'User-Agent': 'deepseek-editor' },
+        });
+        const scopes = String(r.headers.get('x-oauth-scopes') || '');
+        if (!r.ok) {
+            const body = await r.json().catch(() => ({}));
+            return res.json({ ok: false, verdict: 'bad-token', source: found.source, error: body.message || ('HTTP ' + r.status) });
+        }
+        const u = await r.json();
+        const scopeList = scopes.split(',').map((s) => s.trim()).filter(Boolean);
+        const canPush = scopeList.includes('repo') || scopeList.includes('public_repo') || scopeList.length === 0;
+        return res.json({
+            ok: true, verdict: canPush ? 'ok' : 'missing-scope',
+            source: found.source, sourceLabel: found.label,
+            login: u.login, scopes: scopeList,
+            warning: canPush ? null : 'Token has no "repo" scope — pushes to private repos will fail.',
+        });
+    } catch (err) {
+        return res.json({ ok: false, verdict: 'offline', error: 'Could not reach GitHub: ' + err.message });
+    }
+});
+
+// One-click repair: convert an SSH origin to HTTPS so the saved token is used.
+app.post('/api/github/repair-remote', async (req, res) => {
+    const workdir = gitWorkdir(req.body);
+    if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+    const rem = await gitCmd(workdir, ['remote', 'get-url', 'origin']);
+    if (!rem.ok || !rem.stdout.trim()) return res.json({ ok: false, error: 'No "origin" remote to repair.' });
+    const current = rem.stdout.trim();
+    if (remoteKind(current) !== 'ssh') {
+        return res.json({ ok: true, changed: false, remote: current, message: 'Remote is already HTTPS — nothing to change.' });
+    }
+    const next = normalizeRemote(current) + '.git';
+    const set = await gitCmd(workdir, ['remote', 'set-url', 'origin', next]);
+    if (!set.ok) return res.json({ ok: false, error: set.stderr || 'Failed to update remote.' });
+    res.json({ ok: true, changed: true, from: current, remote: next, message: 'Remote switched to HTTPS — your token will now be used.' });
+});
 app.get('/api/roots', (_req, res) => {
     res.json({
         workspace: WORKSPACE,
@@ -362,11 +442,20 @@ function gitEnv() {
         env.GIT_ASKPASS = ASKPASS_HELPER;
         env.GIT_ASKPASS_TOKEN = token;
         env.GIT_ASKPASS_USER = 'x-access-token';
-        // Force HTTPS auth for github.com even if the remote is SSH-shaped,
-        // so a token can be used without an SSH key.
-        env.GIT_CONFIG_COUNT = '1';
-        env.GIT_CONFIG_KEY_0 = 'url.https://github.com/.insteadOf';
-        env.GIT_CONFIG_VALUE_0 = 'git@github.com:';
+        // Force HTTPS auth for github.com even if the remote is SSH-shaped, so a
+        // token works without an SSH key. Cover every SSH spelling git accepts:
+        // scp-style, ssh://, and the git:// protocol.
+        const rewrites = [
+            ['url.https://github.com/.insteadOf', 'git@github.com:'],
+            ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'],
+            ['url.https://github.com/.insteadOf', 'ssh://git@github.com:22/'],
+            ['url.https://github.com/.insteadOf', 'git://github.com/'],
+        ];
+        env.GIT_CONFIG_COUNT = String(rewrites.length);
+        rewrites.forEach(([k, v], i) => {
+            env['GIT_CONFIG_KEY_' + i] = k;
+            env['GIT_CONFIG_VALUE_' + i] = v;
+        });
     } else {
         env.GIT_ASKPASS = 'echo';
         // No token: make sure SSH never hangs waiting for a passphrase.
@@ -386,6 +475,18 @@ function explainGitError(stderr, ctx = {}) {
     }
     if (/Repository not found/i.test(s)) {
         return 'Repository not found — check the name and that your token has "repo" scope.';
+    }
+    if (/\b403\b|Resource not accessible|insufficient (?:scope|permission)/i.test(s)) {
+        return 'Token lacks permission for this repo. Regenerate the PAT with "repo" scope (and SSO authorization if the org requires it).';
+    }
+    if (/\b401\b|Bad credentials/i.test(s)) {
+        return 'Token is invalid or expired. Generate a new PAT and save it in Settings.';
+    }
+    if (/Repository not found/i.test(s)) {
+        return 'Repository not found — check the name and that your token has "repo" scope.';
+    }
+    if (/GH013|push protection|secret scanning/i.test(s)) {
+        return 'Push blocked by GitHub push protection — a secret was detected in the commits. Remove it and retry.';
     }
     if (/Protected branch|non-fast-forward|\[rejected\]/i.test(s)) {
         return 'Push rejected — remote has commits you do not have. Pull first, then push.';
@@ -527,8 +628,11 @@ app.post('/api/git/push', async (req, res) => {
 app.get('/api/github/diagnose', async (req, res) => {
     // Default to the server's own repo (where server.js lives), not the file-browser
     // workspace root — otherwise `git rev-parse` runs one level above the repo and
-    // reports isRepo:false even though a repo is right there.
-    const cwd = resolvePath(String(req.query.cwd || '')) || __dirname;
+    // reports isRepo:false even though a repo is right there. Note resolvePath('')
+    // returns WORKSPACE (truthy), so an explicit query param must be distinguished
+    // from the default rather than relying on a falsy fallback.
+    const explicit = String(req.query.cwd || '').trim();
+    const cwd = explicit ? (resolvePath(explicit) || __dirname) : __dirname;
     const found = resolveGhToken();
     const report = {
         token: { present: !!found.token, source: found.source, label: found.label, validFormat: looksLikeGhToken(found.token) },
@@ -579,8 +683,21 @@ app.get('/api/github/diagnose', async (req, res) => {
         report.repo.remote = rem.ok ? rem.stdout.trim() : '';
         report.repo.remoteKind = remoteKind(report.repo.remote);
         report.repo.httpsEquivalent = normalizeRemote(report.repo.remote);
+        report.repo.githubSlug = githubRepoSlug(report.repo.remote);
+        report.repo.isGithub = isGithubRemote(report.repo.remote);
         report.repo.branch = br.stdout.trim();
         report.repo.upstream = up.ok;
+        // Report whether the token can actually write to this repo.
+        if (report.repo.githubSlug && found.token && report.api.authenticated) {
+            const pr = await ghFetch('/repos/' + report.repo.githubSlug);
+            if (pr.ok) {
+                report.repo.canPush = !!(pr.data.permissions && pr.data.permissions.push);
+                report.repo.private = !!pr.data.private;
+                if (!report.repo.canPush) {
+                    report.fixes.push('Your token cannot push to ' + report.repo.githubSlug + ' — it needs "repo" scope and access to this repository.');
+                }
+            }
+        }
     }
 
     // 4. Verdict + concrete fixes.
@@ -604,12 +721,18 @@ app.get('/api/github/diagnose', async (req, res) => {
         report.fixes.push('No "origin" remote — set one to a GitHub repo URL.');
     } else if (report.repo.remoteKind === 'ssh') {
         // Token is valid but the remote is SSH: git will still use the key.
+        // Note: gitEnv() rewrites SSH→HTTPS automatically when a token exists,
+        // so this is a warning rather than a hard failure.
         report.verdict = 'ssh-remote';
-        report.fixes.push('Remote uses SSH, so your token is ignored. Switch to HTTPS:');
+        report.fixes.push('Remote uses SSH. A saved token is applied automatically via insteadOf, but switching is more reliable:');
         report.fixes.push('git remote set-url origin ' + report.repo.httpsEquivalent + '.git');
+        report.fixes.push('Or use the "Fix remote" button to switch automatically.');
         if (!report.ssh.keyPresent) {
             report.fixes.push('Or add an SSH key to GitHub (Settings → SSH keys).');
         }
+    } else if (report.repo.canPush === false) {
+        report.verdict = 'no-permission';
+        report.fixes.push('Token is valid but cannot push to ' + (report.repo.githubSlug || 'this repo') + '. Regenerate the PAT with "repo" scope.');
     } else {
         report.verdict = 'ready';
     }
