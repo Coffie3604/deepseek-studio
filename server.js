@@ -416,6 +416,11 @@ const BLOCKED_PATTERNS = [
     /\brm\s+-rf\s+\/(?!(data\/data\/com\.termux|storage))/,
     /\bsudo\b/, /\bmkfs\b/, /\b(shutdown|reboot|halt|poweroff)\b/,
     /\bdd\s+if=\/dev\/(zero|random|urandom)/,
+    // Only block killing *everything* (kill -1 / pkill -9 -1). Killing a
+    // specific PID or your own dev server is routine and must stay allowed,
+    // otherwise the agent cannot restart the server it just started.
+    /\b(pkill|killall)\b[^|;&\n]*\s-1(\s|$)/,
+    /\bkill\b[^|;&\n]*\s-1(\s|$)/,
 ];
 app.post('/api/exec', (req, res) => {
     const { cmd, cwd } = req.body || {};
