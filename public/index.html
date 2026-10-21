@@ -74,6 +74,30 @@
     </div>
 
     <div class="tab-panel" id="panel-editor">
+      <div class="editor-toolbar" id="editorToolbar">
+        <button class="etb" id="edMenuBtn" title="Edit tools" aria-haspopup="true" aria-expanded="false">
+          <span class="icon">✎</span><span class="etb-label">Edit</span><span class="caret">▾</span>
+        </button>
+        <span class="ed-lang-badge" id="edLangBadge" hidden></span>
+        <span class="ed-file-info" id="edFileInfo"></span>
+        <div class="ed-menu" id="edMenu" hidden>
+          <button class="ed-menu-item" data-cmd="undo">Undo<span class="kbd">Ctrl+Z</span></button>
+          <button class="ed-menu-item" data-cmd="redo">Redo<span class="kbd">Ctrl+Y</span></button>
+          <div class="ed-menu-sep"></div>
+          <button class="ed-menu-item" data-cmd="cut">Cut<span class="kbd">Ctrl+X</span></button>
+          <button class="ed-menu-item" data-cmd="copy">Copy<span class="kbd">Ctrl+C</span></button>
+          <button class="ed-menu-item" data-cmd="paste">Paste<span class="kbd">Ctrl+V</span></button>
+          <div class="ed-menu-sep"></div>
+          <button class="ed-menu-item" data-cmd="selectAll">Select all<span class="kbd">Ctrl+A</span></button>
+          <button class="ed-menu-item" data-cmd="copyAll">Copy whole file</button>
+          <div class="ed-menu-sep"></div>
+          <button class="ed-menu-item" data-cmd="find">Find<span class="kbd">Ctrl+F</span></button>
+          <button class="ed-menu-item" data-cmd="format">Format document</button>
+          <div class="ed-menu-sep"></div>
+          <button class="ed-menu-item" data-cmd="preview">Preview HTML</button>
+          <button class="ed-menu-item" data-cmd="save">Save<span class="kbd">Ctrl+S</span></button>
+        </div>
+      </div>
       <div class="editor-tabs-bar" id="editorTabsBar"></div>
       <div id="monaco">
         <div class="editor-empty" id="editorEmpty">

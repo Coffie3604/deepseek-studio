@@ -1,6 +1,6 @@
 import * as state from '../core/state.js';
 import { on, emit } from '../core/bus.js';
-import { toast, loadScript } from '../core/ui.js';
+import { toast, loadScript, copyText, promptDialog } from '../core/ui.js';
 import { fsRead, fsWrite } from '../core/api.js';
 
 // Monaco is fetched from a CDN. On Termux/Android the network is often slow,
@@ -23,7 +23,11 @@ let loading = null;
 let opening = null;
 let editor = null;
 let host, empty, tabsBar, saveBtn;
+let menuBtn, menu, langBadge, fileInfo;
 let unsubs = [];
+
+// Files Monaco can syntax-highlight but that we can also render as a page.
+const HTML_EXT = /\.(html?|htm|xhtml)$/i;
 
 export async function init() {
   host    = document.getElementById('monaco');
@@ -31,7 +35,13 @@ export async function init() {
   tabsBar = document.getElementById('editorTabsBar');
   saveBtn = document.getElementById('saveBtn');
 
+  menuBtn   = document.getElementById('edMenuBtn');
+  menu      = document.getElementById('edMenu');
+  langBadge = document.getElementById('edLangBadge');
+  fileInfo  = document.getElementById('edFileInfo');
+
   if (saveBtn) saveBtn.onclick = save;
+  initToolbar();
 
   // Reuse the mirror that worked last time so we don't re-probe dead CDNs.
   try { cdnBase = state.get(CDN_KEY) || null; } catch { cdnBase = null; }
@@ -46,6 +56,7 @@ export async function init() {
   unsubs.push(on('editor:saved', () => renderTabs()));
 
   renderTabs();
+  renderToolbarInfo();
   document.addEventListener('keydown', onKey);
 
   // Do NOT create Monaco here. init() runs at boot while the editor panel is
@@ -270,6 +281,7 @@ async function doOpen(path) {
   }
   if (saveBtn) saveBtn.disabled = false;
   renderTabs();
+  renderToolbarInfo();
 }
 
 async function save() {
@@ -289,6 +301,175 @@ async function save() {
   } else {
     toast(r.error || 'Save failed', 'error');
   }
+}
+
+/* ── Edit-tools dropdown ──────────────────────────────────────────
+ * Monaco's own context menu is unreliable on touch devices (long-press
+ * fights with scrolling), and Android WebView blocks programmatic
+ * clipboard reads. So the toolbar exposes the same operations as explicit
+ * buttons, and "Paste" falls back to a prompt when the async clipboard
+ * API is unavailable.
+ */
+function initToolbar() {
+  if (!menuBtn || !menu) return;
+
+  menuBtn.onclick = (e) => {
+    e.stopPropagation();
+    toggleMenu(menu.hidden);
+  };
+
+  menu.addEventListener('click', (e) => {
+    const item = e.target.closest('.ed-menu-item');
+    if (!item || item.disabled) return;
+    e.stopPropagation();
+    closeMenu();
+    runCommand(item.dataset.cmd);
+  });
+
+  // Close on outside tap / Escape.
+  document.addEventListener('click', (e) => {
+    if (!menu.hidden && !menu.contains(e.target) && e.target !== menuBtn) closeMenu();
+  });
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !menu.hidden) { closeMenu(); menuBtn.focus(); }
+  });
+}
+
+function toggleMenu(open) {
+  if (!menu || !menuBtn) return;
+  menu.hidden = !open;
+  menuBtn.setAttribute('aria-expanded', String(!!open));
+  if (open) refreshMenuState();
+}
+
+function closeMenu() { toggleMenu(false); }
+
+/** Disable actions that cannot work in the current state. */
+function refreshMenuState() {
+  if (!menu) return;
+  const hasFile = !!state.get('openFile');
+  const isHtml = hasFile && HTML_EXT.test(state.get('openFile'));
+  for (const item of menu.querySelectorAll('.ed-menu-item')) {
+    const cmd = item.dataset.cmd;
+    if (cmd === 'preview') { item.disabled = !isHtml; item.hidden = !isHtml; }
+    else if (cmd === 'format') item.disabled = !hasFile;
+    else item.disabled = !hasFile;
+  }
+}
+
+async function runCommand(cmd) {
+  const path = state.get('openFile');
+
+  // Commands that need no open file.
+  if (cmd === 'save') { await save(); return; }
+  if (!path) { toast('Open a file first', 'error'); return; }
+
+  // Monaco-backed commands.
+  if (editor) {
+    const model = editor.getModel();
+    switch (cmd) {
+      case 'undo':   editor.trigger('toolbar', 'undo', null); return;
+      case 'redo':   editor.trigger('toolbar', 'redo', null); return;
+      case 'cut':    editor.trigger('toolbar', 'editor.action.clipboardCutAction', null); return;
+      case 'copy':   editor.trigger('toolbar', 'editor.action.clipboardCopyAction', null); return;
+      case 'selectAll': editor.trigger('toolbar', 'editor.action.selectAll', null); return;
+      case 'find':   editor.trigger('toolbar', 'actions.find', null); return;
+      case 'format': editor.getAction('editor.action.formatDocument')
+                       ?.run().catch(() => toast('No formatter for this language', 'error'));
+                     return;
+      case 'copyAll': {
+        const text = model ? model.getValue() : '';
+        if (!text) { toast('File is empty', 'error'); return; }
+        const ok = await copyText(text);
+        toast(ok ? 'Copied whole file' : 'Copy blocked by browser', ok ? 'success' : 'error');
+        return;
+      }
+      case 'paste': {
+        // Prefer the async clipboard API; fall back to a prompt because
+        // Android WebView often denies clipboard read without a user gesture.
+        let text = null;
+        try {
+          if (navigator.clipboard && navigator.clipboard.readText) {
+            text = await navigator.clipboard.readText();
+          }
+        } catch { text = null; }
+        if (text == null) {
+          text = await promptDialog({
+            title: 'Paste',
+            message: 'Clipboard access was blocked. Paste your text below.',
+            okLabel: 'Insert',
+          });
+          if (text == null) return;
+        }
+        if (!text) { toast('Clipboard is empty', 'error'); return; }
+        const sel = editor.getSelection();
+        editor.executeEdits('toolbar', [{ range: sel, text, forceMoveMarkers: true }]);
+        editor.focus();
+        toast('Pasted', 'success');
+        return;
+      }
+      case 'preview': openHtmlPreview(path); return;
+    }
+  }
+
+  // Fallbacks when Monaco is not available (e.g. CDN blocked).
+  if (cmd === 'copyAll') {
+    const text = state.get('fileContent') || '';
+    if (!text) { toast('File is empty', 'error'); return; }
+    const ok = await copyText(text);
+    toast(ok ? 'Copied whole file' : 'Copy blocked by browser', ok ? 'success' : 'error');
+    return;
+  }
+  if (cmd === 'preview') { openHtmlPreview(path); return; }
+  toast('Editor not ready yet', 'error');
+}
+
+/** Render an HTML file in a sandboxed iframe overlay. */
+function openHtmlPreview(path) {
+  const content = editor ? editor.getValue() : (state.get('fileContent') || '');
+  const overlay = document.createElement('div');
+  overlay.className = 'html-preview-overlay';
+  overlay.innerHTML =
+    '<div class="hp-head">' +
+      '<span class="hp-title"></span>' +
+      '<div class="hp-actions">' +
+        '<button class="btn hp-reload" type="button">Reload</button>' +
+        '<button class="btn hp-close" type="button">Close</button>' +
+      '</div>' +
+    '</div>' +
+    '<iframe class="hp-frame" sandbox="allow-scripts allow-forms allow-modals"></iframe>';
+  overlay.querySelector('.hp-title').textContent = path.split('/').pop();
+
+  const frame = overlay.querySelector('.hp-frame');
+  const load = () => { frame.srcdoc = content; };
+  load();
+
+  overlay.querySelector('.hp-reload').onclick = load;
+  const close = () => overlay.remove();
+  overlay.querySelector('.hp-close').onclick = close;
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', esc); }
+  });
+
+  document.body.appendChild(overlay);
+}
+
+/** Update the language badge + file label in the toolbar. */
+function renderToolbarInfo() {
+  const path = state.get('openFile');
+  if (langBadge) {
+    if (!path) { langBadge.hidden = true; }
+    else {
+      const lang = detectLang(path);
+      const isHtml = HTML_EXT.test(path);
+      langBadge.hidden = false;
+      langBadge.textContent = isHtml ? 'HTML' : lang;
+      langBadge.className = 'ed-lang-badge' + (isHtml ? ' html' : '');
+      langBadge.title = isHtml ? 'HTML file — Preview available in Edit menu' : lang;
+    }
+  }
+  if (fileInfo) fileInfo.textContent = path || '';
 }
 
 function renderTabs() {
@@ -326,6 +507,7 @@ function closeTab(p) {
       if (editor) editor.setValue('');
       if (saveBtn) saveBtn.disabled = true;
       renderTabs();
+      renderToolbarInfo();
     }
   } else renderTabs();
 }
