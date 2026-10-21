@@ -1274,6 +1274,181 @@ app.post('/api/ai/tool-call', async (req, res) => {
     } catch (e) { res.status(500).json({ error: redact(e.message) }); }
 });
 
+// ── License status ────────────────────────────────────────────────────────
+// The editor is free and open source; this endpoint exists so clients and CI
+// can query entitlement state without special-casing a 404.
+app.get('/api/license/status', (_req, res) => {
+    res.json({
+        ok: true,
+        licensed: true,
+        plan: 'open-source',
+        edition: 'community',
+        version: PKG_VERSION,
+        expires: null,
+        features: ['editor', 'terminal', 'git', 'ai', 'deploy', 'backup', 'compile'],
+    });
+});
+
+// ── Toolchain detection ───────────────────────────────────────────────────
+// Reports which build tools are actually installed so the UI can disable
+// deploy/compile actions instead of failing at run time.
+const TOOLCHAIN = [
+    { id: 'node', bin: 'node', args: ['--version'], label: 'Node.js' },
+    { id: 'npm', bin: 'npm', args: ['--version'], label: 'npm' },
+    { id: 'git', bin: 'git', args: ['--version'], label: 'Git' },
+    { id: 'python', bin: 'python3', args: ['--version'], label: 'Python' },
+    { id: 'gcc', bin: 'gcc', args: ['--version'], label: 'GCC' },
+    { id: 'make', bin: 'make', args: ['--version'], label: 'Make' },
+    { id: 'docker', bin: 'docker', args: ['--version'], label: 'Docker' },
+];
+function probeTool(t) {
+    return new Promise((resolve) => {
+        execFile(t.bin, t.args, { timeout: 5000, maxBuffer: 1024 * 1024 }, (err, stdout, stderr) => {
+            if (err) return resolve({ id: t.id, label: t.label, available: false, version: null });
+            const out = String(stdout || stderr || '').trim().split('\n')[0];
+            resolve({ id: t.id, label: t.label, available: true, version: out.slice(0, 120) });
+        });
+    });
+}
+app.get('/api/deploy/check-tools', async (_req, res) => {
+    try {
+        const tools = await Promise.all(TOOLCHAIN.map(probeTool));
+        res.json({ ok: true, tools, available: tools.filter((t) => t.available).map((t) => t.id) });
+    } catch (err) { res.status(500).json({ error: redact(err.message) }); }
+});
+
+// ── Deploy build ──────────────────────────────────────────────────────────
+// Runs the project's build script (npm run build, falling back to a no-op when
+// there is nothing to build). Never trusts client-supplied command strings.
+app.post('/api/deploy/build', async (req, res) => {
+    const workdir = gitWorkdir(req.body);
+    if (!workdir) return res.status(403).json({ error: 'Forbidden' });
+    const pkgPath = path.join(workdir, 'package.json');
+    let script = null;
+    try {
+        const pkg = JSON.parse(await fsp.readFile(pkgPath, 'utf8'));
+        if (pkg.scripts && pkg.scripts.build) script = 'build';
+    } catch (_) { /* no package.json — nothing to build */ }
+    if (!script) {
+        return res.json({ ok: true, skipped: true, reason: 'No build script defined in package.json', workdir });
+    }
+    const started = Date.now();
+    const r = await gitCmd(workdir, ['--version']); // warm check that git/cwd is valid
+    const run = await new Promise((resolve) => {
+        exec('npm run build', {
+            cwd: workdir, timeout: 300000, maxBuffer: 20 * 1024 * 1024,
+            shell: '/bin/sh', env: { ...process.env, CI: '1' },
+        }, (err, stdout, stderr) => resolve({
+            ok: !err, code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+            stdout: redact(stdout || ''), stderr: redact(stderr || ''),
+        }));
+    });
+    res.json({ ...run, script, workdir, durationMs: Date.now() - started, gitOk: r.ok });
+});
+
+// ── Backups ───────────────────────────────────────────────────────────────
+// Snapshots live under <workspace>/.backups/<name>/<timestamp>/ and are plain
+// file copies, so they survive restarts and can be restored by hand.
+const BACKUP_DIRNAME = '.backups';
+function backupRoot() { return path.join(WORKSPACE, BACKUP_DIRNAME); }
+function safeBackupName(name) {
+    const s = String(name || '').trim();
+    if (!s || s.length > 120) return null;
+    if (s.includes('/') || s.includes('\\') || s.includes('..') || s.startsWith('.')) return null;
+    return s;
+}
+app.get('/api/backup/list', async (req, res) => {
+    const root = backupRoot();
+    const name = req.query.name ? safeBackupName(req.query.name) : null;
+    if (req.query.name && !name) return res.status(400).json({ error: 'Invalid backup name' });
+    try {
+        const out = [];
+        const names = name ? [name] : (await fsp.readdir(root, { withFileTypes: true }).catch(() => []))
+            .filter((d) => d.isDirectory()).map((d) => d.name);
+        for (const n of names) {
+            const dir = path.join(root, n);
+            const snaps = await fsp.readdir(dir, { withFileTypes: true }).catch(() => []);
+            for (const s of snaps) {
+                if (!s.isDirectory()) continue;
+                const full = path.join(dir, s.name);
+                let bytes = 0, files = 0;
+                const walk = async (p) => {
+                    const ents = await fsp.readdir(p, { withFileTypes: true }).catch(() => []);
+                    for (const e of ents) {
+                        const fp = path.join(p, e.name);
+                        if (e.isDirectory()) await walk(fp);
+                        else { files++; try { bytes += (await fsp.stat(fp)).size; } catch (_) {} }
+                    }
+                };
+                await walk(full);
+                let createdAt = null;
+                try { createdAt = (await fsp.stat(full)).mtime.toISOString(); } catch (_) {}
+                out.push({ name: n, id: s.name, path: path.relative(WORKSPACE, full).replace(/\\/g, '/'), files, bytes, createdAt });
+            }
+        }
+        out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+        res.json({ ok: true, backups: out, count: out.length, root: path.relative(WORKSPACE, root).replace(/\\/g, '/') });
+    } catch (err) { res.status(500).json({ error: redact(err.message) }); }
+});
+app.post('/api/backup/create', async (req, res) => {
+    const body = req.body || {};
+    const name = safeBackupName(body.name);
+    if (!name) return res.status(400).json({ error: 'Invalid backup name' });
+    const src = resolvePath(body.path || name);
+    if (!src) return res.status(403).json({ error: 'Forbidden' });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const dest = path.join(backupRoot(), name, stamp);
+    try {
+        const st = await fsp.stat(src);
+        if (!st.isDirectory()) return res.status(400).json({ error: 'Only directories can be backed up' });
+        // Refuse to snapshot a directory into its own subtree (e.g. backing up
+        // the workspace root would otherwise recurse into .backups forever).
+        const rel = path.relative(src, dest);
+        if (!rel.startsWith('..') && !path.isAbsolute(rel)) {
+            return res.status(400).json({ error: 'Cannot back up a directory into its own subdirectory' });
+        }
+        await fsp.mkdir(path.dirname(dest), { recursive: true });
+        await fsp.cp(src, dest, { recursive: true, filter: (p) => path.basename(p) !== '.git' });
+        res.json({ ok: true, name, id: stamp, path: path.relative(WORKSPACE, dest).replace(/\\/g, '/') });
+    } catch (err) { res.status(500).json({ error: redact(err.message) }); }
+});
+
+// ── Compile ───────────────────────────────────────────────────────────────
+// Syntax-checks a single file using the right tool for its extension. This is
+// a check, not a full build — it catches typos without running user code.
+app.post('/api/compile', async (req, res) => {
+    const body = req.body || {};
+    const target = resolvePath(body.path);
+    if (!target) return res.status(403).json({ error: 'Forbidden' });
+    const ext = path.extname(target).toLowerCase();
+    const runners = {
+        '.js': ['node', ['--check', target]],
+        '.mjs': ['node', ['--check', target]],
+        '.cjs': ['node', ['--check', target]],
+        '.json': ['node', ['-e', `JSON.parse(require('fs').readFileSync(${JSON.stringify(target)},'utf8'))`]],
+        '.py': ['python3', ['-m', 'py_compile', target]],
+        '.sh': ['sh', ['-n', target]],
+    };
+    const runner = runners[ext];
+    if (!runner) return res.status(400).json({ error: `No compiler for ${ext || 'this file type'}` });
+    try {
+        const st = await fsp.stat(target);
+        if (!st.isFile()) return res.status(400).json({ error: 'Not a file' });
+        if (st.size > 4 * 1024 * 1024) return res.status(413).json({ error: 'File too large' });
+    } catch (err) { return res.status(404).json({ error: err.message }); }
+    const started = Date.now();
+    execFile(runner[0], runner[1], { timeout: 60000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+        res.json({
+            ok: !err,
+            code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+            compiler: runner[0],
+            stdout: redact(stdout || ''),
+            stderr: redact(stderr || ''),
+            durationMs: Date.now() - started,
+        });
+    });
+});
+
 const PUBLIC_DIR = path.join(__dirname, 'public');
 app.use(express.static(PUBLIC_DIR, {
     setHeaders: (res, filePath) => { if (/\.(html|js|css)$/.test(filePath)) res.setHeader('Cache-Control', 'no-cache'); },
