@@ -25,6 +25,12 @@ let editor = null;
 let host, empty, tabsBar, saveBtn;
 let menuBtn, menu, langBadge, fileInfo;
 let unsubs = [];
+// Document-level listeners added by initToolbar(). init() runs again on every
+// return to the panel (the editor is a `heavy` feature, so the lifecycle
+// destroys and re-inits it), and each run used to add two more anonymous
+// document listeners that were never removed. After a few panel switches the
+// menu closed itself several times per tap and Escape fired repeatedly.
+let toolbarDocUnsubs = [];
 
 // Files Monaco can syntax-highlight but that we can also render as a page.
 const HTML_EXT = /\.(html?|htm|xhtml)$/i;
@@ -68,6 +74,8 @@ export async function init() {
 export async function destroy() {
   for (const un of unsubs) un();
   unsubs = [];
+  for (const un of toolbarDocUnsubs) un();
+  toolbarDocUnsubs = [];
   document.removeEventListener('keydown', onKey);
   if (editor) { try { editor.dispose(); } catch {} editor = null; }
   // Monaco itself stays loaded (window.monaco is global and expensive to
@@ -81,14 +89,37 @@ export async function destroy() {
 }
 
 export function mount() {
-  // mount() is the only path that runs when the panel becomes visible, and it
-  // is where Monaco is actually created. init()'s restore attempt happens at
-  // boot, before any instance exists, so re-apply the open file here or the
-  // editor comes up blank every time the user returns to the panel.
+  // mount() runs when the panel becomes visible and is where Monaco is
+  // actually created (init() runs behind display:none, where the host is 0×0).
+  //
+  // It restores the buffer directly rather than calling open(state.openFile).
+  // open() emits 'panel:show', which re-enters switchPanel -> mount(), so the
+  // old code performed a redundant full re-open of the *previous* file on
+  // every panel switch (extra fetch + setValue + model swap) before the real
+  // open request ran. restoreBuffer() does the same visible work with no bus
+  // traffic and no second open().
+  if (!ready || !editor) {
+    loadMonaco()
+      .then(() => restoreBuffer())
+      .catch((e) => console.error('[editor] monaco load failed', e));
+    return;
+  }
+  restoreBuffer();
+  setTimeout(() => { try { editor.layout(); } catch {} }, 60);
+}
+
+/** Re-apply the already-loaded file to a freshly created instance. */
+function restoreBuffer() {
+  if (!editor) return;
   const path = state.get('openFile');
-  if (path) { open(path, true).catch((e) => console.error('[editor] mount open failed', e)); return; }
-  if (!ready || !editor) loadMonaco().catch((e) => console.error('[editor] monaco load failed', e));
-  else setTimeout(() => editor.layout(), 60);
+  if (!path) return;
+  const content = state.get('fileContent') || '';
+  if (editor.getValue() !== content) editor.setValue(content);
+  const model = editor.getModel();
+  if (model) window.monaco.editor.setModelLanguage(model, detectLang(path));
+  if (saveBtn) saveBtn.disabled = false;
+  renderTabs();
+  renderToolbarInfo();
 }
 export function unmount() {}
 
@@ -326,13 +357,20 @@ function initToolbar() {
     runCommand(item.dataset.cmd);
   });
 
-  // Close on outside tap / Escape.
-  document.addEventListener('click', (e) => {
+  // Close on outside tap / Escape. These are document-level, so they must be
+  // tracked and removed in destroy() — init() re-runs on every panel switch.
+  const onDocClick = (e) => {
     if (!menu.hidden && !menu.contains(e.target) && e.target !== menuBtn) closeMenu();
-  });
-  document.addEventListener('keydown', (e) => {
+  };
+  const onDocKey = (e) => {
     if (e.key === 'Escape' && !menu.hidden) { closeMenu(); menuBtn.focus(); }
-  });
+  };
+  document.addEventListener('click', onDocClick);
+  document.addEventListener('keydown', onDocKey);
+  toolbarDocUnsubs.push(
+    () => document.removeEventListener('click', onDocClick),
+    () => document.removeEventListener('keydown', onDocKey),
+  );
 }
 
 function toggleMenu(open) {
