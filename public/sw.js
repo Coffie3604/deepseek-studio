@@ -1,4 +1,4 @@
-const CACHE_NAME = 'deepseek-studio-v12';
+const CACHE_NAME = 'deepseek-studio-v13';
 const PRECACHE_URLS = [
   '/', '/index.html', '/app.css', '/manifest.json', '/icon-v2.svg',
   '/js/boot.js',
@@ -32,6 +32,9 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(fetch(event.request).catch(() => caches.match('/')));
     return;
   }
+  // Code assets must be network-first so a deploy is picked up immediately;
+  // stale-while-revalidate here served old modules after every update.
+  const isCode = /\.(?:js|css|html)$/.test(url.pathname);
   event.respondWith(
     caches.match(event.request).then((cached) => {
       const network = fetch(event.request).then((response) => {
@@ -41,7 +44,7 @@ self.addEventListener('fetch', (event) => {
         }
         return response;
       }).catch(() => cached);
-      return cached || network;
+      return isCode ? network.catch(() => cached) : (cached || network);
     })
   );
 });
