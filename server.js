@@ -21,6 +21,15 @@ const HOST = process.env.HOST || '127.0.0.1';
 const BIND_ALL = HOST === '0.0.0.0' || HOST === '::';
 const HOME = process.env.HOME || os.homedir();
 const WORKSPACE = path.resolve(process.env.DS_WORKSPACE || path.join(HOME, 'projects'));
+// Additional browsable roots. DS_ROOTS is a colon-separated list of absolute paths.
+// DS_ALLOW_ANY_ROOT=1 lifts the sandbox entirely (use only on a trusted machine).
+const ALLOW_ANY_ROOT = /^(1|true|yes)$/i.test(String(process.env.DS_ALLOW_ANY_ROOT || ''));
+const EXTRA_ROOTS = String(process.env.DS_ROOTS || '')
+    .split(path.delimiter)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => path.resolve(s));
+const ROOTS = Array.from(new Set([WORKSPACE, ...EXTRA_ROOTS]));
 const SECRETS_FILE = path.join(HOME, '.deepseek-secrets.json');
 const ASKPASS_HELPER = path.join(HOME, '.deepseek-git-askpass.sh');
 const TERMUX_BASH = '/data/data/com.termux/files/usr/bin/bash';
@@ -51,6 +60,66 @@ function saveSecrets() {
 }
 const ghToken = () => String(secrets.github_token || '').trim();
 
+// ── GitHub token discovery ────────────────────────────────────────────────
+// The token can come from several places. We check them in priority order so
+// a token already present on the machine (gh CLI, env, git credential store)
+// works without the user re-entering it in Settings.
+const GH_TOKEN_SOURCES = [
+    { id: 'settings', label: 'Settings (saved)', get: () => ghToken() },
+    { id: 'env', label: 'Environment', get: () => String(process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '').trim() },
+    { id: 'gh-cli', label: 'gh CLI', get: () => {
+        try {
+            const hosts = path.join(HOME, '.config', 'gh', 'hosts.yml');
+            const txt = fs.readFileSync(hosts, 'utf8');
+            const m = txt.match(/oauth_token:\s*(\S+)/);
+            return m ? m[1].trim() : '';
+        } catch (_) { return ''; }
+    } },
+    { id: 'git-credential', label: 'git credential store', get: () => {
+        try {
+            const cfg = path.join(HOME, '.git-credentials');
+            const txt = fs.readFileSync(cfg, 'utf8');
+            const m = txt.match(/https:\/\/([^:@\s]+):([^@\s]+)@github\.com/);
+            return m ? decodeURIComponent(m[2]).trim() : '';
+        } catch (_) { return ''; }
+    } },
+];
+function resolveGhToken() {
+    for (const src of GH_TOKEN_SOURCES) {
+        let v = '';
+        try { v = src.get() || ''; } catch (_) { v = ''; }
+        if (v) return { token: v, source: src.id, label: src.label };
+    }
+    return { token: '', source: null, label: null };
+}
+// Effective token used for git + API. Settings wins, then auto-discovery.
+function effectiveGhToken() { return resolveGhToken().token; }
+function ghTokenSource() { return resolveGhToken().source; }
+
+const GH_TOKEN_RE = /^(ghp_|gho_|ghu_|ghs_|ghr_|github_pat_)[A-Za-z0-9_]{10,}$/;
+function looksLikeGhToken(v) { return GH_TOKEN_RE.test(String(v || '').trim()); }
+
+// Classify a git remote URL. SSH remotes cannot use a token, which is the
+// single most common reason a "valid token" still fails to push.
+function remoteKind(url) {
+    const s = String(url || '').trim();
+    if (!s) return null;
+    if (/^git@[^:]+:/.test(s) || /^ssh:\/\//i.test(s)) return 'ssh';
+    if (/^https?:\/\//i.test(s)) return 'https';
+    if (/^git:\/\//i.test(s)) return 'git';
+    return 'other';
+}
+
+// Convert an SSH remote to its HTTPS equivalent so token auth can be used.
+function normalizeRemote(url) {
+    let s = String(url || '').trim();
+    if (!s) return s;
+    const scp = s.match(/^git@([^:]+):(.+)$/);
+    if (scp) s = `https://${scp[1]}/${scp[2]}`;
+    s = s.replace(/^ssh:\/\/git@/i, 'https://');
+    return s.replace(/\.git$/, '');
+}
+
 function redact(input) {
     let out = String(input == null ? '' : input);
     for (const v of Object.values(secrets)) {
@@ -66,12 +135,23 @@ function withinBase(base, resolved) {
     const r = path.resolve(resolved);
     return r === b || r.startsWith(b + path.sep);
 }
+// True when `resolved` sits inside any allowed root (or anywhere, if sandbox is off).
+function withinAnyRoot(resolved) {
+    if (ALLOW_ANY_ROOT) return true;
+    const r = path.resolve(resolved);
+    return ROOTS.some((root) => withinBase(root, r));
+}
+// The root that contains `resolved`, or null.
+function rootOf(resolved) {
+    const r = path.resolve(resolved);
+    return ROOTS.find((root) => withinBase(root, r)) || null;
+}
 function resolvePath(rel, base) {
     if (!rel) return base || WORKSPACE;
     const s = String(rel);
     const b = base || WORKSPACE;
     const full = path.isAbsolute(s) ? path.resolve(s) : path.resolve(b, s);
-    return withinBase(WORKSPACE, full) ? full : null;
+    return withinAnyRoot(full) ? full : null;
 }
 
 const app = express();
@@ -139,13 +219,13 @@ function providerStatus() {
 app.get('/api/health', (_req, res) => {
     res.json({
         ok: providerStatus().length > 0, version: PKG_VERSION, ts: Date.now(),
-        providers: providerStatus(), hasGitHub: !!ghToken(), pty: !!pty,
+        providers: providerStatus(), hasGitHub: !!effectiveGhToken(), ghTokenSource: ghTokenSource(), pty: !!pty,
     });
 });
 app.get('/api/version', (_req, res) => {
     res.json({
         version: PKG_VERSION, node: process.version, workspace: WORKSPACE,
-        providers: providerStatus(), hasGitHub: !!ghToken(), pty: !!pty,
+        providers: providerStatus(), hasGitHub: !!effectiveGhToken(), ghTokenSource: ghTokenSource(), pty: !!pty,
         uptime: Math.round(process.uptime()),
     });
 });
@@ -174,6 +254,14 @@ app.post('/api/secrets', (req, res) => {
     res.json({ ok: true, name });
 });
 
+app.get('/api/roots', (_req, res) => {
+    res.json({
+        workspace: WORKSPACE,
+        roots: ROOTS,
+        allowAnyRoot: ALLOW_ANY_ROOT,
+        home: HOME,
+    });
+});
 app.get('/api/fs/list', async (req, res) => {
     const target = resolvePath(req.query.path);
     if (!target) return res.status(403).json({ error: 'Forbidden' });
@@ -189,7 +277,11 @@ app.get('/api/fs/list', async (req, res) => {
                 try { const st = await fsp.stat(path.join(target, d.name)); isDir = st.isDirectory(); }
                 catch (_) { isDir = false; }
             }
-            out.push({ name: d.name, isDir, isLink, path: path.relative(WORKSPACE, path.join(target, d.name)).replace(/\\/g, '/') });
+            const full = path.join(target, d.name);
+            // Report paths relative to the root that contains them; fall back to absolute.
+            const root = rootOf(full);
+            const rel = root ? path.relative(root, full).replace(/\\/g, '/') : full;
+            out.push({ name: d.name, isDir, isLink, path: rel, abs: full });
         }
         out.sort((a, b) => (a.isDir !== b.isDir ? (a.isDir ? -1 : 1) : a.name.localeCompare(b.name)));
         res.json(out);
@@ -261,21 +353,66 @@ app.post('/api/exec', (req, res) => {
 });
 
 function gitEnv() {
-    const token = ghToken();
+    const token = effectiveGhToken();
     const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
+    // Never let a stale GIT_ASKPASS from the parent shell leak in.
+    delete env.GIT_ASKPASS_TOKEN;
+    delete env.GIT_ASKPASS_USER;
     if (token) {
         env.GIT_ASKPASS = ASKPASS_HELPER;
         env.GIT_ASKPASS_TOKEN = token;
         env.GIT_ASKPASS_USER = 'x-access-token';
-    } else env.GIT_ASKPASS = 'echo';
+        // Force HTTPS auth for github.com even if the remote is SSH-shaped,
+        // so a token can be used without an SSH key.
+        env.GIT_CONFIG_COUNT = '1';
+        env.GIT_CONFIG_KEY_0 = 'url.https://github.com/.insteadOf';
+        env.GIT_CONFIG_VALUE_0 = 'git@github.com:';
+    } else {
+        env.GIT_ASKPASS = 'echo';
+        // No token: make sure SSH never hangs waiting for a passphrase.
+        env.GIT_SSH_COMMAND = 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new';
+    }
     return env;
+}
+
+// Translate raw git stderr into an actionable message.
+function explainGitError(stderr, ctx = {}) {
+    const s = String(stderr || '');
+    if (/Permission denied \(publickey\)/i.test(s)) {
+        return 'SSH auth failed: no key on GitHub. Save a GitHub token in Settings (or add your SSH key).';
+    }
+    if (/could not read Username|Authentication failed|terminal prompts disabled/i.test(s)) {
+        return 'GitHub auth failed: no valid token. Save a GitHub token in Settings.';
+    }
+    if (/Repository not found/i.test(s)) {
+        return 'Repository not found — check the name and that your token has "repo" scope.';
+    }
+    if (/Protected branch|non-fast-forward|\[rejected\]/i.test(s)) {
+        return 'Push rejected — remote has commits you do not have. Pull first, then push.';
+    }
+    if (/could not resolve host|Network is unreachable|timed out/i.test(s)) {
+        return 'Network error reaching GitHub — check your connection.';
+    }
+    if (/src refspec .* does not match any/i.test(s)) {
+        return 'Nothing to push — the branch has no commits yet.';
+    }
+    return '';
 }
 function gitCmd(cwd, args, timeout = 60000) {
     return new Promise((resolve) => {
-        execFile('git', args, { cwd, env: gitEnv(), timeout, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => resolve({
-            ok: !err, code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-            stdout: redact(stdout || ''), stderr: redact(stderr || ''),
-        }));
+        execFile('git', args, { cwd, env: gitEnv(), timeout, maxBuffer: 50 * 1024 * 1024 }, (err, stdout, stderr) => {
+            const out = redact(stdout || '');
+            const errOut = redact(stderr || '');
+            const res = {
+                ok: !err, code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+                stdout: out, stderr: errOut,
+            };
+            if (err) {
+                const hint = explainGitError(errOut + ' ' + (err.message || ''));
+                if (hint) res.hint = hint;
+            }
+            resolve(res);
+        });
     });
 }
 function gitWorkdir(body) { return resolvePath((body || {}).cwd || ''); }
@@ -358,9 +495,125 @@ app.post('/api/git/push', async (req, res) => {
     if (!workdir) return res.status(403).json({ error: 'Forbidden' });
     const branch = (await gitCmd(workdir, ['branch', '--show-current'])).stdout.trim();
     if (!branch) return res.json({ ok: false, error: 'Detached HEAD — cannot push' });
+
+    // Preflight: fail fast with a clear reason instead of a raw git dump.
+    const remote = await gitCmd(workdir, ['remote', 'get-url', 'origin']);
+    if (!remote.ok || !remote.stdout.trim()) {
+        return res.json({ ok: false, error: 'No "origin" remote configured. Set one first.' });
+    }
+    const remoteUrl = remote.stdout.trim();
+    const isSsh = /^(git@|ssh:\/\/)/.test(remoteUrl);
+    const token = effectiveGhToken();
+    if (isSsh && !token) {
+        return res.json({
+            ok: false, needsAuth: true,
+            error: 'Remote uses SSH but no GitHub token is saved. Save a token in Settings, or add your SSH key to GitHub.',
+        });
+    }
+    if (!token) {
+        return res.json({ ok: false, needsAuth: true, error: 'No GitHub token. Save one in Settings to push.' });
+    }
+
     const hasUpstream = (await gitCmd(workdir, ['rev-parse', '--abbrev-ref', branch + '@{upstream}'])).ok;
     const args = hasUpstream ? ['push'] : ['push', '-u', 'origin', branch];
-    res.json(await gitCmd(workdir, args, 180000));
+    const result = await gitCmd(workdir, args, 180000);
+    if (!result.ok && !result.hint) {
+        result.hint = explainGitError(result.stderr) || 'Push failed — see stderr for details.';
+    }
+    res.json(result);
+});
+
+// Diagnose GitHub connectivity end-to-end and report exactly what is wrong.
+app.get('/api/github/diagnose', async (req, res) => {
+    // Default to the server's own repo (where server.js lives), not the file-browser
+    // workspace root — otherwise `git rev-parse` runs one level above the repo and
+    // reports isRepo:false even though a repo is right there.
+    const cwd = resolvePath(String(req.query.cwd || '')) || __dirname;
+    const found = resolveGhToken();
+    const report = {
+        token: { present: !!found.token, source: found.source, label: found.label, validFormat: looksLikeGhToken(found.token) },
+        api: { reachable: false, authenticated: false, login: null, scopes: null, error: null },
+        repo: { isRepo: false, remote: '', remoteKind: null, branch: '', upstream: false },
+        ssh: { keyPresent: false, keyPath: null },
+        verdict: 'unknown',
+        fixes: [],
+    };
+
+    // 1. SSH key presence (informational — token is the primary path).
+    const keyPath = path.join(HOME, '.ssh', 'id_ed25519');
+    report.ssh.keyPresent = fs.existsSync(keyPath);
+    report.ssh.keyPath = report.ssh.keyPresent ? keyPath : null;
+
+    // 2. API reachability + auth.
+    try {
+        const r = await fetch('https://api.github.com/user', {
+            headers: {
+                Accept: 'application/vnd.github+json',
+                'User-Agent': 'deepseek-studio',
+                ...(found.token ? { Authorization: 'Bearer ' + found.token } : {}),
+            },
+        });
+        report.api.reachable = true;
+        if (r.ok) {
+            const d = await r.json().catch(() => ({}));
+            report.api.authenticated = true;
+            report.api.login = d.login || null;
+            report.api.scopes = r.headers.get('x-oauth-scopes');
+        } else {
+            const d = await r.json().catch(() => ({}));
+            report.api.error = d.message || ('HTTP ' + r.status);
+        }
+    } catch (err) {
+        report.api.error = err.message;
+    }
+
+    // 3. Repo state.
+    const inside = await gitCmd(cwd, ['rev-parse', '--is-inside-work-tree']);
+    if (inside.ok && inside.stdout.trim().startsWith('true')) {
+        report.repo.isRepo = true;
+        const [rem, br, up] = await Promise.all([
+            gitCmd(cwd, ['remote', 'get-url', 'origin']),
+            gitCmd(cwd, ['branch', '--show-current']),
+            gitCmd(cwd, ['rev-parse', '--abbrev-ref', '@{upstream}']),
+        ]);
+        report.repo.remote = rem.ok ? rem.stdout.trim() : '';
+        report.repo.remoteKind = remoteKind(report.repo.remote);
+        report.repo.httpsEquivalent = normalizeRemote(report.repo.remote);
+        report.repo.branch = br.stdout.trim();
+        report.repo.upstream = up.ok;
+    }
+
+    // 4. Verdict + concrete fixes.
+    if (!report.api.reachable) {
+        report.verdict = 'offline';
+        report.fixes.push('No network access to api.github.com — check connectivity.');
+    } else if (!found.token) {
+        report.verdict = 'no-token';
+        report.fixes.push('Save a GitHub token: Settings → GitHub → paste a PAT with "repo" scope.');
+        if (report.repo.remoteKind === 'ssh') {
+            report.fixes.push('Or add your SSH public key to GitHub (Settings → SSH keys).');
+        }
+    } else if (!report.api.authenticated) {
+        report.verdict = 'bad-token';
+        report.fixes.push('Token rejected by GitHub (' + (report.api.error || 'unknown') + '). Generate a new PAT with "repo" scope.');
+    } else if (!report.repo.isRepo) {
+        report.verdict = 'not-a-repo';
+        report.fixes.push('This folder is not a git repository — run git init.');
+    } else if (!report.repo.remote) {
+        report.verdict = 'no-remote';
+        report.fixes.push('No "origin" remote — set one to a GitHub repo URL.');
+    } else if (report.repo.remoteKind === 'ssh') {
+        // Token is valid but the remote is SSH: git will still use the key.
+        report.verdict = 'ssh-remote';
+        report.fixes.push('Remote uses SSH, so your token is ignored. Switch to HTTPS:');
+        report.fixes.push('git remote set-url origin ' + report.repo.httpsEquivalent + '.git');
+        if (!report.ssh.keyPresent) {
+            report.fixes.push('Or add an SSH key to GitHub (Settings → SSH keys).');
+        }
+    } else {
+        report.verdict = 'ready';
+    }
+    res.json(report);
 });
 app.post('/api/git/pull', async (req, res) => {
     const workdir = gitWorkdir(req.body);
@@ -408,7 +661,7 @@ setInterval(() => {
 }, 60 * 1000).unref();
 
 async function ghFetch(pathname, init = {}) {
-    const token = ghToken();
+    const token = effectiveGhToken();
     if (!token) return { ok: false, status: 401, data: { message: 'No GitHub token' } };
     const res = await fetch('https://api.github.com' + pathname, {
         ...init,
@@ -427,10 +680,14 @@ async function ghFetch(pathname, init = {}) {
 }
 
 app.get('/api/github/status', async (_req, res) => {
-    if (!ghToken()) return res.json({ connected: false });
+    const found = resolveGhToken();
+    if (!found.token) return res.json({ connected: false, source: null });
     const r = await ghFetch('/user');
-    if (!r.ok) return res.json({ connected: false, error: r.data && r.data.message });
-    res.json({ connected: true, login: r.data.login, name: r.data.name, avatar: r.data.avatar_url });
+    if (!r.ok) return res.json({ connected: false, source: found.source, error: r.data && r.data.message });
+    res.json({
+        connected: true, source: found.source, sourceLabel: found.label,
+        login: r.data.login, name: r.data.name, avatar: r.data.avatar_url,
+    });
 });
 app.get('/api/github/device/config', (_req, res) => {
     res.json({ configured: !!(secrets.github_client_id || process.env.DS_GITHUB_CLIENT_ID) });
@@ -993,7 +1250,8 @@ server.listen(PORT, HOST, () => {
     console.log('  Workspace:  ' + WORKSPACE);
     console.log('  Node:       ' + process.version);
     console.log('  Providers:  ' + (providerStatus().join(', ') || 'none — paste a key in Settings'));
-    console.log('  GitHub:     ' + (ghToken() ? 'connected' : 'not connected'));
+    const ghSrc = resolveGhToken();
+    console.log('  GitHub:     ' + (ghSrc.token ? 'connected (' + ghSrc.label + ')' : 'not connected'));
     console.log('  Terminal:   ' + (pty ? 'node-pty (real TTY)' : 'pipe fallback'));
     console.log(line);
     console.log('');

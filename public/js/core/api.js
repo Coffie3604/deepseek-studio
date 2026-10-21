@@ -26,6 +26,7 @@ const jsonPost = (path, body) => request(path, {
   body: JSON.stringify(body || {}),
 });
 
+export const roots     = () => request('/api/roots');
 export const fsList   = (p) => request('/api/fs/list?path=' + encodeURIComponent(p || ''));
 export const fsRead   = (p) => request('/api/fs/read?path=' + encodeURIComponent(p));
 export const fsWrite  = (p, content) => jsonPost('/api/fs/write', { path: p, content });
