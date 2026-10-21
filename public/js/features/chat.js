@@ -1,7 +1,7 @@
 import * as state from '../core/state.js';
 import { on, emit } from '../core/bus.js';
 import { toast, escapeHtml, showConfirm, copyText } from '../core/ui.js';
-import { aiChatStream, aiToolCall, aiTools, aiPreview, aiRepoMap } from '../core/api.js';
+import { aiChatStream, aiComplete, aiToolCall, aiTools, aiPreview, aiRepoMap } from '../core/api.js';
 import { schedule, cancel } from '../core/perf.js';
 
 let elMessages, elInput, elSend, elStop, elAutoRun;
@@ -355,9 +355,83 @@ function buildSystem(project) {
   );
 }
 
+// ─── Context compaction ─────────────────────────────────────────────
+// Long agent sessions accumulate tool output fast (a single `run_tests`
+// can be thousands of tokens). When the wire payload grows past a budget
+// we summarise the oldest turns into one compact system note, keeping the
+// original system prompt and the most recent turns verbatim.
+const COMPACT_CHAR_BUDGET = 60000;   // ~15k tokens of history
+const COMPACT_KEEP_RECENT  = 6;      // always keep last N messages verbatim
+
+function approxChars(messages) {
+  let n = 0;
+  for (const m of messages) {
+    if (typeof m.content === 'string') n += m.content.length;
+    if (m.tool_calls) n += JSON.stringify(m.tool_calls).length;
+  }
+  return n;
+}
+
+// Returns a NEW messages array with old turns folded into a summary note.
+// On any failure it returns the input unchanged — compaction must never
+// break a working turn.
+async function compactMessages(messages) {
+  if (approxChars(messages) <= COMPACT_CHAR_BUDGET) return messages;
+
+  const system = messages[0] && messages[0].role === 'system' ? messages[0] : null;
+  const rest = system ? messages.slice(1) : messages.slice();
+  if (rest.length <= COMPACT_KEEP_RECENT) return messages;
+
+  const cut = rest.length - COMPACT_KEEP_RECENT;
+  const old = rest.slice(0, cut);
+  const recent = rest.slice(cut);
+
+  const transcript = old.map((m) => {
+    const role = m.role || 'unknown';
+    let body = typeof m.content === 'string' ? m.content : '';
+    if (m.tool_calls) {
+      body += ' [called: ' + m.tool_calls.map((t) => t.function && t.function.name).filter(Boolean).join(', ') + ']';
+    }
+    return role.toUpperCase() + ': ' + body.slice(0, 1200);
+  }).join('\n\n');
+
+  const res = await aiComplete({
+    provider: 'deepseek',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'You compress coding-agent transcripts. Produce a dense factual summary ' +
+          'preserving: files touched, decisions made, commands run and their outcomes, ' +
+          'errors encountered, and any unfinished work. Omit pleasantries. ' +
+          'Use terse bullet points. Max 400 words.',
+      },
+      { role: 'user', content: transcript },
+    ],
+    maxTokens: 700,
+  }, { signal: abort.signal });
+
+  if (res.aborted) return messages;
+  if (!res.ok || !res.content) {
+    console.warn('[chat] compaction failed, keeping full history', res.error);
+    return messages;
+  }
+
+  const note = {
+    role: 'system',
+    content: 'Summary of earlier conversation (older turns were compacted to save context):\n' + res.content,
+  };
+  toast('Context compacted (' + old.length + ' turns summarised)', 'info', 2000);
+  return system ? [system, note, ...recent] : [note, ...recent];
+}
+
 async function runAgentLoop(messages) {
-  const MAX_ITER = 20;
+  const MAX_ITER = Number(state.get('maxIterations')) || 20;
   for (let iter = 0; iter < MAX_ITER; iter++) {
+    if (abort.signal.aborted) return;
+
+    // Fold old turns into a summary before the payload gets too big.
+    messages = await compactMessages(messages);
     if (abort.signal.aborted) return;
 
     let text = '';
@@ -397,7 +471,12 @@ async function runAgentLoop(messages) {
             }
           }
         },
-        (err) => reject(err)
+        (err) => reject(err),
+        {
+          onRetry: ({ attempt, max, wait, why }) => {
+            toast('Retrying (' + attempt + '/' + max + ') in ' + Math.round(wait / 1000) + 's — ' + why, 'info', 2500);
+          },
+        }
       );
       abort._stream = stream;
       stream.done.then(resolve, reject);
@@ -488,7 +567,22 @@ async function runAgentLoop(messages) {
     }
     showTyping();
   }
-  appendMessage('assistant', '(reached max iterations)');
+
+  // Hit the iteration cap with work possibly unfinished. Offer to continue
+  // rather than silently truncating — the loop state is still in `messages`.
+  const cont = await new Promise((resolve) => {
+    showConfirm(
+      'Reached the ' + MAX_ITER + '-step limit',
+      'The agent stopped mid-task. Continue for another ' + MAX_ITER + ' steps?',
+      resolve,
+      'Continue'
+    );
+  });
+  if (cont && !abort.signal.aborted) {
+    await runAgentLoop(messages);
+  } else {
+    appendMessage('assistant', '_(stopped at the ' + MAX_ITER + '-step limit)_', true);
+  }
 }
 
 function stop() {
