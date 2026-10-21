@@ -1,4 +1,4 @@
-#!/data/data/com.termux/files/usr/bin/bash
+#!/usr/bin/env bash
 # dse — deepseek-editor control command for Termux.
 #
 #   dse            restart the server (default)
