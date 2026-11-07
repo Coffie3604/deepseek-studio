@@ -2,7 +2,7 @@
 'use strict';
 
 const express = require('express');
-const { execFile, exec } = require('child_process');
+const { execFile, exec, spawn } = require('child_process');
 const fs = require('fs');
 const fsp = fs.promises;
 const os = require('os');
@@ -152,11 +152,38 @@ function withinBase(base, resolved) {
     const r = path.resolve(resolved);
     return r === b || r.startsWith(b + path.sep);
 }
+// `path.resolve` is purely lexical, so it happily returns a path that *looks*
+// contained while a symlink inside the workspace points anywhere on disk.
+// We realpath the deepest existing ancestor of the target (the target itself
+// may not exist yet, e.g. a file about to be created) and check containment
+// against the realpath'd roots. The missing tail is re-appended lexically so
+// writes to new files still work.
+function realpathLoose(abs) {
+    let cur = abs;
+    const tail = [];
+    for (let i = 0; i < 64; i++) {
+        try {
+            const real = fs.realpathSync(cur);
+            return tail.length ? path.join(real, ...tail.reverse()) : real;
+        } catch (_) {
+            const parent = path.dirname(cur);
+            if (parent === cur) return abs; // hit the filesystem root
+            tail.push(path.basename(cur));
+            cur = parent;
+        }
+    }
+    return abs;
+}
+function realRoots() {
+    return ROOTS.map((r) => {
+        try { return fs.realpathSync(r); } catch (_) { return r; }
+    });
+}
 // True when `resolved` sits inside any allowed root (or anywhere, if sandbox is off).
 function withinAnyRoot(resolved) {
     if (ALLOW_ANY_ROOT) return true;
-    const r = path.resolve(resolved);
-    return ROOTS.some((root) => withinBase(root, r));
+    const r = realpathLoose(path.resolve(resolved));
+    return realRoots().some((root) => withinBase(root, r));
 }
 // The root that contains `resolved`, or null.
 function rootOf(resolved) {
@@ -1240,8 +1267,39 @@ app.post('/api/ai/tool-call', async (req, res) => {
             for (const p of BLOCKED_PATTERNS) if (p.test(cmd)) return res.status(403).json({ error: 'Blocked: ' + p.source });
             const workdir = resolvePath(a.cwd, base) || base;
             const isBg = a.background === true;
-            return exec(cmd, { cwd: workdir, timeout: isBg ? 3000 : 120000, maxBuffer: 20 * 1024 * 1024, shell: '/bin/sh' }, (err, stdout, stderr) => {
-                if (isBg && err && err.killed) return toolResult(res, true, 'Started bg: ' + cmd.slice(0, 60), { background: true });
+            if (isBg) {
+                // Detach properly: spawn with stdio ignored and unref so the child
+                // outlives this request. The old code used exec() with a 3s timeout
+                // and treated the resulting kill as success, so every background
+                // command died after 3 seconds while claiming it had started.
+                return new Promise((resolve) => {
+                    let child;
+                    try {
+                        child = spawn('/bin/sh', ['-c', cmd], {
+                            cwd: workdir, detached: true, stdio: 'ignore',
+                        });
+                    } catch (e) {
+                        return toolResult(res, false, 'Failed to start: ' + cmd.slice(0, 60), { error: redact(e.message) });
+                    }
+                    let settled = false;
+                    const done = (ok, msg, extra) => {
+                        if (settled) return; settled = true;
+                        toolResult(res, ok, msg, extra);
+                    };
+                    child.on('error', (e) => done(false, 'Failed to start: ' + cmd.slice(0, 60), { error: redact(e.message) }));
+                    // Give the shell a moment to fail fast (bad cwd, missing binary).
+                    const timer = setTimeout(() => {
+                        try { child.unref(); } catch (_) {}
+                        done(true, 'Started bg (pid ' + child.pid + '): ' + cmd.slice(0, 60), { background: true, pid: child.pid });
+                    }, 400);
+                    child.on('exit', (code) => {
+                        clearTimeout(timer);
+                        if (code !== 0) done(false, 'Background command exited immediately (code ' + code + '): ' + cmd.slice(0, 60), { code });
+                        else done(true, 'Background command finished: ' + cmd.slice(0, 60), { code: 0 });
+                    });
+                });
+            }
+            return exec(cmd, { cwd: workdir, timeout: 120000, maxBuffer: 20 * 1024 * 1024, shell: '/bin/sh' }, (err, stdout, stderr) => {
                 const out = redact((stdout || '') + (stderr ? '\n' + stderr : ''));
                 const trimmed = out.length > 6000 ? out.slice(0, 6000) + '\n...(truncated)' : out;
                 toolResult(res, !err, 'Ran: ' + cmd.slice(0, 60) + (err ? ' (exit ' + (err.code || '?') + ')' : ' ok'), { code: err ? (typeof err.code === 'number' ? err.code : 1) : 0, output: trimmed });
